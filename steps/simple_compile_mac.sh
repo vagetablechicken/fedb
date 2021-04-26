@@ -18,9 +18,12 @@
 
 WORK_DIR=`pwd`
 
-sh steps/install_hybridse_mac.sh
-ln -sf /opt/depends/thirdparty thirdparty
-ln -sf /opt/depends/thirdsrc thirdsrc
+# sh steps/install_hybridse_mac.sh
+echo "hybridse installed"
+
+export FEDB_THIRDPARTY=/Users/4paradigm/Projects/fedb-mac/HybridSQL-docker/depends/thirdparty
+# ln -sf /opt/depends/thirdparty thirdparty
+# ln -sf /opt/depends/thirdsrc thirdsrc
 mkdir -p $WORK_DIR/build
 cd $WORK_DIR/build && cmake .. && make -j4 fedb sql_pysdk_package sql_jsdk
 code=$?
