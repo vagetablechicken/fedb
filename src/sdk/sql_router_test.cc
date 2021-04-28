@@ -77,8 +77,8 @@ TEST_F(SQLRouterTest, db_name_test) {
     ASSERT_TRUE(router->DropDB(db, &status)) << db << ": " << status.msg;
     // SQL_IDENTIFIER: [^`/\\.\n]+, so use '/' in name is not allowed
     db = "1/2";
-    ASSERT_FALSE(router->CreateDB(db, &status) && status->code == -2) << db << ": " << status.msg;
-    ASSERT_FALSE(router->DropDB(db, &status) && status->code == -2) << db << ": " << status.msg;
+    ASSERT_FALSE(router->CreateDB(db, &status) && status.code == -2) << db << ": " << status.msg;
+    ASSERT_FALSE(router->DropDB(db, &status) && status.code == -2) << db << ": " << status.msg;
 }
 
 TEST_F(SQLRouterTest, db_api_test) {
