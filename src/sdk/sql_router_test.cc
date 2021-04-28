@@ -73,10 +73,12 @@ TEST_F(SQLRouterTest, db_name_test) {
     ASSERT_FALSE(router->CreateDB("", &status));
 
     std::string db = "123456";
-    ASSERT_TRUE(router->CreateDB(db, &status)) << db << "should be, but " << status.msg;
+    ASSERT_TRUE(router->CreateDB(db, &status)) << db << ": " << status.msg;
+    ASSERT_TRUE(router->DropDB(db, &status)) << db << ": " << status.msg;
     // SQL_IDENTIFIER: [^`/\\.\n]+, so use '/' in name is not allowed
     db = "1/2";
-    ASSERT_FALSE(router->CreateDB(db, &status)) << db << "shouldn't be created";
+    ASSERT_FALSE(router->CreateDB(db, &status) && status->code == -2) << db << ": " << status.msg;
+    ASSERT_FALSE(router->DropDB(db, &status) && status->code == -2) << db << ": " << status.msg;
 }
 
 TEST_F(SQLRouterTest, db_api_test) {
