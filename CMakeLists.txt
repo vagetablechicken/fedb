@@ -101,7 +101,7 @@ endif ()
 set(VM_LIBS hybridse_core hybridse_sdk boost_filesystem boost_date_time boost_regex)
 
 # TODO: TP_INSTALLED
-if(NOT ENV{TP_INSTALLED})
+if(NOT DEFINED ENV{TP_INSTALLED})
     set(ENV{TP_INSTALLED} "/Users/4paradigm/Projects/fedb-mac/HybridSQL-docker/installed")
 endif()
 
