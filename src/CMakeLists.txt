@@ -16,7 +16,7 @@ include_directories(${INCLUDE_DIRECTORIES} ${PROJECT_SOURCE_DIR}/src)
 
 function(compile_proto proto_name project_dir)
 add_custom_command(OUTPUT ${project_dir}/src/proto/${proto_name}.pb.cc
-        COMMAND ${project_dir}/thirdparty/bin/protoc -I ${PROJECT_SOURCE_DIR}/src/proto
+        COMMAND ${TP_INSTALLED}/bin/protoc -I ${PROJECT_SOURCE_DIR}/src/proto
         --cpp_out=${project_dir}/src/proto/ ${project_dir}/src/proto/${proto_name}.proto
         DEPENDS ${project_dir}/src/proto/${proto_name}.proto
         )
@@ -98,7 +98,8 @@ if(TESTING_ENABLE)
 endif()
 
 add_executable(parse_log tools/parse_log.cc  $<TARGET_OBJECTS:fedb_proto>)
-target_link_libraries(parse_log log fedb_proto base protobuf glog gflags unwind ssl crypto z snappy dl pthread)
+target_link_libraries(parse_log log fedb_proto base protobuf glog gflags ssl crypto z snappy dl pthread)
+# TODO: link unwind?
 
 add_executable(fedb cmd/fedb.cc base/status.cc proto/client.pb.cc base/linenoise.cc)
 target_link_libraries(fedb ${BIN_LIBS})

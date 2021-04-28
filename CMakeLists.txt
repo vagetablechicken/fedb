@@ -99,7 +99,15 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(BRPC_LIBS brpc protobuf glog gflags ssl crypto leveldb z snappy dl pthread ${OS_LIB})
 endif ()
 set(VM_LIBS hybridse_core hybridse_sdk boost_filesystem boost_date_time boost_regex)
-set(LLVM_DIR "$ENV{FEDB_THIRDPARTY}/thirdparty/lib/cmake/llvm")
+
+# TODO: TP_INSTALLED
+if(NOT ENV{TP_INSTALLED})
+    set(ENV{TP_INSTALLED} "/Users/4paradigm/Projects/fedb-mac/HybridSQL-docker/installed")
+endif()
+
+set(TP_INSTALLED $ENV{TP_INSTALLED})
+message(STATUS "Thirdparty path: ${TP_INSTALLED}")
+set(LLVM_DIR "${TP_INSTALLED}/lib/cmake/llvm")
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -119,15 +127,13 @@ configure_file(
     "${PROJECT_SOURCE_DIR}/src/config.h.in"
     "${PROJECT_SOURCE_DIR}/src/config.h")
 
-include_directories($ENV{FEDB_THIRDPARTY}/include
-        $ENV{FEDB_THIRDPARTY}/hybridse/include
-        /usr/local/Cellar/glog/0.4.0/include
-        /usr/local/Cellar/gflags/2.2.2/include
+include_directories(
+        ${TP_INSTALLED}/include
         )
 
-link_directories($ENV{FEDB_THIRDPARTY}/lib 
-    ${PROJECT_SOURCE_DIR}/lib64
-    $ENV{FEDB_THIRDPARTY}/hybridse/lib)
+link_directories(${TP_INSTALLED}/lib
+        ${TP_INSTALLED}/lib64
+        )
 
 add_subdirectory(src)
 add_custom_target(rtidbpy
