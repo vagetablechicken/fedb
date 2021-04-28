@@ -1011,12 +1011,12 @@ int main(int argc, char** argv) {
     LOG(INFO) << "before create mc";
     ::fedb::sdk::MiniCluster mc(6181);
     LOG(INFO) << "create mc";
-//    ::fedb::sdk::mc_ = &mc;
-//    int ok = ::fedb::sdk::mc_->SetUp(1);
-//    LOG(INFO) << "setup done";
-//    sleep(1);
-//    srand(time(NULL));
-//    ok = RUN_ALL_TESTS();
-//    ::fedb::sdk::mc_->Close();
+    ::fedb::sdk::mc_ = &mc;
+    int ok = ::fedb::sdk::mc_->SetUp(1);
+    LOG(INFO) << "setup done";
+    sleep(1);
+    srand(time(NULL));
+    ok = RUN_ALL_TESTS();
+    ::fedb::sdk::mc_->Close();
     return 0;//ok;
 }
