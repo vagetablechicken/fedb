@@ -1,61 +1,86 @@
+#include <brpc/channel.h>
 #include <brpc/restful.h>
 #include <brpc/server.h>
 #include <butil/logging.h>
 #include <gflags/gflags.h>
+#include <gtest/gtest.h>
 
-DEFINE_int32(port, 8010, "TCP Port of this server");
-DEFINE_int32(idle_timeout_s, -1,
-             "Connection will be closed if there is no "
-             "read/write operations during the last `idle_timeout_s'");
-DEFINE_int32(logoff_ms, 2000,
-             "Maximum duration of server's LOGOFF state "
-             "(waiting for client to close connection before server stops)");
-
-DEFINE_string(certificate, "cert.pem", "Certificate file path to enable SSL");
-DEFINE_string(private_key, "key.pem", "Private key file path to enable SSL");
-DEFINE_string(ciphers, "", "Cipher suite used for SSL connections");
+#include "api_server_impl.h"
+#include "sdk/mini_cluster.h"
+namespace fedb {
+namespace http {
 
 class APIServerTest : public ::testing::Test {
  public:
-    APIServerTest() : {
-        _server.
-    }
+    APIServerTest() : mc_(new sdk::MiniCluster(6181)) {}
     ~APIServerTest() {}
-    void SetUp() {}
-    void TearDown() {}
+    void SetUp() {
+        ASSERT_TRUE(mc_->SetUp()) << "Fail to set up mini cluster";
+        sdk::ClusterOptions option;
+        option.zk_cluster = mc_->GetZkCluster();
+        option.zk_path = mc_->GetZkPath();
+
+        fedb::http::APIServerImpl queue_svc;
+        ASSERT_TRUE(queue_svc.Init(option));
+
+        // Http server set up
+        ASSERT_TRUE(server_.AddService(&queue_svc, brpc::SERVER_DOESNT_OWN_SERVICE, "/demo => demo,") == 0)
+            << "Fail to add queue_svc";
+
+        // Start the server.
+        brpc::ServerOptions options;
+        // options.idle_timeout_sec = FLAGS_idle_timeout_s;
+        ASSERT_TRUE(server_.Start(8010, &options) == 0) << "Fail to start HttpServer";
+    }
+    void TearDown() {
+        server_.Stop(0);
+        server_.Join();
+
+        mc_->Close();
+    }
 
  public:
-    brpc::Server _server;
+    brpc::Server server_;
+    std::unique_ptr<sdk::MiniCluster> mc_;
 };
+
+TEST_F(APIServerTest, demo) {
+    // A Channel represents a communication line to a Server. Notice that
+    // Channel is thread-safe and can be shared by all threads in your program.
+    brpc::Channel channel;
+    brpc::ChannelOptions options;
+    options.protocol = "http";
+    options.timeout_ms = 2000 /*milliseconds*/;
+    options.max_retry = 3;
+
+    // Initialize the channel, NULL means using default options.
+    // options, see `brpc/channel.h'.
+    std::string url = "http://127.0.0.1:8010/demo";
+    ASSERT_TRUE(channel.Init(url.c_str(), &options) == 0) << "Fail to initialize channel";
+
+    // We will receive response synchronously, safe to put variables
+    // on stack.
+    brpc::Controller cntl;
+
+    cntl.http_request().uri() = url;
+    // if (!FLAGS_d.empty()) {
+    //     cntl.http_request().set_method(brpc::HTTP_METHOD_POST);
+    //     cntl.request_attachment().append(FLAGS_d);
+    // }
+
+    // Because `done'(last parameter) is NULL, this function waits until
+    // the response comes back or error occurs(including timedout).
+    channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
+    ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
+    LOG(INFO) << cntl.response_attachment();
+}
+
+}  // namespace http
+}  // namespace fedb
 
 int main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&argc, argv);
-    ::fedb::base::SetLogLevel(INFO);
+    // ::fedb::base::SetLogLevel(INFO);
     ::google::ParseCommandLineFlags(&argc, &argv, true);
     return RUN_ALL_TESTS();
-
-    // Generally you only need one Server.
-    brpc::Server server;
-
-    fedb::http::APIServerImpl queue_svc;
-
-    if (server.AddService(&queue_svc, brpc::SERVER_DOESNT_OWN_SERVICE, "/v1/queue/demo   => demo,") != 0) {
-        LOG(ERROR) << "Fail to add queue_svc";
-        return -1;
-    }
-
-    // Start the server.
-    brpc::ServerOptions options;
-    options.idle_timeout_sec = FLAGS_idle_timeout_s;
-    options.mutable_ssl_options()->default_cert.certificate = FLAGS_certificate;
-    options.mutable_ssl_options()->default_cert.private_key = FLAGS_private_key;
-    options.mutable_ssl_options()->ciphers = FLAGS_ciphers;
-    if (server.Start(FLAGS_port, &options) != 0) {
-        LOG(ERROR) << "Fail to start HttpServer";
-        return -1;
-    }
-
-    // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
-    server.RunUntilAskedToQuit();
-    return 0;
 }

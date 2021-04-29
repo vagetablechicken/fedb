@@ -364,6 +364,7 @@ int PutData(
     std::string value;
     ::fedb::codec::SDKCodec codec(table_info);
     std::map<uint32_t, ::fedb::codec::Dimension> dimensions;
+    // TODO: needs refactor
     const int part_size = table_info.table_partition_size();
     if (table_info.partition_key_size() > 0) {
         if (codec.EncodeDimension(input_value, 0, &dimensions) < 0) {
