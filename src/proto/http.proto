@@ -1,0 +1,55 @@
+package fedb.http;
+
+option cc_generic_services = true;
+
+message HttpRequest {};
+message HttpResponse {};
+
+message Column{
+  required string name = 1;
+  required int32 type = 2;
+}
+
+//message PutReq {
+//  message Value{
+//    repeated Field fields = 1;
+//  }
+//  repeated Value values = 1;
+//}
+message PutReq{
+  message Field{
+    required string name = 1;
+    required string value = 2;
+  }
+  repeated Field value = 1;
+}
+
+message GetProcedureResp {
+  required string name = 1;
+  required string procedure = 2;
+  repeated Column input_schema = 3;
+  repeated string input_common_cols = 4;
+  repeated Column output_schema = 5;
+  repeated string output_common_cols = 6;
+  repeated string tables = 7;
+}
+
+message ExecProcedureResp{
+  repeated Column schema = 1;
+  message Row{
+    repeated string value = 1;
+  }
+  repeated Row data = 2;
+  repeated string common_cols_data = 3;
+}
+
+message Response {
+  required int32 code = 1;
+  required string msg = 2;
+  optional ExecProcedureResp exec_sp_resp = 3;
+  optional GetProcedureResp get_sp_resp = 4;
+};
+
+service APIService {
+  rpc Process(HttpRequest) returns (HttpResponse);
+};

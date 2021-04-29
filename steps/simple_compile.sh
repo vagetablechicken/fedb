@@ -19,6 +19,7 @@ if [[ "${CMAKE_TYPE}" != "Debug" ]]; then
         CMAKE_TYPE="RelWithDebInfo"
 fi
 WORK_DIR=`pwd`
+export TP_INSTALLED=${WORK_DIR}/thirdparty
 . /etc/profile.d/enable-rh.sh 
 . /etc/profile.d/enable-thirdparty.sh
 . /root/.bashrc
