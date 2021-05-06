@@ -54,6 +54,7 @@ ClusterSDK::ClusterSDK(const ClusterOptions& options)
       engine_(NULL) {}
 
 ClusterSDK::~ClusterSDK() {
+    LOG(INFO) << "before pool cancel, pending task:" << pool_.PendingNum();
     pool_.Stop(false);
     if (zk_client_ != NULL) {
         zk_client_->CloseZK();

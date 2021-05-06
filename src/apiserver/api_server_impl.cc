@@ -4,7 +4,12 @@
 
 namespace fedb {
 namespace http {
-APIServerImpl::~APIServerImpl() {}
+//APIServerImpl::APIServerImpl(const sdk::ClusterOptions& options): cluster_sdk_(options) {
+//
+//}
+APIServerImpl::~APIServerImpl() {
+    sql_router_.reset();
+}
 
 bool APIServerImpl::Init(const sdk::ClusterOptions& options) {
     cluster_sdk_.reset(new ::fedb::sdk::ClusterSDK(options));
@@ -19,7 +24,7 @@ bool APIServerImpl::Init(const sdk::ClusterOptions& options) {
         LOG(ERROR) << "Fail to connect to db";
         return false;
     }
-    sql_router_.reset(router.release());
+    sql_router_ = std::move(router);
     return true;
 }
 
@@ -29,7 +34,7 @@ void APIServerImpl::demo(google::protobuf::RpcController* cntl_base, const HttpR
     brpc::Controller* cntl = static_cast<brpc::Controller*>(cntl_base);
     cntl->response_attachment().append("nice");
 
-    LOG(INFO) << cntl->http_request().uri().path();
+    LOG(INFO) << "get path: " << cntl->http_request().uri().path();
 
 }
 
