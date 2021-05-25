@@ -17,7 +17,8 @@ jobs:
         run: |
           bash steps/init_env.sh
           mkdir -p build
-          du -h --max-depth=1 /
+          echo "du here"
+          ls / -a
           du -h --max-depth=1 .
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=ON .. && make -j$(nproc) && cd ../
       - name: run cpp
