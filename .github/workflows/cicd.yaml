@@ -21,7 +21,7 @@ jobs:
       - name: run cpp
         run: |
           du -h --max-depth=1 /
-          du -h --max-depth=1
+          du -h --max-depth=1 .
           bash steps/ut.sh
 #      - name: run sql_sdk_test
 #        if: always()
