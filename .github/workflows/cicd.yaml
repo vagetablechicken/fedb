@@ -20,6 +20,9 @@ jobs:
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=ON .. && make -j$(nproc) && cd ../
       - name: run cpp
         run: |
+          df -h
+          du --max-depth=1 build -h
+          rm build/src -rf
           bash steps/ut.sh
 #      - name: run sql_sdk_test
 #        if: always()
