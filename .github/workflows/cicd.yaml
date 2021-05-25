@@ -17,11 +17,11 @@ jobs:
         run: |
           bash steps/init_env.sh
           mkdir -p build
+          du -h --max-depth=1 /
+          du -h --max-depth=1 .
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=ON .. && make -j$(nproc) && cd ../
       - name: run cpp
         run: |
-          du -h --max-depth=1 /
-          du -h --max-depth=1 .
           bash steps/ut.sh
 #      - name: run sql_sdk_test
 #        if: always()
