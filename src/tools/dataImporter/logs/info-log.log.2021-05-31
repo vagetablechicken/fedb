@@ -1,0 +1,12 @@
+15:37:06.827 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:29)] - hdfs://host/testdata/20180%5B8-9%5D*
+15:37:06.831 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:29)] - hdfs://host/testdata/2018%2B%200%5B8-9%5D*
+15:37:06.832 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:29)] - hdfs://host/testdata/2018-01-01%2000%253A00%253A00
+15:37:06.833 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:29)] - hdfs://host/testdata/2018-01-01%20%20%2000*
+15:37:06.833 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:29)] - hdfs://host/testdata/2018-01-01%23123%23
+15:37:06.834 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:29)] - hdfs://host/testdata/2018-01-01%23123%20%2B%23*
+16:05:24.878 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:41)] - /testdata/20180%5B8-9%5D*
+16:05:24.880 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:41)] - /testdata/2018%2B%200%5B8-9%5D*
+16:05:24.881 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:41)] - /testdata/2018-01-01%2000%253A00%253A00
+16:05:24.881 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:41)] - /testdata/2018-01-01%20%20%2000*
+16:05:24.882 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:41)] - /testdata/2018-01-01%23123%23
+16:05:24.882 [INFO] [main] [com._4paradigm.dataimporter.WildcardURI.<init>(WildcardURI.java:41)] - /testdata/2018-01-01%23123%20%2B%23*
