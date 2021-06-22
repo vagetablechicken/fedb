@@ -79,7 +79,7 @@ python3 predict.py
 
 ## Architecture 
 
-<div align=center><img src="./images/openmldb_architecture.png"/></div>
+<div align=center><img src="./images/openmldb_architecture.jpg"/></div>
 
 ## Status and Roadmap
 
