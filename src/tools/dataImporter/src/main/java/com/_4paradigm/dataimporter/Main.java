@@ -9,11 +9,11 @@ import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
 import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
 
 import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVRecord;
 import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVRecord;
 
 import java.io.FileReader;
 import java.io.IOException;
@@ -88,6 +88,7 @@ public class Main {
         long startTime = System.currentTimeMillis();
 
         insertImport(X, rows, router, dbName, tableName);
+        // TODO(hw): What metadata does bulk load need?
 
         long endTime = System.currentTimeMillis();
 
@@ -96,7 +97,7 @@ public class Main {
         if (router != null) {
             router.close();
         }
-        logger.info("End. Total time: {}", totalTime);
+        logger.info("End. Total time: {} ms", totalTime);
     }
 
     private static void insertImport(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
@@ -132,6 +133,41 @@ public class Main {
             }
         });
 
+    }
+
+    private void bulkLoad(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
+        // rows->list SQLInsertRow
+        // for each Row
+        // Use one record to generate insert place holder
+        StringBuilder builder = new StringBuilder("insert into " + tableName + " values(");
+        CSVRecord peekRecord = rows.get(0);
+        for (int i = 0; i < peekRecord.size(); ++i) {
+            builder.append((i == 0) ? "?" : ",?");
+        }
+        builder.append(");");
+        String insertPlaceHolder = builder.toString();
+        // TODO(hw): use this insertRow to create demo
+
+        SQLInsertRow insertRow = router.getInsertRow(dbName, insertPlaceHolder);
+
+        // TODO(hw): ClusterSDK(java sdk missed) to GetTablet -> std::vector<std::shared_ptr<::fedb::catalog::TabletAccessor>>
+        // getInserRows has already got the SQLCache(table_info), we only need table_info->name()&tid() to GetTablet(tabletServers)
+
+        // SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>& row,
+        //        const std::vector<std::shared_ptr<::fedb::catalog::TabletAccessor>>& tablets,
+//        for(dim: insertRow.GetDimensions()){ // TODO(hw): needs swig support
+//          dim->pid // here has tid, pid, dimensions, ts_dimensions(maybe empty->cur_ts)
+//          check if tablets[pid] existed
+//          tid, pid->MemTable
+//          In MemTable:
+//          1. MemTable::Put -> gene real_ref_cnt, create DataBlockInfo & DataBlockId(append to one MemTable's Data Region, returns addr, len, blockId)
+//              multi-threading: needs lock?
+//          2. find segments -> use blockId to do segment insertion
+//        }
+
+        // MemTable{Segments, Data region, blockId->DataBlockInfo}
+        // so many MemTables
+        // save to files? or just a rpc request? Maybe rpc requests is better in demo.
     }
 }
 
