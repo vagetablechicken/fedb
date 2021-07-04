@@ -739,7 +739,46 @@ TableIterator* MemTable::NewTraverseIterator(uint32_t index) {
     return new MemTableTraverseIterator(segments_[real_idx], seg_cnt_, ttl->ttl_type, expire_time, expire_cnt, 0);
 }
 
-MemTableKeyIterator::MemTableKeyIterator(Segment** segments, uint32_t seg_cnt, ::openmldb::storage::TTLType ttl_type,
+bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
+                        const ::google::protobuf::RepeatedPtrField<::fedb::api::Index>& indexes) {
+    // data_block[i] is the block which id == i
+    // TODO(hw): need to reset all segments?
+    for (int i = 0; i < indexes.size(); ++i) {
+        const auto& inner_index = indexes.Get(i);
+        auto index_def = GetIndex(inner_index.inner_index_id());
+        if (!index_def || !index_def->IsReady()) {
+            return false;
+        }
+
+        uint32_t real_idx = index_def->GetInnerPos();
+        for (int j = 0; j < inner_index.segments_size(); ++j) {
+            const auto& segment_index = inner_index.segments(j);
+            auto seg_idx = segment_index.id();
+            auto segment = segments_[real_idx][seg_idx];
+            for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
+                const auto& key_entry = segment_index.key_entries(key_idx);
+                auto pk = Slice(key_entry.key());
+                for (int time_idx = 0; time_idx < key_entry.time_entries_size(); ++time_idx) {
+                    const auto& time_entry = key_entry.time_entries(time_idx);
+                    auto* block =
+                        time_entry.block_id() < data_blocks.size() ? data_blocks[time_entry.block_id()] : nullptr;
+                    if (block == nullptr) {
+                        // TODO(hw): error handle
+                        DLOG(INFO) << "block info mismatch";
+                        return false;
+                    }
+                    // TODO(hw): ts_cnt_ is created by ColumnKey.ts_name, only one.
+                    // Segment::Put has a lock
+                    segment->Put(pk, time_entry.time(), block);
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+MemTableKeyIterator::MemTableKeyIterator(Segment** segments, uint32_t seg_cnt, ::fedb::storage::TTLType ttl_type,
                                          uint64_t expire_time, uint64_t expire_cnt, uint32_t ts_index)
     : segments_(segments),
       seg_cnt_(seg_cnt),

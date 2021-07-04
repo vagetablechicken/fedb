@@ -4766,5 +4766,111 @@ void TabletImpl::CreateProcedure(const std::shared_ptr<hybridse::sdk::ProcedureI
     LOG(INFO) << "refresh procedure success! sp_name: " << sp_name << ", db: " << db_name << ", sql: " << sql;
 }
 
+void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoadRequest* request,
+                          ::fedb::api::GeneralResponse* response, Closure* done) {
+    brpc::ClosureGuard done_guard(done);
+    // tid pid existed? return error
+
+    if (follower_.load(std::memory_order_relaxed)) {
+        response->set_code(::fedb::base::ReturnCode::kIsFollowerCluster);
+        response->set_msg("is follower cluster");
+        return;
+    }
+    uint64_t start_time = ::baidu::common::timer::get_micros();
+    std::shared_ptr<Table> table = GetTable(request->tid(), request->pid());
+    if (!table) {
+        PDLOG(WARNING, "table is not exist. tid %u, pid %u", request->tid(), request->pid());
+        response->set_code(::fedb::base::ReturnCode::kTableIsNotExist);
+        response->set_msg("table is not exist");
+        return;
+    }
+    if (!table->IsLeader()) {
+        response->set_code(::fedb::base::ReturnCode::kTableIsFollower);
+        response->set_msg("table is follower");
+        return;
+    }
+    if (table->GetTableStat() == ::fedb::storage::kLoading) {
+        PDLOG(WARNING, "table is loading. tid %u, pid %u", request->tid(), request->pid());
+        response->set_code(::fedb::base::ReturnCode::kTableIsLoading);
+        response->set_msg("table is loading");
+        return;
+    }
+
+    auto* cntl = dynamic_cast<brpc::Controller*>(controller);
+    const auto& data = cntl->request_attachment();
+    if (data.empty()) {
+        // TODO(hw): return error, do not send a empty request
+        PDLOG(WARNING, "empty data");
+        response->set_code(100);
+        return;
+    }
+
+    // We must copy data from IOBuf, cuz the rows have different TTLs, it's not a good idea to keep them together.
+    butil::IOBufBytesIterator iter(data);
+    std::vector<DataBlock*> data_blocks(request->block_info_size());
+    for (int i = 0; i < request->block_info_size(); ++i) {
+        const auto& info = request->block_info(i);
+        auto buf = new char[info.length()];
+        iter.copy_and_forward(buf, info.length());
+        data_blocks[i] = new DataBlock(info.ref_cnt(), buf, info.length(), true);
+    }
+    if (iter.bytes_left() != 0) {
+        // TODO(hw): error
+        PDLOG(WARNING, "data info mismatch");
+        response->set_code(100);
+        //        return;
+    }
+    if (!std::dynamic_pointer_cast<MemTable>(table)->BulkLoad(data_blocks, request->index_region())) {
+        // TODO(hw): error
+        PDLOG(WARNING, "bulk load failed");
+        response->set_code(100);
+        return;
+    }
+
+    response->set_code(::fedb::base::ReturnCode::kOk);
+    std::shared_ptr<LogReplicator> replicator;
+    do {
+        replicator = GetReplicator(request->tid(), request->pid());
+        if (!replicator) {
+            PDLOG(WARNING, "fail to find table tid %u pid %u leader's log replicator", request->tid(), request->pid());
+            break;
+        }
+        const auto& indexes = request->index_region();
+        for (int i = 0; i < indexes.size(); ++i) {
+            const auto& inner_index = indexes.Get(i);
+            for (int j = 0; j < inner_index.segments_size(); ++j) {
+                const auto& segment_index = inner_index.segments(j);
+                for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
+                    const auto& key_entry = segment_index.key_entries(key_idx);
+                    const auto& pk = key_entry.key();
+                    for (int time_idx = 0; time_idx < key_entry.time_entries_size(); ++time_idx) {
+                        const auto& time_entry = key_entry.time_entries(time_idx);
+
+                        auto* block =
+                            time_entry.block_id() < data_blocks.size() ? data_blocks[time_entry.block_id()] : nullptr;
+
+                        ::fedb::api::LogEntry entry;
+                        entry.set_pk(pk);
+                        entry.set_ts(time_entry.time());
+                        entry.set_value(block->data, block->size);
+                        entry.set_term(replicator->GetLeaderTerm());
+                        replicator->AppendEntry(entry);
+                    }
+                }
+            }
+        }
+
+    } while (false);
+    uint64_t end_time = ::baidu::common::timer::get_micros();
+
+    DLOG(INFO) << "bulk load cost" << end_time - start_time << request->tid() << request->pid();
+
+    if (replicator) {
+        if (FLAGS_binlog_notify_on_put) {
+            replicator->Notify();
+        }
+    }
+}
+
 }  // namespace tablet
 }  // namespace openmldb

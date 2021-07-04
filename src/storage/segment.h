@@ -51,6 +51,16 @@ struct DataBlock {
         memcpy(data, input, len);
     }
 
+    DataBlock(uint8_t dim_cnt, char* input, uint32_t len, bool skip_copy)
+        : dim_cnt_down(dim_cnt), size(len), data(NULL) {
+        if (skip_copy) {
+            data = input;
+        } else {
+            data = new char[len];
+            memcpy(data, input, len);
+        }
+    }
+
     ~DataBlock() {
         delete[] data;
         data = NULL;
