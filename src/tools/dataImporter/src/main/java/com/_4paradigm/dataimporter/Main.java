@@ -1,26 +1,47 @@
 package com._4paradigm.dataimporter;
 
+import com._4paradigm.fedb.ns.NS;
+import com._4paradigm.fedb.ts.TS;
 import com._4paradigm.hybridsql.fedb.DataType;
+import com._4paradigm.hybridsql.fedb.DimMap;
 import com._4paradigm.hybridsql.fedb.SQLInsertRow;
+import com._4paradigm.hybridsql.fedb.SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t;
+import com._4paradigm.hybridsql.fedb.SWIGTYPE_p_std__vectorT_unsigned_long_long_t;
 import com._4paradigm.hybridsql.fedb.Schema;
 import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
 import com._4paradigm.hybridsql.fedb.sdk.SqlException;
 import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
 import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
 
+import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.Table;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.methods.ByteArrayRequestEntity;
+import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.http.client.methods.HttpPost;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.awt.*;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+
+import static com.google.common.collect.MoreCollectors.onlyElement;
 
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
@@ -87,8 +108,10 @@ public class Main {
         logger.info("rows {}, peek {}", rows.size(), rows.isEmpty() ? "" : rows.get(0).toString());
         long startTime = System.currentTimeMillis();
 
-        insertImport(X, rows, router, dbName, tableName);
+//        insertImport(X, rows, router, dbName, tableName);
+
         // TODO(hw): What metadata does bulk load need?
+        bulkLoad(X, rows, router, dbName, tableName);
 
         long endTime = System.currentTimeMillis();
 
@@ -135,7 +158,7 @@ public class Main {
 
     }
 
-    private void bulkLoad(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
+    private static void bulkLoad(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
         // rows->list SQLInsertRow
         // for each Row
         // Use one record to generate insert place holder
@@ -146,24 +169,149 @@ public class Main {
         }
         builder.append(");");
         String insertPlaceHolder = builder.toString();
-        // TODO(hw): use this insertRow to create demo
+        // TODO(hw): use this insertRow to create demo 为了少写代码
 
-        SQLInsertRow insertRow = router.getInsertRow(dbName, insertPlaceHolder);
+        logger.info("query zk");
+        RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
+        CuratorFramework client = CuratorFrameworkFactory.newClient("172.24.4.55:6181", retryPolicy);
+        client.start();
+        NS.TableInfo testTable = null;
+        try {
+            String tableInfoPath = "/onebox/table/db_table_data";
+            List<String> tables = client.getChildren().forPath(tableInfoPath);
+            if (tables == null) {
+                logger.error("zk path {} get child failed.", tableInfoPath);
+                return;
+            }
 
-        // TODO(hw): ClusterSDK(java sdk missed) to GetTablet -> std::vector<std::shared_ptr<::fedb::catalog::TabletAccessor>>
-        // getInserRows has already got the SQLCache(table_info), we only need table_info->name()&tid() to GetTablet(tabletServers)
+            for (String tableId : tables) {
+                byte[] tableInfo = client.getData().forPath(tableInfoPath + "/" + tableId);
+                NS.TableInfo info = NS.TableInfo.parseFrom(tableInfo);
+                logger.info(info.toString());
+                if (info.getName().equals(tableName)) {
+                    testTable = info;
+                }
+            }
 
-        // SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>& row,
-        //        const std::vector<std::shared_ptr<::fedb::catalog::TabletAccessor>>& tablets,
-//        for(dim: insertRow.GetDimensions()){ // TODO(hw): needs swig support
-//          dim->pid // here has tid, pid, dimensions, ts_dimensions(maybe empty->cur_ts)
-//          check if tablets[pid] existed
-//          tid, pid->MemTable
+            if (testTable == null) {
+                logger.error("no table info of table {}", tableName);
+                return;
+            }
+            // TODO(hw): test http request(proto type)
+            for (NS.TablePartition partition : testTable.getTablePartitionList()) {
+                logger.info("pid {}, {}", partition.getPid(), partition.getPartitionMetaList());
+                NS.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(NS.PartitionMeta::getIsLeader).collect(onlyElement());
+                TS.GetTableStatusRequest request = TS.GetTableStatusRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
+
+                HttpClient httpClient = new HttpClient();
+                PostMethod postMethod = new PostMethod("http://" + leader.getEndpoint() + "/TabletServer/GetTableStatus");
+                postMethod.addRequestHeader("Content-Type", "application/proto;charset=utf-8");
+                postMethod.setRequestEntity(new ByteArrayRequestEntity(request.toByteArray()));
+                httpClient.executeMethod(postMethod);
+
+                TS.GetTableStatusResponse resp = TS.GetTableStatusResponse.parseFrom(postMethod.getResponseBodyAsStream());
+                logger.info("get resp: {}", resp);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        assert testTable != null;
+        long tid = testTable.getTid();
+        Table<Long, Long, StringBuilder> dataMgr = HashBasedTable.create();
+        AtomicLong idGenerator = new AtomicLong();
+        List<TS.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
+
+        for (CSVRecord row : rows) {
+            SQLInsertRow insertRow = router.getInsertRow(dbName, insertPlaceHolder);
+            // TODO(hw): fulfill insertRow
+
+            // TODO(hw): 拿insertRow的dims等信息，需要改sdk swig，但java复制步骤代码量不小，还是改sdk更容易。
+
+            // SQLClusterRouter::PutRow
+            DimMap dims = insertRow.GetDimensions(); // dims of pid
+            SWIGTYPE_p_std__vectorT_unsigned_long_long_t tsDims = insertRow.GetTs();
+            for (Map.Entry<Long, SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t> entry : dims.entrySet()) { // TODO(hw): needs swig support
+                Long pid = entry.getKey();
+                // here has tid, pid, dimensions, ts_dimensions(maybe empty->cur_ts)
+                // TODO(hw): check if tablets[pid] existed, this row should be sent to <tid, pid>->MemTable
+
+                // TODO(hw):          if (ts_dimensions.empty()) {
+                //                        ret = client->Put(tid, pid, cur_ts, row->GetRow(), kv.second, 1);
+                //                    } else {
+                //                        ret = client->Put(tid, pid, kv.second, row->GetTs(), row->GetRow(), 1);
+                //                    }
+
+                // TODO(hw): impl the second Put first
+                //  TabletClient::Put tid, pid, entry.GetValue(), insertRow.GetTs(), insertRow.GetRow()(means data, String type)
+                {
+                    // TODO(hw):
+                    //    ::fedb::api::PutRequest request;
+                    //    request.set_value(value);
+                    //    request.set_tid(tid);
+                    //    request.set_pid(pid);
+                    //    for (size_t i = 0; i < dimensions.size(); i++) {
+                    //        ::fedb::api::Dimension* d = request.add_dimensions();
+                    //        d->set_key(dimensions[i].first);
+                    //        d->set_idx(dimensions[i].second);
+                    //    }
+                    //    for (size_t i = 0; i < ts_dimensions.size(); i++) {
+                    //        ::fedb::api::TSDimension* d = request.add_ts_dimensions();
+                    //        d->set_ts(ts_dimensions[i]);
+                    //        d->set_idx(i);
+                    //    }
+                    //  assume that put request is here, how to insert the put request?
+                    //  TabletImpl::Put 3种可能的put
+
+                    // request.dimensions == row.dimensions == entry.GetValue()
+                    TS.PutRequest request = TS.PutRequest.newBuilder().build(); // TODO(hw): to get fake dims & ts_dims
+                    List<TS.Dimension> dimensions = request.getDimensionsList();
+                    List<TS.TSDimension> ts_dimensions = request.getTsDimensionsList();
+                    if (!dimensions.isEmpty()) {
+                        // TODO(hw): CheckDimessionPut
+
+                        if(!ts_dimensions.isEmpty()){
+                            // TODO(hw): 1 table->Put(request->dimensions(), request->ts_dimensions(), request->value());
+                            //  inner_index_key_map needs MemTable::table_index_, GetTableSchemaResponse只有table meta，得TableIndex::ParseFromMeta才能转出table index
+
+                        }else{
+                            // TODO(hw): 2 table->Put(request->time(), request->value(), request->dimensions());
+                        }
+
+                    } else {
+                        // TODO(hw): 3 table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());
+                    }
+                }
+
 //          In MemTable:
 //          1. MemTable::Put -> gene real_ref_cnt, create DataBlockInfo & DataBlockId(append to one MemTable's Data Region, returns addr, len, blockId)
-//              multi-threading: needs lock?
-//          2. find segments -> use blockId to do segment insertion
-//        }
+//                String data = insertRow.GetRow();
+//                StringBuilder dataHolder = dataMgr.get(tid, pid);
+//                int head = dataHolder.length();
+//                dataHolder.append(data);
+//                long id = dataBlockInfoList.size();
+//                // TODO(hw): ref cnt
+//                dataBlockInfoList.add(TS.DataBlockInfo.newBuilder().setOffset(head).setLength(data.length()).build());
+
+//                // TODO(hw): rpc message都只有c版本，没有生产java，如果保持这样，那就得往sql cluster router里灌数据，让c++那边生成data/index region。这不符合以后要用spark的逻辑。
+//                //  spark java能直接发rpc给tablet server
+
+
+////              multi-threading insert into one MemTable dataHolder: needs lock?
+////          2. find segments -> use blockId to do segment insertion
+//                // One MemTable, how many inner_index? each inner_index contains two-level skip list
+//                // like one PutRequest, TabletImpl::Put()
+//                // dimensions_size==0? ts_dimensions_size==0?有三种MemTable::Put，都需要模拟
+//
+//                // needs MemTable::table_index_
+
+            }
+        }
+
+        // TODO(hw): https://github.com/baidu/brpc-java/blob/master/brpc-java-examples/brpc-java-core-examples/src/main/java/com/baidu/brpc/example/standard/RpcClientTest.java
+        //  有没有必要用java？
+
 
         // MemTable{Segments, Data region, blockId->DataBlockInfo}
         // so many MemTables

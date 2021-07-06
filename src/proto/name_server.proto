@@ -23,6 +23,8 @@ package openmldb.nameserver;
 option cc_generic_services = true;
 option java_package = "com._4paradigm.openmldb.ns";
 option java_outer_classname = "NS";
+// TODO(hw): java gen
+option java_generic_services = true;
 
 enum ServerMode {
     kNORMAL = 0;

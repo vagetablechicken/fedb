@@ -4769,7 +4769,6 @@ void TabletImpl::CreateProcedure(const std::shared_ptr<hybridse::sdk::ProcedureI
 void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoadRequest* request,
                           ::fedb::api::GeneralResponse* response, Closure* done) {
     brpc::ClosureGuard done_guard(done);
-    // tid pid existed? return error
 
     if (follower_.load(std::memory_order_relaxed)) {
         response->set_code(::fedb::base::ReturnCode::kIsFollowerCluster);

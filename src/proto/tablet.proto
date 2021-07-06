@@ -20,6 +20,10 @@ import "sql_procedure.proto";
 package openmldb.api;
 
 option cc_generic_services = true;
+option java_package = "com._4paradigm.fedb.ts";
+option java_outer_classname = "TS";
+// TODO(hw): java gen
+option java_generic_services = true;
 
 enum TableMode {
     kTableLeader = 1;

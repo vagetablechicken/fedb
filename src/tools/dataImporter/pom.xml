@@ -33,16 +33,39 @@
             <version>4.11</version>
             <scope>test</scope>
         </dependency>
-<!--         <dependency> -->
-<!--             <groupId>com.4paradigm.hybridsql</groupId> -->
-<!--             <artifactId>fedb-jdbc</artifactId> -->
-<!--             <version>2.2.2</version> -->
-<!--         </dependency> -->
-            <dependency>
-              <groupId>com.4paradigm.hybridsql</groupId>
-              <artifactId>fedb-jdbc</artifactId>
-              <version>2.3.0</version>
-            </dependency>
+<!--        <dependency>-->
+<!--            <groupId>com.4paradigm.hybridsql</groupId>-->
+<!--            <artifactId>fedb-jdbc</artifactId>-->
+<!--            <version>2.3.0</version>-->
+<!--        </dependency>-->
+        <dependency>
+            <groupId>com.4paradigm.hybridsql</groupId>
+            <artifactId>fedb-jdbc</artifactId>
+            <version>2.2.2</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/../../sdk/java/sql-jdbc/target/fedb-jdbc-2.2.2.jar</systemPath>
+        </dependency>
+        <dependency>
+            <groupId>com.4paradigm.hybridsql</groupId>
+            <artifactId>fedb-native</artifactId>
+            <version>2.2.2</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/../../sdk/java/sql-native/target/fedb-native-2.2.2.jar</systemPath>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>2.6.1</version>
+        </dependency>
+
+
+        <!-- https://mvnrepository.com/artifact/org.apache.curator/apache-curator -->
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>apache-curator</artifactId>
+            <version>5.1.0</version>
+            <type>pom</type>
+        </dependency>
 
         <!--日志开始-->
         <dependency>
@@ -110,12 +133,12 @@
         </dependency>
 
         <!-- csv TODO use apache common csv-->
-       <dependency>
-           <groupId>net.sourceforge.javacsv</groupId>
-           <artifactId>javacsv</artifactId>
-           <version>2.0</version>
-           <scope>test</scope>
-       </dependency>
+        <dependency>
+            <groupId>net.sourceforge.javacsv</groupId>
+            <artifactId>javacsv</artifactId>
+            <version>2.0</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-csv</artifactId>
@@ -326,12 +349,12 @@
             </plugin>
         </plugins>
     </build>
-<!--      for fedb-jdbc -->
+    <!--      for fedb-jdbc -->
     <repositories>
         <repository>
-          <id>my-repo1</id>
-          <name>your custom repo</name>
-          <url>https://repo.maven.apache.org/maven2</url>
+            <id>my-repo1</id>
+            <name>your custom repo</name>
+            <url>https://repo.maven.apache.org/maven2</url>
         </repository>
     </repositories>
 </project>

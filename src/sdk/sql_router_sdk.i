@@ -21,6 +21,9 @@
 %include stl.i
 %include stdint.i
 %include std_vector.i
+%include std_map.i
+%include std_pair.i
+
 #ifdef SWIGJAVA
 %include various.i
 %apply char *BYTE { char *string_buffer_var_name };
@@ -40,6 +43,9 @@
 %shared_ptr(openmldb::sdk::TableReader);
 %template(VectorUint32) std::vector<uint32_t>;
 %template(VectorString) std::vector<std::string>;
+// std_map iterator
+//%template(VectorPairStrInt) std::vector<std::pair<std::string, uint32_t>>;
+%template(DimMap) std::map<unsigned int, std::vector<std::pair<std::string, unsigned int>>>;
 
 %{
 #include "sdk/sql_router.h"
