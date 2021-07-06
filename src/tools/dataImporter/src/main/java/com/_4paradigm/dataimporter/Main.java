@@ -271,16 +271,27 @@ public class Main {
                     if (!dimensions.isEmpty()) {
                         // TODO(hw): CheckDimessionPut
 
-                        if(!ts_dimensions.isEmpty()){
+                        if (!ts_dimensions.isEmpty()) {
                             // TODO(hw): 1 table->Put(request->dimensions(), request->ts_dimensions(), request->value());
                             //  inner_index_key_map needs MemTable::table_index_, GetTableSchemaResponse只有table meta，得TableIndex::ParseFromMeta才能转出table index
 
-                        }else{
+                            // 具体要table_index_的什么？
+                            // dim->idx, InnerIndexPos -> inner_pos, dim->key
+                            // InnerIndex重度需要
+                        } else {
                             // TODO(hw): 2 table->Put(request->time(), request->value(), request->dimensions());
+                            //  inner_index_key_map is needed too
                         }
 
                     } else {
                         // TODO(hw): 3 table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());
+                        //  Put 3 won't be used in this case. won't set pk,...
+                        // find seg_idx
+                        int seg_idx = 0;
+                        // if mem table seg_cnt_ > 1, hash
+                        long id = dataBlockInfoList.size();
+                        dataBlockInfoList.add(TS.DataBlockInfo.newBuilder().setRefCnt(1).build());
+                        // segments_[0][seg_idx]->Put()
                     }
                 }
 
