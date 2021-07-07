@@ -195,16 +195,16 @@ bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& di
     return true;
 }
 
-bool MemTable::Put(const Dimensions& dimensions, const TSDimensions& ts_dimemsions, const std::string& value) {
-    if (dimensions.size() == 0 || ts_dimemsions.size() == 0) {
-        PDLOG(WARNING, "empty dimesion. tid %u pid %u", id_, pid_);
+bool MemTable::Put(const Dimensions& dimensions, const TSDimensions& ts_dimensions, const std::string& value) {
+    if (dimensions.empty() || ts_dimensions.empty()) {
+        PDLOG(WARNING, "empty dimension. tid %u pid %u", id_, pid_);
         return false;
     }
     std::map<int32_t, Slice> inner_index_key_map;
     for (auto iter = dimensions.begin(); iter != dimensions.end(); iter++) {
         int32_t inner_pos = table_index_.GetInnerIndexPos(iter->idx());
         if (inner_pos < 0) {
-            PDLOG(WARNING, "invalid dimesion. dimesion idx %u, tid %u pid %u", iter->idx(), id_, pid_);
+            PDLOG(WARNING, "invalid dimension. dimension idx %u, tid %u pid %u", iter->idx(), id_, pid_);
             return false;
         }
         inner_index_key_map.emplace(inner_pos, iter->key());
@@ -220,8 +220,8 @@ bool MemTable::Put(const Dimensions& dimensions, const TSDimensions& ts_dimemsio
             auto ts_col = index_def->GetTsColumn();
             if (ts_col) {
                 bool has_found_ts = false;
-                for (auto it = ts_dimemsions.begin(); it != ts_dimemsions.end(); it++) {
-                    if (static_cast<int>(it->idx()) == ts_col->GetTsIdx()) {
+                for (const auto & ts_dimension : ts_dimensions) {
+                    if (static_cast<int>(ts_dimension.idx()) == ts_col->GetTsIdx()) {
                         has_found_ts = true;
                         break;
                     }
@@ -236,7 +236,7 @@ bool MemTable::Put(const Dimensions& dimensions, const TSDimensions& ts_dimemsio
             }
         }
     }
-    DataBlock* block = new DataBlock(real_ref_cnt, value.c_str(), value.length());
+    auto* block = new DataBlock(real_ref_cnt, value.c_str(), value.length());
     for (const auto& kv : inner_index_key_map) {
         auto inner_index = table_index_.GetInnerIndex(kv.first);
         bool need_put = false;
@@ -740,7 +740,7 @@ TableIterator* MemTable::NewTraverseIterator(uint32_t index) {
 }
 
 bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
-                        const ::google::protobuf::RepeatedPtrField<::fedb::api::Index>& indexes) {
+                        const ::google::protobuf::RepeatedPtrField<::fedb::api::BulkLoadIndex>& indexes) {
     // data_block[i] is the block which id == i
     // TODO(hw): need to reset all segments?
     for (int i = 0; i < indexes.size(); ++i) {
@@ -751,15 +751,15 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
         }
 
         uint32_t real_idx = index_def->GetInnerPos();
-        for (int j = 0; j < inner_index.segments_size(); ++j) {
-            const auto& segment_index = inner_index.segments(j);
+        for (int j = 0; j < inner_index.segment_size(); ++j) {
+            const auto& segment_index = inner_index.segment(j);
             auto seg_idx = segment_index.id();
             auto segment = segments_[real_idx][seg_idx];
-            for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
-                const auto& key_entry = segment_index.key_entries(key_idx);
+            for (int key_idx = 0; key_idx < segment_index.key_entry_size(); ++key_idx) {
+                const auto& key_entry = segment_index.key_entry(key_idx);
                 auto pk = Slice(key_entry.key());
-                for (int time_idx = 0; time_idx < key_entry.time_entries_size(); ++time_idx) {
-                    const auto& time_entry = key_entry.time_entries(time_idx);
+                for (int time_idx = 0; time_idx < key_entry.time_entry_size(); ++time_idx) {
+                    const auto& time_entry = key_entry.time_entry(time_idx);
                     auto* block =
                         time_entry.block_id() < data_blocks.size() ? data_blocks[time_entry.block_id()] : nullptr;
                     if (block == nullptr) {
@@ -767,7 +767,7 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
                         DLOG(INFO) << "block info mismatch";
                         return false;
                     }
-                    // TODO(hw): ts_cnt_ is created by ColumnKey.ts_name, only one.
+                    // TODO(hw): ts_cnt_ is created by ColumnKey.ts_name, only one?
                     // Segment::Put has a lock
                     segment->Put(pk, time_entry.time(), block);
                 }

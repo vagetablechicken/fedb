@@ -9,7 +9,6 @@ import com._4paradigm.hybridsql.fedb.SWIGTYPE_p_std__vectorT_std__pairT_std__str
 import com._4paradigm.hybridsql.fedb.SWIGTYPE_p_std__vectorT_unsigned_long_long_t;
 import com._4paradigm.hybridsql.fedb.Schema;
 import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
-import com._4paradigm.hybridsql.fedb.sdk.SqlException;
 import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
 import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
 
@@ -26,19 +25,19 @@ import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
-import org.apache.http.client.methods.HttpPost;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.awt.*;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.google.common.collect.MoreCollectors.onlyElement;
@@ -90,14 +89,15 @@ public class Main {
                     "dropoff_latitude double,\n" +
                     "store_and_fwd_flag string,\n" +
                     "trip_duration int,\n" +
-                    "index(key=vendor_id, ts=pickup_datetime),\n" +
+                    "index(key=(vendor_id, passenger_count), ts=pickup_datetime),\n" +
                     "index(key=passenger_count, ts=pickup_datetime)\n" +
                     ");");
             if (!ok) {
                 throw new RuntimeException("recreate table " + tableName + " failed");
             }
-        } catch (SqlException | RuntimeException e) {
+        } catch (Exception e) {
             logger.warn(e.getMessage());
+            return;
         }
         // reader, perhaps needs hdfs writer later
         // reader can read dir | file | *.xx?
@@ -220,7 +220,7 @@ public class Main {
         assert testTable != null;
         long tid = testTable.getTid();
         Table<Long, Long, StringBuilder> dataMgr = HashBasedTable.create();
-        AtomicLong idGenerator = new AtomicLong();
+
         List<TS.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
         for (CSVRecord row : rows) {
@@ -268,24 +268,74 @@ public class Main {
                     TS.PutRequest request = TS.PutRequest.newBuilder().build(); // TODO(hw): to get fake dims & ts_dims
                     List<TS.Dimension> dimensions = request.getDimensionsList();
                     List<TS.TSDimension> ts_dimensions = request.getTsDimensionsList();
+
+                    TS.BulkLoadInfoResponse indexInfo = TS.BulkLoadInfoResponse.newBuilder().build(); // TODO(hw): fake resp, request tablet server later
                     if (!dimensions.isEmpty()) {
                         // TODO(hw): CheckDimessionPut
 
                         if (!ts_dimensions.isEmpty()) {
                             // TODO(hw): 1 table->Put(request->dimensions(), request->ts_dimensions(), request->value());
-                            //  inner_index_key_map needs MemTable::table_index_, GetTableSchemaResponse只有table meta，得TableIndex::ParseFromMeta才能转出table index
+                            // TODO(hw): when bulk loading, cannot AddIndex().
+                            //  And MemTable::table_index_ may be modified by AddIndex()/Delete..., so we should get table_index_'s info from MemTable, to know the real status
 
-                            // 具体要table_index_的什么？
-                            // dim->idx, InnerIndexPos -> inner_pos, dim->key
-                            // InnerIndex重度需要
+                            Map<Integer, String> innerIndexKeyMap = new HashMap<>();
+                            for (TS.Dimension dim : dimensions) {
+                                innerIndexKeyMap.put(indexInfo.getInnerIndexPos(dim.getIdx()), dim.getKey());
+                            }
+                            AtomicInteger realRefCnt = new AtomicInteger();
+                            innerIndexKeyMap.forEach((k, v) -> {
+                                // TODO(hw): check idx valid
+                                TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
+                                for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
+                                    // if has ts_col
+                                    if (indexDef.getTsIdx() != -1) {
+                                        boolean foundTs = ts_dimensions.stream().anyMatch(ts -> ts.getIdx() == indexDef.getTsIdx());
+                                        if (foundTs && indexDef.getIsReady()) {
+                                            realRefCnt.getAndIncrement();
+                                        } else {
+                                            logger.info("cannot find ts col.../ not ready...");
+                                        }
+                                    }
+                                }
+                            });
+
+                            StringBuilder sb = dataMgr.get(tid, pid);
+                            String rowData = insertRow.GetRow();
+                            int head = sb.length();
+                            sb.append(rowData);
+
+                            long id = dataBlockInfoList.size();
+                            // TODO(hw): realRefCnt == 0?
+                            dataBlockInfoList.add(TS.DataBlockInfo.newBuilder().setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length()).build());
+
+                            // TODO(hw): segment put use block id
+                            innerIndexKeyMap.forEach((k, v) -> {
+                                TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
+                                boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
+                                if (needPut) {
+                                    int segIdx = 0;
+                                    if (indexInfo.getSegCnt() > 1) {
+                                        // TODO(hw): hash
+                                    }
+                                    // TODO(hw): segment[k][segIdx]->Put. In one segment, just two-level sorted array(desc)
+                                    //  only in-memory first
+
+                                    // v is pk, ts_dimension, data block
+                                    // TODO(hw): needs Segment::ts_idx_map_
+                                    //  index变化时new Segment会有很多情况，还是直接从MemTable处拿到每个Segment的情况最直接
+
+
+                                }
+                            });
                         } else {
                             // TODO(hw): 2 table->Put(request->time(), request->value(), request->dimensions());
-                            //  inner_index_key_map is needed too
+                            //  inner_index_key_map is needed, calculated from ts_idx_vec
                         }
 
                     } else {
                         // TODO(hw): 3 table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());
                         //  Put 3 won't be used in this case. won't set pk,...
+                        assert false;
                         // find seg_idx
                         int seg_idx = 0;
                         // if mem table seg_cnt_ > 1, hash

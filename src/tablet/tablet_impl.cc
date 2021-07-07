@@ -4837,14 +4837,13 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
         const auto& indexes = request->index_region();
         for (int i = 0; i < indexes.size(); ++i) {
             const auto& inner_index = indexes.Get(i);
-            for (int j = 0; j < inner_index.segments_size(); ++j) {
-                const auto& segment_index = inner_index.segments(j);
-                for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
-                    const auto& key_entry = segment_index.key_entries(key_idx);
+            for (int j = 0; j < inner_index.segment_size(); ++j) {
+                const auto& segment_index = inner_index.segment(j);
+                for (int key_idx = 0; key_idx < segment_index.key_entry_size(); ++key_idx) {
+                    const auto& key_entry = segment_index.key_entry(key_idx);
                     const auto& pk = key_entry.key();
-                    for (int time_idx = 0; time_idx < key_entry.time_entries_size(); ++time_idx) {
-                        const auto& time_entry = key_entry.time_entries(time_idx);
-
+                    for (int time_idx = 0; time_idx < key_entry.time_entry_size(); ++time_idx) {
+                        const auto& time_entry = key_entry.time_entry(time_idx);
                         auto* block =
                             time_entry.block_id() < data_blocks.size() ? data_blocks[time_entry.block_id()] : nullptr;
 
@@ -4858,7 +4857,6 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
                 }
             }
         }
-
     } while (false);
     uint64_t end_time = ::baidu::common::timer::get_micros();
 
