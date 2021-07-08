@@ -785,7 +785,8 @@ message BulkLoadInfoResponse {
         }
         repeated IndexDef index_def = 1;
     }
-    repeated InnerIndexSt inner_index = 5;
+    repeated InnerIndexSt inner_index = 5; // 4&5: Table::table_index_
+    // MemTable::segments_
 }
 
 service TabletServer {
