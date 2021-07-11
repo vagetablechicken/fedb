@@ -744,15 +744,18 @@ message DataBlockInfo {
 
 message Segment {
     optional uint32 id = 1;
-    message KeyEntry {
+    message KeyEntries {
         optional bytes key = 1;
-        message TimeEntry {
-            optional uint64 time = 1;
-            optional uint32 block_id = 2;
+        message KeyEntry {
+            message TimeEntry {
+                optional uint64 time = 1;
+                optional uint32 block_id = 2;
+            }
+            repeated TimeEntry time_entry = 2;
         }
-        repeated TimeEntry time_entry = 2;
+        repeated KeyEntry key_entry = 2; // ts_cnt_ == key_entry_size()
     }
-    repeated KeyEntry key_entry = 2;
+    repeated KeyEntries key_entries = 2;
 }
 
 message BulkLoadIndex {
@@ -776,7 +779,7 @@ message BulkLoadInfoRequest {
 message BulkLoadInfoResponse {
     optional int32 code = 1;
     optional string msg = 2;
-    optional int32 seg_cnt = 3;
+    optional uint32 seg_cnt = 3;
     repeated int32 inner_index_pos = 4;
     message InnerIndexSt {
         message IndexDef {
@@ -786,7 +789,19 @@ message BulkLoadInfoResponse {
         repeated IndexDef index_def = 1;
     }
     repeated InnerIndexSt inner_index = 5; // 4&5: Table::table_index_
-    // MemTable::segments_
+
+    message InnerSegments {
+        message Segment {
+            optional uint32 ts_cnt = 1;
+            message MapFieldEntry {
+                required uint32 key = 1; // TODO(hw): java will use int, cpp uses uint32. Not good?
+                required uint32 value = 2;
+            }
+            repeated MapFieldEntry ts_idx_map = 2; // TODO(hw): proto3 supports map
+        }
+        repeated Segment segment = 1;
+    }
+    repeated InnerSegments inner_segments = 6; // MemTable::segments_
 }
 
 service TabletServer {

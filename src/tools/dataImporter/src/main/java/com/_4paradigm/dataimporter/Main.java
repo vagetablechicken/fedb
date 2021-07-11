@@ -12,6 +12,7 @@ import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
 import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
 import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
 import org.apache.commons.csv.CSVParser;
@@ -37,8 +38,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 import static com.google.common.collect.MoreCollectors.onlyElement;
 
@@ -301,6 +303,7 @@ public class Main {
 
                             StringBuilder sb = dataMgr.get(tid, pid);
                             String rowData = insertRow.GetRow();
+                            assert sb != null;
                             int head = sb.length();
                             sb.append(rowData);
 
@@ -320,10 +323,37 @@ public class Main {
                                     // TODO(hw): segment[k][segIdx]->Put. In one segment, just two-level sorted array(desc)
                                     //  only in-memory first
 
-                                    // v is pk, ts_dimension, data block
+                                    // v is pk, ts_dimension, data block id
                                     // TODO(hw): needs Segment::ts_idx_map_
-                                    //  index变化时new Segment会有很多情况，还是直接从MemTable处拿到每个Segment的情况最直接
+                                    TS.BulkLoadInfoResponse.InnerSegments.Segment segmentInfo = indexInfo.getInnerSegments(k).getSegment(segIdx);
+                                    // ts_idx_map array to map
+                                    Map<Integer, Integer> tsIdxMap = segmentInfo.getTsIdxMapList().stream().collect(Collectors.toMap(
+                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
+                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
+                                    int tsCnt = segmentInfo.getTsCnt();
 
+                                    // TODO(hw): void Segment::Put(const Slice& key, const TSDimensions& ts_dimension,
+                                    //                  DataBlock* row)
+                                    if (ts_dimensions.isEmpty()) {
+                                        logger.info("data ts dims is empty, not return, skip this row");
+                                        return;// TODO(hw): just for debug
+                                    }
+
+                                    if (tsCnt == 1) {
+                                        if (ts_dimensions.size() == 1) {
+                                            // TODO(hw): Segment::Put(const Slice& key, uint64_t time, DataBlock* row)
+                                        } else if (!tsIdxMap.isEmpty()) {
+                                            for (TS.TSDimension curTs : ts_dimensions) {
+                                                Integer pos = tsIdxMap.get(curTs.getIdx());
+                                                if (pos != null) {
+                                                    // TODO(hw): Segment::Put(const Slice& key, uint64_t time, DataBlock* row)
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    } else {
+
+                                    }
 
                                 }
                             });
@@ -377,6 +407,66 @@ public class Main {
         // MemTable{Segments, Data region, blockId->DataBlockInfo}
         // so many MemTables
         // save to files? or just a rpc request? Maybe rpc requests is better in demo.
+    }
+
+    public static class SegmentDataMap {
+        // TODO(hw): id ?
+        int tsCnt;
+        public int ONE_IDX = 0;
+        public int NO_IDX = 0;
+
+        public SegmentDataMap(int tsCnt) {
+            this.tsCnt = tsCnt;
+        }
+
+        Map<String, List<Map<Long, Integer>>> keyEntries = new TreeMap<>(); // TODO(hw): comparator?
+
+        void Put(String key, int idxPos, Long time, Integer id) {
+            List<Map<Long, Integer>> entryList = keyEntries.getOrDefault(key, new ArrayList<>());
+            if (entryList.isEmpty()) {
+                for (int i = 0; i < tsCnt; i++) {
+                    entryList.add(new TreeMap<>());// TODO(hw): comparator?
+                }
+            }
+            entryList.get(idxPos).put(time, id);
+        }
+    }
+
+    // TODO(hw): index region
+    //  Table<String, Long, Integer> SegmentIndexMap treeMap, can do reverse iter? comparator1, Slice::compare, comparator2, TimeComparator
+    public void SegmentPut(String key, List<TS.TSDimension> tsDimensions, int dataBlockId, int tsCnt, Map<Integer, Integer> tsIdxMap, SegmentDataMap segment) {
+        // ts_cnt_ == 1, means don't have tsIdxMap.
+        // TODO(hw): tsIdxMap.isEmpty() -> ts_cnt_ == 1, else ts_cnt >= 1. ts_cnt_ == 1 has two situations(has map or no map). Not good.
+        if (tsCnt == 1) {
+            if (tsDimensions.size() == 1) {
+                segment.Put(key, segment.NO_IDX, tsDimensions.get(0).getTs(), dataBlockId);
+            } else {
+                // tsCnt == 1 & has tsIdxMap, so tsIdxMap only has one element.
+                Preconditions.checkArgument(tsIdxMap.size() == 1);
+                Integer tsIdx = tsIdxMap.keySet().stream().collect(onlyElement());
+                TS.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
+                segment.Put(key, segment.ONE_IDX, needPutIdx.getTs(), dataBlockId);
+            }
+        } else {
+            // TODO(hw): tsCnt != 1
+
+            for (TS.TSDimension tsDimension : tsDimensions) {
+                Integer pos = tsIdxMap.get(tsDimension.getIdx());
+                if (pos == null) {
+                    continue;
+                }
+                // ((KeyEntry**)entry_arr)[pos->second]->entries.Insert(  // NOLINT
+                //                cur_ts.ts(), row);
+                // key: cur_ts.ts(), value: row->block id
+                // entries_: a KeyEntries, Slice is the key, void* is the value.
+                // entries->Get(key, entry/entry_arr) means get the entry of Slice key. So Slice key is the first key.
+                // value entry，就是一个skiplist，(KeyEntry*)entry)->entries.Insert(time, row);即可
+                // value entry_arr，entry_arr是ts_cnt_个entry，所以对ts_cnt_ != 1时，就得有个entry_arr
+
+                segment.Put(key, pos, tsDimension.getTs(), dataBlockId);
+            }
+        }
+
     }
 }
 
