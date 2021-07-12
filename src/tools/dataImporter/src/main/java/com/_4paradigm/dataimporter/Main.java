@@ -228,6 +228,10 @@ public class Main {
 
         List<TS.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
+        // TODO(hw): rpc message都只有c版本，没有生产java，如果保持这样，那就得往sql cluster router里灌数据，让c++那边生成data/index region。这不符合以后要用spark的逻辑。
+        //  spark java能直接发rpc给tablet server, so we send BulkLoadRequest by this process.
+
+        // TODO(hw): multi-thread how?
         for (CSVRecord row : rows) {
             SQLInsertRow insertRow = router.getInsertRow(dbName, insertPlaceHolder);
             // TODO(hw): fulfill insertRow
@@ -259,6 +263,10 @@ public class Main {
                 List<TS.TSDimension> ts_dimensions = request.getTsDimensionsList();
                 long time = request.getTime(); // may go to MemTable::Put 2 or MemTable::Put 3
 
+                // TODO(hw): when bulk loading, cannot AddIndex().
+                //  And MemTable::table_index_ may be modified by AddIndex()/Delete...,
+                //  so we should get table_index_'s info from MemTable, to know the real status.
+                //  And the status can't be changed until bulk lood finished.
                 // TODO(hw): fake resp, request tablet server later
                 TS.BulkLoadInfoResponse indexInfo = TS.BulkLoadInfoResponse.newBuilder().build();
 
@@ -279,146 +287,72 @@ public class Main {
                 // set the dataBlockInfo's ref count when index region insertion
                 TS.DataBlockInfo.Builder dataBlockInfoBuilder = TS.DataBlockInfo.newBuilder();
 
-                // TODO(hw):
-                //  TabletClient::Put tid, pid, entry.GetValue(), insertRow.GetTs(), insertRow.GetRow()(means data, String type)
-                //  推测只会是MemTable::Put3，应该不存在dims不存在却有ts dims的情况？
+                // TODO(hw): we use ExecuteInsert logic, so never call `table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());`
+                //  即，不存在dims不存在却有ts dims的情况
+                Preconditions.checkState(!dimensions.isEmpty());
 
-                if (!dimensions.isEmpty()) {
-                    // TODO(hw): CheckDimessionPut
+                // TODO(hw): CheckDimessionPut
 
-                    if (!ts_dimensions.isEmpty()) {
-                        // TODO(hw): 1 table->Put(request->dimensions(), request->ts_dimensions(), request->value());
-
-                        // TODO(hw): when bulk loading, cannot AddIndex().
-                        //  And MemTable::table_index_ may be modified by AddIndex()/Delete..., so we should get table_index_'s info from MemTable, to know the real status
-                        AtomicInteger realRefCnt = new AtomicInteger();
-                        innerIndexKeyMap.forEach((k, v) -> {
-                            // TODO(hw): check idx valid
-                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
-                            for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
-                                // if has ts_col
-                                if (indexDef.getTsIdx() != -1) {
-                                    boolean foundTs = ts_dimensions.stream().anyMatch(ts -> ts.getIdx() == indexDef.getTsIdx());
-                                    if (foundTs && indexDef.getIsReady()) {
-                                        realRefCnt.getAndIncrement();
-                                    } else {
-                                        logger.info("cannot find ts col.../ not ready...");
-                                    }
-                                }
-                                // TODO(hw): if !inner_index should return false
-                            }
-                        });
-
-                        Preconditions.checkState(realRefCnt.get() > 0);
-                        dataBlockInfoBuilder.setRefCnt(realRefCnt.get());
-
-                        // TODO(hw): segment put use block id
-                        for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
-                            Integer idx = idx2key.getKey();
-                            String key = idx2key.getValue();
-                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
-                            boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
-                            if (needPut) {
-                                int segIdx = 0;
-                                if (indexInfo.getSegCnt() > 1) {
-                                    // TODO(hw): hash
-                                }
-                                // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
-                                SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
-
-                                // TODO(hw): void Segment::Put(const Slice& key, const TSDimensions& ts_dimension,
-                                //                  DataBlock* row)
-                                // v is pk, ts_dimension, data block id
-                                segment.Put(key, ts_dimensions, dataBlockId);
-                            }
+                AtomicInteger realRefCnt = new AtomicInteger();
+                // 1. if ts_dimensions is empty, we will put data into `ready Index` without checking.
+                //      But we'll check the Index whether has the ts column. Mismatch meta returns false.
+                // 2. if ts_dimensions is not empty, we will find the corresponding ts_dimensions to put data. If can't find, continue.
+                innerIndexKeyMap.forEach((k, v) -> {
+                    // TODO(hw): check idx valid
+                    TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
+                    for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
+                        //
+                        if (ts_dimensions.isEmpty() && indexDef.getTsIdx() != -1) {
+                            throw new RuntimeException("IndexStatus has the ts column, but InsertRow doesn't have ts_dimensions.");
                         }
-                    } else {
-                        // TODO(hw): 2 table->Put(request->time(), request->value(), request->dimensions());
-                        //  no ts_dimension
 
-                        AtomicInteger realRefCnt = new AtomicInteger();
-                        innerIndexKeyMap.forEach((k, v) -> {
-                            // TODO(hw): check idx valid
-                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
-                            for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
-                                // if has ts_col
-                                if (indexDef.getTsIdx() == -1) {
-                                    if (indexDef.getIsReady()) {
-                                        realRefCnt.getAndIncrement();
-                                    } else {
-                                        logger.info("cannot find ts col.../ not ready...");
-                                    }
-                                }
-                                // TODO(hw): shouldn't have ts idx
+                        if (!ts_dimensions.isEmpty()) {
+                            // just continue
+                            if (indexDef.getTsIdx() == -1 || ts_dimensions.stream().noneMatch(ts -> ts.getIdx() == indexDef.getTsIdx())) {
+                                continue;
                             }
-                        });
+                            // TODO(hw): But there may be another question.
+                            //  if we can't find here, but indexDef is ready, we may put in the next phase.
+                            //  (foundTs is not corresponding to the put index, we can't ensure that?)
+                        }
 
-                        Preconditions.checkState(realRefCnt.get() > 0);
-                        // TODO(hw): 也应该能完成才add，应该推后
-
-                        dataBlockInfoBuilder.setRefCnt(realRefCnt.get());
-
-                        for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
-                            Integer idx = idx2key.getKey();
-                            String key = idx2key.getValue();
-                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
-                            boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
-                            if (needPut) {
-                                int segIdx = 0;
-                                if (indexInfo.getSegCnt() > 1) {
-                                    // TODO(hw): hash
-                                }
-                                // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
-                                SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
-
-                                // key, time, data block id
-                                segment.Put(key, Collections.singletonList(TS.TSDimension.newBuilder().setTs(time).build()), dataBlockId);
-                            }
+                        if (indexDef.getIsReady()) {
+                            realRefCnt.incrementAndGet();
                         }
                     }
+                });
 
-                } else {
-                    // TODO(hw): 3 table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());
+                // if no ts_dimensions, it's ok to warp the current time into ts_dimensions.
+                List<TS.TSDimension> tsDimsWrap = ts_dimensions;
+                if (ts_dimensions.isEmpty()) {
+                    tsDimsWrap = Collections.singletonList(TS.TSDimension.newBuilder().setTs(time).build());
+                }
+                for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
+                    Integer idx = idx2key.getKey();
+                    String key = idx2key.getValue();
+                    TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
+                    boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
+                    if (needPut) {
+                        int segIdx = 0;
+                        if (indexInfo.getSegCnt() > 1) {
+                            // TODO(hw): hash
+                        }
+                        // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
+                        SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
 
-                    int seg_idx = 0;
-                    // TODO(hw): if mem table seg_cnt_ > 1, hash
-                    dataBlockInfoBuilder.setRefCnt(1);
-                    // TODO(hw): no set_key
-                    bulkLoadRequest.segmentDataMaps.get(0).get(seg_idx).Put(key, time, dataBlockId);
+                        // TODO(hw): void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
+                        segment.Put(key, tsDimsWrap, dataBlockId);
+                    }
                 }
 
                 // TODO(hw): if success, add data & info
-                StringBuilder sb = ;
+                StringBuilder sb = bulkLoadRequest.dataBlock;
                 String rowData = insertRow.GetRow();
-                Preconditions.checkState(sb != null);
                 int head = sb.length();
                 sb.append(rowData);
-                Preconditions.checkState(dataBlockInfoBuilder.hasRefCnt());
-                dataBlockInfoList.add(dataBlockInfoBuilder.setOffset(head).setLength(rowData.length()).build());
-
-
-//          In MemTable:
-//          1. MemTable::Put -> gene real_ref_cnt, create DataBlockInfo & DataBlockId(append to one MemTable's Data Region, returns addr, len, blockId)
-//                String data = insertRow.GetRow();
-//                StringBuilder dataHolder = dataMgr.get(tid, pid);
-//                int head = dataHolder.length();
-//                dataHolder.append(data);
-//                long id = dataBlockInfoList.size();
-//                // TODO(hw): ref cnt
-//                dataBlockInfoList.add(TS.DataBlockInfo.newBuilder().setOffset(head).setLength(data.length()).build());
-
-//                // TODO(hw): rpc message都只有c版本，没有生产java，如果保持这样，那就得往sql cluster router里灌数据，让c++那边生成data/index region。这不符合以后要用spark的逻辑。
-//                //  spark java能直接发rpc给tablet server
-
-
-////              multi-threading insert into one MemTable dataHolder: needs lock?
-////          2. find segments -> use blockId to do segment insertion
-//                // One MemTable, how many inner_index? each inner_index contains two-level skip list
-//                // like one PutRequest, TabletImpl::Put()
-//                // dimensions_size==0? ts_dimensions_size==0?有三种MemTable::Put，都需要模拟
-//
-//                // needs MemTable::table_index_
-
+                dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length());
+                dataBlockInfoList.add(dataBlockInfoBuilder.build());
+                // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
             } // One <tid, pid> Put for One Row End
         }
 
@@ -426,9 +360,8 @@ public class Main {
         //  有没有必要用java？
 
 
-        // MemTable{Segments, Data region, blockId->DataBlockInfo}
-        // so many MemTables
-        // save to files? or just a rpc request? Maybe rpc requests is better in demo.
+        // TODO(hw): so many MemTables
+        //  save to files? or just a rpc request? Maybe rpc requests is better in demo.
     }
 
     public static class SegmentDataMap {

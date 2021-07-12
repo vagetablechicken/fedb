@@ -242,6 +242,7 @@ bool MemTable::Put(const Dimensions& dimensions, const TSDimensions& ts_dimensio
         bool need_put = false;
         for (const auto& index_def : inner_index->GetIndex()) {
             if (index_def->IsReady()) {
+                // TODO(hw): if we don't find this ts(has_found_ts==false), but it's ready, will put too?
                 need_put = true;
                 break;
             }
