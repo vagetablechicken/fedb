@@ -27,14 +27,17 @@ import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
+import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -219,9 +222,9 @@ public class Main {
             e.printStackTrace();
         }
 
-        assert testTable != null;
+        Preconditions.checkNotNull(testTable, "table is null");
         long tid = testTable.getTid();
-        Table<Long, Long, StringBuilder> dataMgr = HashBasedTable.create();
+        Table<Long, Long, BulkLoadRequest> tableRequestMgr = HashBasedTable.create();
 
         List<TS.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
@@ -231,151 +234,168 @@ public class Main {
 
             // TODO(hw): 拿insertRow的dims等信息，需要改sdk swig，但java复制步骤代码量不小，还是改sdk更容易。
 
-            // SQLClusterRouter::PutRow
+            // SQLClusterRouter::ExecuteInsertRow -> SQLClusterRouter::PutRow
             DimMap dims = insertRow.GetDimensions(); // dims of pid
-            SWIGTYPE_p_std__vectorT_unsigned_long_long_t tsDims = insertRow.GetTs();
+            SWIGTYPE_p_std__vectorT_unsigned_long_long_t rowTsDims = insertRow.GetTs();
             for (Map.Entry<Long, SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t> entry : dims.entrySet()) { // TODO(hw): needs swig support
                 Long pid = entry.getKey();
                 // here has tid, pid, dimensions, ts_dimensions(maybe empty->cur_ts)
                 // TODO(hw): check if tablets[pid] existed, this row should be sent to <tid, pid>->MemTable
 
-                // TODO(hw):          if (ts_dimensions.empty()) {
+                // TODO(hw):          if (tsDims.empty()) { -> insertRow.GetTs(), not the PutRequest's ts_dimensions(it's the result of tsDims)
                 //                        ret = client->Put(tid, pid, cur_ts, row->GetRow(), kv.second, 1);
                 //                    } else {
                 //                        ret = client->Put(tid, pid, kv.second, row->GetTs(), row->GetRow(), 1);
                 //                    }
+                SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t rowDims = entry.getValue();
 
-                // TODO(hw): impl the second Put first
-                //  TabletClient::Put tid, pid, entry.GetValue(), insertRow.GetTs(), insertRow.GetRow()(means data, String type)
-                {
-                    // TODO(hw):
-                    //    ::fedb::api::PutRequest request;
-                    //    request.set_value(value);
-                    //    request.set_tid(tid);
-                    //    request.set_pid(pid);
-                    //    for (size_t i = 0; i < dimensions.size(); i++) {
-                    //        ::fedb::api::Dimension* d = request.add_dimensions();
-                    //        d->set_key(dimensions[i].first);
-                    //        d->set_idx(dimensions[i].second);
-                    //    }
-                    //    for (size_t i = 0; i < ts_dimensions.size(); i++) {
-                    //        ::fedb::api::TSDimension* d = request.add_ts_dimensions();
-                    //        d->set_ts(ts_dimensions[i]);
-                    //        d->set_idx(i);
-                    //    }
-                    //  assume that put request is here, how to insert the put request?
-                    //  TabletImpl::Put 3种可能的put
+                // TODO(hw): if(rowTsDims.isEmpty()) { time = currentTime; }
 
-                    // request.dimensions == row.dimensions == entry.GetValue()
-                    TS.PutRequest request = TS.PutRequest.newBuilder().build(); // TODO(hw): to get fake dims & ts_dims
-                    List<TS.Dimension> dimensions = request.getDimensionsList();
-                    List<TS.TSDimension> ts_dimensions = request.getTsDimensionsList();
+                // TODO(hw): to get fake dims & ts_dims
+                //  rowDims -> request.dimensions()
+                //  rowTsDims -> request.ts_dimensions() or request.time()(if rowTsDims is empty)
+                TS.PutRequest request = TS.PutRequest.newBuilder().build();
+                List<TS.Dimension> dimensions = request.getDimensionsList();
+                List<TS.TSDimension> ts_dimensions = request.getTsDimensionsList();
+                long time = request.getTime(); // may go to MemTable::Put 2 or MemTable::Put 3
 
-                    TS.BulkLoadInfoResponse indexInfo = TS.BulkLoadInfoResponse.newBuilder().build(); // TODO(hw): fake resp, request tablet server later
+                // TODO(hw): fake resp, request tablet server later
+                TS.BulkLoadInfoResponse indexInfo = TS.BulkLoadInfoResponse.newBuilder().build();
 
-                    if (!dimensions.isEmpty()) {
-                        // TODO(hw): CheckDimessionPut
-
-                        if (!ts_dimensions.isEmpty()) {
-                            // TODO(hw): 1 table->Put(request->dimensions(), request->ts_dimensions(), request->value());
-
-                            // TODO(hw): when bulk loading, cannot AddIndex().
-                            //  And MemTable::table_index_ may be modified by AddIndex()/Delete..., so we should get table_index_'s info from MemTable, to know the real status
-
-                            Map<Integer, String> innerIndexKeyMap = new HashMap<>();
-                            for (TS.Dimension dim : dimensions) {
-                                innerIndexKeyMap.put(indexInfo.getInnerIndexPos(dim.getIdx()), dim.getKey());
-                            }
-                            AtomicInteger realRefCnt = new AtomicInteger();
-                            innerIndexKeyMap.forEach((k, v) -> {
-                                // TODO(hw): check idx valid
-                                TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
-                                for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
-                                    // if has ts_col
-                                    if (indexDef.getTsIdx() != -1) {
-                                        boolean foundTs = ts_dimensions.stream().anyMatch(ts -> ts.getIdx() == indexDef.getTsIdx());
-                                        if (foundTs && indexDef.getIsReady()) {
-                                            realRefCnt.getAndIncrement();
-                                        } else {
-                                            logger.info("cannot find ts col.../ not ready...");
-                                        }
-                                    }
-                                }
-                            });
-
-                            StringBuilder sb = dataMgr.get(tid, pid);
-                            String rowData = insertRow.GetRow();
-                            Preconditions.checkState(sb != null);
-                            int head = sb.length();
-                            sb.append(rowData);
-
-                            long id = dataBlockInfoList.size();
-                            Preconditions.checkState(realRefCnt.get() > 0);
-                            dataBlockInfoList.add(TS.DataBlockInfo.newBuilder().setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length()).build());
-
-                            // TODO(hw): segment put use block id
-                            innerIndexKeyMap.forEach((k, v) -> {
-                                TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
-                                boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
-                                if (needPut) {
-                                    int segIdx = 0;
-                                    if (indexInfo.getSegCnt() > 1) {
-                                        // TODO(hw): hash
-                                    }
-                                    // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
-
-                                    // v is pk, ts_dimension, data block id
-
-                                    // TODO(hw): fake get the SegmentDataMap, needs get or default
-                                    TS.BulkLoadInfoResponse.InnerSegments.Segment segmentInfo = indexInfo.getInnerSegments(k).getSegment(segIdx);
-                                    // TODO(hw): needs Segment::ts_idx_map_ ts_idx_map array to map
-                                    Map<Integer, Integer> tsIdxMap = segmentInfo.getTsIdxMapList().stream().collect(Collectors.toMap(
-                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
-                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
-                                    int tsCnt = segmentInfo.getTsCnt();
-                                    SegmentDataMap segment = new SegmentDataMap(tsCnt);
-
-
-                                    // TODO(hw): void Segment::Put(const Slice& key, const TSDimensions& ts_dimension,
-                                    //                  DataBlock* row)
-
-                                    if (tsCnt == 1) {
-                                        if (ts_dimensions.size() == 1) {
-                                            // TODO(hw): Segment::Put(const Slice& key, uint64_t time, DataBlock* row)
-                                            //  !!! SegmentDataMap应该拥有Segment的内部元数据，不用暴露给外面
-                                            SegmentPut(key, ts_dimensions, id, tsIdxMap, segment);
-                                        } else if (!tsIdxMap.isEmpty()) {
-                                            for (TS.TSDimension curTs : ts_dimensions) {
-                                                Integer pos = tsIdxMap.get(curTs.getIdx());
-                                                if (pos != null) {
-                                                    // TODO(hw): Segment::Put(const Slice& key, uint64_t time, DataBlock* row)
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    } else {
-
-                                    }
-
-                                }
-                            });
-                        } else {
-                            // TODO(hw): 2 table->Put(request->time(), request->value(), request->dimensions());
-                            //  inner_index_key_map is needed
-                        }
-
-                    } else {
-                        // TODO(hw): 3 table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());
-                        //  Put 3 won't be used in this case. won't set pk,...
-                        Preconditions.checkState(false);
-                        // find seg_idx
-                        int seg_idx = 0;
-                        // if mem table seg_cnt_ > 1, hash
-                        long id = dataBlockInfoList.size();
-                        dataBlockInfoList.add(TS.DataBlockInfo.newBuilder().setRefCnt(1).build());
-                        // segments_[0][seg_idx]->Put()
-                    }
+                @Nullable BulkLoadRequest bulkLoadRequest = tableRequestMgr.get(tid, pid);
+                if (bulkLoadRequest == null) {
+                    bulkLoadRequest = new BulkLoadRequest(indexInfo); // built from BulkLoadInfoResponse
+                    tableRequestMgr.put(tid, pid, bulkLoadRequest);
                 }
+
+                Map<Integer, String> innerIndexKeyMap = new HashMap<>();
+                for (TS.Dimension dim : dimensions) {
+                    Preconditions.checkElementIndex(dim.getIdx(), indexInfo.getInnerIndexCount());
+                    innerIndexKeyMap.put(indexInfo.getInnerIndexPos(dim.getIdx()), dim.getKey());
+                }
+
+                // Index Region insert, only use id
+                int dataBlockId = dataBlockInfoList.size();
+                // set the dataBlockInfo's ref count when index region insertion
+                TS.DataBlockInfo.Builder dataBlockInfoBuilder = TS.DataBlockInfo.newBuilder();
+
+                // TODO(hw):
+                //  TabletClient::Put tid, pid, entry.GetValue(), insertRow.GetTs(), insertRow.GetRow()(means data, String type)
+                //  推测只会是MemTable::Put3，应该不存在dims不存在却有ts dims的情况？
+
+                if (!dimensions.isEmpty()) {
+                    // TODO(hw): CheckDimessionPut
+
+                    if (!ts_dimensions.isEmpty()) {
+                        // TODO(hw): 1 table->Put(request->dimensions(), request->ts_dimensions(), request->value());
+
+                        // TODO(hw): when bulk loading, cannot AddIndex().
+                        //  And MemTable::table_index_ may be modified by AddIndex()/Delete..., so we should get table_index_'s info from MemTable, to know the real status
+                        AtomicInteger realRefCnt = new AtomicInteger();
+                        innerIndexKeyMap.forEach((k, v) -> {
+                            // TODO(hw): check idx valid
+                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
+                            for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
+                                // if has ts_col
+                                if (indexDef.getTsIdx() != -1) {
+                                    boolean foundTs = ts_dimensions.stream().anyMatch(ts -> ts.getIdx() == indexDef.getTsIdx());
+                                    if (foundTs && indexDef.getIsReady()) {
+                                        realRefCnt.getAndIncrement();
+                                    } else {
+                                        logger.info("cannot find ts col.../ not ready...");
+                                    }
+                                }
+                                // TODO(hw): if !inner_index should return false
+                            }
+                        });
+
+                        Preconditions.checkState(realRefCnt.get() > 0);
+                        dataBlockInfoBuilder.setRefCnt(realRefCnt.get());
+
+                        // TODO(hw): segment put use block id
+                        for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
+                            Integer idx = idx2key.getKey();
+                            String key = idx2key.getValue();
+                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
+                            boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
+                            if (needPut) {
+                                int segIdx = 0;
+                                if (indexInfo.getSegCnt() > 1) {
+                                    // TODO(hw): hash
+                                }
+                                // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
+                                SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
+
+                                // TODO(hw): void Segment::Put(const Slice& key, const TSDimensions& ts_dimension,
+                                //                  DataBlock* row)
+                                // v is pk, ts_dimension, data block id
+                                segment.Put(key, ts_dimensions, dataBlockId);
+                            }
+                        }
+                    } else {
+                        // TODO(hw): 2 table->Put(request->time(), request->value(), request->dimensions());
+                        //  no ts_dimension
+
+                        AtomicInteger realRefCnt = new AtomicInteger();
+                        innerIndexKeyMap.forEach((k, v) -> {
+                            // TODO(hw): check idx valid
+                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
+                            for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
+                                // if has ts_col
+                                if (indexDef.getTsIdx() == -1) {
+                                    if (indexDef.getIsReady()) {
+                                        realRefCnt.getAndIncrement();
+                                    } else {
+                                        logger.info("cannot find ts col.../ not ready...");
+                                    }
+                                }
+                                // TODO(hw): shouldn't have ts idx
+                            }
+                        });
+
+                        Preconditions.checkState(realRefCnt.get() > 0);
+                        // TODO(hw): 也应该能完成才add，应该推后
+
+                        dataBlockInfoBuilder.setRefCnt(realRefCnt.get());
+
+                        for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
+                            Integer idx = idx2key.getKey();
+                            String key = idx2key.getValue();
+                            TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
+                            boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
+                            if (needPut) {
+                                int segIdx = 0;
+                                if (indexInfo.getSegCnt() > 1) {
+                                    // TODO(hw): hash
+                                }
+                                // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
+                                SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
+
+                                // key, time, data block id
+                                segment.Put(key, Collections.singletonList(TS.TSDimension.newBuilder().setTs(time).build()), dataBlockId);
+                            }
+                        }
+                    }
+
+                } else {
+                    // TODO(hw): 3 table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());
+
+                    int seg_idx = 0;
+                    // TODO(hw): if mem table seg_cnt_ > 1, hash
+                    dataBlockInfoBuilder.setRefCnt(1);
+                    // TODO(hw): no set_key
+                    bulkLoadRequest.segmentDataMaps.get(0).get(seg_idx).Put(key, time, dataBlockId);
+                }
+
+                // TODO(hw): if success, add data & info
+                StringBuilder sb = ;
+                String rowData = insertRow.GetRow();
+                Preconditions.checkState(sb != null);
+                int head = sb.length();
+                sb.append(rowData);
+                Preconditions.checkState(dataBlockInfoBuilder.hasRefCnt());
+                dataBlockInfoList.add(dataBlockInfoBuilder.setOffset(head).setLength(rowData.length()).build());
+
 
 //          In MemTable:
 //          1. MemTable::Put -> gene real_ref_cnt, create DataBlockInfo & DataBlockId(append to one MemTable's Data Region, returns addr, len, blockId)
@@ -399,7 +419,7 @@ public class Main {
 //
 //                // needs MemTable::table_index_
 
-            }
+            } // One <tid, pid> Put for One Row End
         }
 
         // TODO(hw): https://github.com/baidu/brpc-java/blob/master/brpc-java-examples/brpc-java-core-examples/src/main/java/com/baidu/brpc/example/standard/RpcClientTest.java
@@ -413,17 +433,20 @@ public class Main {
 
     public static class SegmentDataMap {
         // TODO(hw): id ?
-        int tsCnt;
+        final int tsCnt;
+        final Map<Integer, Integer> tsIdxMap;
         public int ONE_IDX = 0;
         public int NO_IDX = 0;
 
-        public SegmentDataMap(int tsCnt) {
+        // TODO(hw): SegmentIndexMap treeMap, can do reverse iter? comparator1, Slice::compare, comparator2, TimeComparator
+        Map<String, List<Map<Long, Integer>>> keyEntries = new TreeMap<>();
+
+        public SegmentDataMap(int tsCnt, Map<Integer, Integer> tsIdxMap) {
             this.tsCnt = tsCnt;
+            this.tsIdxMap = tsIdxMap; // could be empty
         }
 
-        Map<String, List<Map<Long, Integer>>> keyEntries = new TreeMap<>(); // TODO(hw): comparator?
-
-        void Put(String key, int idxPos, Long time, Integer id) {
+        public void Put(String key, int idxPos, Long time, Integer id) {
             List<Map<Long, Integer>> entryList = keyEntries.getOrDefault(key, new ArrayList<>());
             if (entryList.isEmpty()) {
                 for (int i = 0; i < tsCnt; i++) {
@@ -432,43 +455,62 @@ public class Main {
             }
             entryList.get(idxPos).put(time, id);
         }
+
+        public void Put(String key, List<TS.TSDimension> tsDimensions, Integer dataBlockId) {
+            if (tsDimensions.isEmpty()) {
+                return;
+            }
+            if (tsCnt == 1) {
+                if (tsDimensions.size() == 1) {
+                    Put(key, this.NO_IDX, tsDimensions.get(0).getTs(), dataBlockId);
+                } else {
+                    // tsCnt == 1 & has tsIdxMap, so tsIdxMap only has one element.
+                    Preconditions.checkArgument(tsIdxMap.size() == 1);
+                    Integer tsIdx = tsIdxMap.keySet().stream().collect(onlyElement());
+                    TS.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
+                    Put(key, this.ONE_IDX, needPutIdx.getTs(), dataBlockId);
+                }
+            } else {
+                // tsCnt != 1, KeyEntry array for one key
+
+                for (TS.TSDimension tsDimension : tsDimensions) {
+                    Integer pos = tsIdxMap.get(tsDimension.getIdx());
+                    if (pos == null) {
+                        continue;
+                    }
+                    Put(key, pos, tsDimension.getTs(), dataBlockId);
+                }
+            }
+        }
         // TODO(hw): serialize to `message Segment`
     }
 
-    // TODO(hw): index region
-    //  Table<String, Long, Integer> SegmentIndexMap treeMap, can do reverse iter? comparator1, Slice::compare, comparator2, TimeComparator
-    public void SegmentPut(String key, List<TS.TSDimension> tsDimensions, int dataBlockId, int tsCnt, Map<Integer, Integer> tsIdxMap, SegmentDataMap segment) {
-        // ts_cnt_ == 1, means don't have tsIdxMap.
-        // TODO(hw): tsIdxMap.isEmpty() -> ts_cnt_ == 1, else ts_cnt >= 1. ts_cnt_ == 1 has two situations(has map or no map). Not good.
-        if (tsCnt == 1) {
-            if (tsDimensions.size() == 1) {
-                segment.Put(key, segment.NO_IDX, tsDimensions.get(0).getTs(), dataBlockId);
-            } else {
-                // tsCnt == 1 & has tsIdxMap, so tsIdxMap only has one element.
-                Preconditions.checkArgument(tsIdxMap.size() == 1);
-                Integer tsIdx = tsIdxMap.keySet().stream().collect(onlyElement());
-                TS.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
-                segment.Put(key, segment.ONE_IDX, needPutIdx.getTs(), dataBlockId);
-            }
-        } else {
-            // TODO(hw): tsCnt != 1
+    public static class BulkLoadRequest {
+        public List<List<SegmentDataMap>> segmentDataMaps;
+        public StringBuilder dataBlock = new StringBuilder();
+        public List<TS.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
-            for (TS.TSDimension tsDimension : tsDimensions) {
-                Integer pos = tsIdxMap.get(tsDimension.getIdx());
-                if (pos == null) {
-                    continue;
-                }
-                // ((KeyEntry**)entry_arr)[pos->second]->entries.Insert(  // NOLINT
-                //                cur_ts.ts(), row);
-                // key: cur_ts.ts(), value: row->block id
-                // entries_: a KeyEntries, Slice is the key, void* is the value.
-                // entries->Get(key, entry/entry_arr) means get the entry of Slice key. So Slice key is the first key.
-                // value entry，就是一个skiplist，(KeyEntry*)entry)->entries.Insert(time, row);即可
-                // value entry_arr，entry_arr是ts_cnt_个entry，所以对ts_cnt_ != 1时，就得有个entry_arr
-
-                segment.Put(key, pos, tsDimension.getTs(), dataBlockId);
-            }
+        public BulkLoadRequest(TS.BulkLoadInfoResponse bulkLoadInfo) {
+            segmentDataMaps = new ArrayList<>();
+            bulkLoadInfo.getInnerSegmentsList().forEach(
+                    innerSegments -> {
+                        List<SegmentDataMap> segments = new ArrayList<>();
+                        innerSegments.getSegmentList().forEach(
+                                segmentInfo -> {
+                                    // ts_idx_map array to map, proto2 doesn't support map.
+                                    Map<Integer, Integer> tsIdxMap = segmentInfo.getTsIdxMapList().stream().collect(Collectors.toMap(
+                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
+                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
+                                    int tsCnt = segmentInfo.getTsCnt();
+                                    SegmentDataMap segment = new SegmentDataMap(tsCnt, tsIdxMap);
+                                    segments.add(new SegmentDataMap((segmentInfo.getTsCnt()), tsIdxMap));
+                                }
+                        );
+                        this.segmentDataMaps.add(segments);
+                    }
+            );
         }
+        // TODO(hw): serialize to TS.BulkLoadRequest
 
     }
 }
