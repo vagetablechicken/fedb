@@ -272,11 +272,13 @@ public class Main {
                     List<TS.TSDimension> ts_dimensions = request.getTsDimensionsList();
 
                     TS.BulkLoadInfoResponse indexInfo = TS.BulkLoadInfoResponse.newBuilder().build(); // TODO(hw): fake resp, request tablet server later
+
                     if (!dimensions.isEmpty()) {
                         // TODO(hw): CheckDimessionPut
 
                         if (!ts_dimensions.isEmpty()) {
                             // TODO(hw): 1 table->Put(request->dimensions(), request->ts_dimensions(), request->value());
+
                             // TODO(hw): when bulk loading, cannot AddIndex().
                             //  And MemTable::table_index_ may be modified by AddIndex()/Delete..., so we should get table_index_'s info from MemTable, to know the real status
 
@@ -303,12 +305,12 @@ public class Main {
 
                             StringBuilder sb = dataMgr.get(tid, pid);
                             String rowData = insertRow.GetRow();
-                            assert sb != null;
+                            Preconditions.checkState(sb != null);
                             int head = sb.length();
                             sb.append(rowData);
 
                             long id = dataBlockInfoList.size();
-                            // TODO(hw): realRefCnt == 0?
+                            Preconditions.checkState(realRefCnt.get() > 0);
                             dataBlockInfoList.add(TS.DataBlockInfo.newBuilder().setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length()).build());
 
                             // TODO(hw): segment put use block id
@@ -320,28 +322,28 @@ public class Main {
                                     if (indexInfo.getSegCnt() > 1) {
                                         // TODO(hw): hash
                                     }
-                                    // TODO(hw): segment[k][segIdx]->Put. In one segment, just two-level sorted array(desc)
-                                    //  only in-memory first
+                                    // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
 
                                     // v is pk, ts_dimension, data block id
-                                    // TODO(hw): needs Segment::ts_idx_map_
+
+                                    // TODO(hw): fake get the SegmentDataMap, needs get or default
                                     TS.BulkLoadInfoResponse.InnerSegments.Segment segmentInfo = indexInfo.getInnerSegments(k).getSegment(segIdx);
-                                    // ts_idx_map array to map
+                                    // TODO(hw): needs Segment::ts_idx_map_ ts_idx_map array to map
                                     Map<Integer, Integer> tsIdxMap = segmentInfo.getTsIdxMapList().stream().collect(Collectors.toMap(
                                             TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
                                             TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
                                     int tsCnt = segmentInfo.getTsCnt();
+                                    SegmentDataMap segment = new SegmentDataMap(tsCnt);
+
 
                                     // TODO(hw): void Segment::Put(const Slice& key, const TSDimensions& ts_dimension,
                                     //                  DataBlock* row)
-                                    if (ts_dimensions.isEmpty()) {
-                                        logger.info("data ts dims is empty, not return, skip this row");
-                                        return;// TODO(hw): just for debug
-                                    }
 
                                     if (tsCnt == 1) {
                                         if (ts_dimensions.size() == 1) {
                                             // TODO(hw): Segment::Put(const Slice& key, uint64_t time, DataBlock* row)
+                                            //  !!! SegmentDataMap应该拥有Segment的内部元数据，不用暴露给外面
+                                            SegmentPut(key, ts_dimensions, id, tsIdxMap, segment);
                                         } else if (!tsIdxMap.isEmpty()) {
                                             for (TS.TSDimension curTs : ts_dimensions) {
                                                 Integer pos = tsIdxMap.get(curTs.getIdx());
@@ -359,13 +361,13 @@ public class Main {
                             });
                         } else {
                             // TODO(hw): 2 table->Put(request->time(), request->value(), request->dimensions());
-                            //  inner_index_key_map is needed, calculated from ts_idx_vec
+                            //  inner_index_key_map is needed
                         }
 
                     } else {
                         // TODO(hw): 3 table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());
                         //  Put 3 won't be used in this case. won't set pk,...
-                        assert false;
+                        Preconditions.checkState(false);
                         // find seg_idx
                         int seg_idx = 0;
                         // if mem table seg_cnt_ > 1, hash
@@ -430,6 +432,7 @@ public class Main {
             }
             entryList.get(idxPos).put(time, id);
         }
+        // TODO(hw): serialize to `message Segment`
     }
 
     // TODO(hw): index region
