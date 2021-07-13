@@ -1,7 +1,7 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.fedb.ns.NS;
-import com._4paradigm.fedb.ts.TS;
+import com._4paradigm.fedb.api.API;
+import com._4paradigm.fedb.nameserver.Nameserver;
 import com._4paradigm.hybridsql.fedb.DataType;
 import com._4paradigm.hybridsql.fedb.DimMap;
 import com._4paradigm.hybridsql.fedb.SQLInsertRow;
@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
-import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,6 +41,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -115,16 +118,14 @@ public class Main {
 
 //        insertImport(X, rows, router, dbName, tableName);
 
-        // TODO(hw): What metadata does bulk load need?
-        bulkLoad(X, rows, router, dbName, tableName);
+        bulkLoadMulti(X, rows, router, dbName, tableName);
 
         long endTime = System.currentTimeMillis();
 
         long totalTime = endTime - startTime;
 
-        if (router != null) {
-            router.close();
-        }
+        router.close();
+
         logger.info("End. Total time: {} ms", totalTime);
     }
 
@@ -180,7 +181,7 @@ public class Main {
         RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
         CuratorFramework client = CuratorFrameworkFactory.newClient("172.24.4.55:6181", retryPolicy);
         client.start();
-        NS.TableInfo testTable = null;
+        Nameserver.TableInfo testTable = null;
         try {
             String tableInfoPath = "/onebox/table/db_table_data";
             List<String> tables = client.getChildren().forPath(tableInfoPath);
@@ -191,7 +192,7 @@ public class Main {
 
             for (String tableId : tables) {
                 byte[] tableInfo = client.getData().forPath(tableInfoPath + "/" + tableId);
-                NS.TableInfo info = NS.TableInfo.parseFrom(tableInfo);
+                Nameserver.TableInfo info = Nameserver.TableInfo.parseFrom(tableInfo);
                 logger.info(info.toString());
                 if (info.getName().equals(tableName)) {
                     testTable = info;
@@ -203,10 +204,10 @@ public class Main {
                 return;
             }
             // TODO(hw): test http request(proto type)
-            for (NS.TablePartition partition : testTable.getTablePartitionList()) {
+            for (Nameserver.TablePartition partition : testTable.getTablePartitionList()) {
                 logger.info("pid {}, {}", partition.getPid(), partition.getPartitionMetaList());
-                NS.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(NS.PartitionMeta::getIsLeader).collect(onlyElement());
-                TS.GetTableStatusRequest request = TS.GetTableStatusRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
+                Nameserver.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(Nameserver.PartitionMeta::getIsLeader).collect(onlyElement());
+                API.GetTableStatusRequest request = API.GetTableStatusRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
 
                 HttpClient httpClient = new HttpClient();
                 PostMethod postMethod = new PostMethod("http://" + leader.getEndpoint() + "/TabletServer/GetTableStatus");
@@ -214,7 +215,7 @@ public class Main {
                 postMethod.setRequestEntity(new ByteArrayRequestEntity(request.toByteArray()));
                 httpClient.executeMethod(postMethod);
 
-                TS.GetTableStatusResponse resp = TS.GetTableStatusResponse.parseFrom(postMethod.getResponseBodyAsStream());
+                API.GetTableStatusResponse resp = API.GetTableStatusResponse.parseFrom(postMethod.getResponseBodyAsStream());
                 logger.info("get resp: {}", resp);
             }
 
@@ -226,7 +227,7 @@ public class Main {
         long tid = testTable.getTid();
         Table<Long, Long, BulkLoadRequest> tableRequestMgr = HashBasedTable.create();
 
-        List<TS.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
+        List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
         // TODO(hw): rpc message都只有c版本，没有生产java，如果保持这样，那就得往sql cluster router里灌数据，让c++那边生成data/index region。这不符合以后要用spark的逻辑。
         //  spark java能直接发rpc给tablet server, so we send BulkLoadRequest by this process.
@@ -258,9 +259,9 @@ public class Main {
                 // TODO(hw): to get fake dims & ts_dims
                 //  rowDims -> request.dimensions()
                 //  rowTsDims -> request.ts_dimensions() or request.time()(if rowTsDims is empty)
-                TS.PutRequest request = TS.PutRequest.newBuilder().build();
-                List<TS.Dimension> dimensions = request.getDimensionsList();
-                List<TS.TSDimension> ts_dimensions = request.getTsDimensionsList();
+                API.PutRequest request = API.PutRequest.newBuilder().build();
+                List<API.Dimension> dimensions = request.getDimensionsList();
+                List<API.TSDimension> ts_dimensions = request.getTsDimensionsList();
                 long time = request.getTime(); // may go to MemTable::Put 2 or MemTable::Put 3
 
                 // TODO(hw): when bulk loading, cannot AddIndex().
@@ -268,7 +269,7 @@ public class Main {
                 //  so we should get table_index_'s info from MemTable, to know the real status.
                 //  And the status can't be changed until bulk lood finished.
                 // TODO(hw): fake resp, request tablet server later
-                TS.BulkLoadInfoResponse indexInfo = TS.BulkLoadInfoResponse.newBuilder().build();
+                API.BulkLoadInfoResponse indexInfo = API.BulkLoadInfoResponse.newBuilder().build();
 
                 @Nullable BulkLoadRequest bulkLoadRequest = tableRequestMgr.get(tid, pid);
                 if (bulkLoadRequest == null) {
@@ -277,7 +278,7 @@ public class Main {
                 }
 
                 Map<Integer, String> innerIndexKeyMap = new HashMap<>();
-                for (TS.Dimension dim : dimensions) {
+                for (API.Dimension dim : dimensions) {
                     Preconditions.checkElementIndex(dim.getIdx(), indexInfo.getInnerIndexCount());
                     innerIndexKeyMap.put(indexInfo.getInnerIndexPos(dim.getIdx()), dim.getKey());
                 }
@@ -285,7 +286,7 @@ public class Main {
                 // Index Region insert, only use id
                 int dataBlockId = dataBlockInfoList.size();
                 // set the dataBlockInfo's ref count when index region insertion
-                TS.DataBlockInfo.Builder dataBlockInfoBuilder = TS.DataBlockInfo.newBuilder();
+                API.DataBlockInfo.Builder dataBlockInfoBuilder = API.DataBlockInfo.newBuilder();
 
                 // TODO(hw): we use ExecuteInsert logic, so never call `table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());`
                 //  即，不存在dims不存在却有ts dims的情况
@@ -299,8 +300,8 @@ public class Main {
                 // 2. if ts_dimensions is not empty, we will find the corresponding ts_dimensions to put data. If can't find, continue.
                 innerIndexKeyMap.forEach((k, v) -> {
                     // TODO(hw): check idx valid
-                    TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
-                    for (TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
+                    API.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
+                    for (API.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
                         //
                         if (ts_dimensions.isEmpty() && indexDef.getTsIdx() != -1) {
                             throw new RuntimeException("IndexStatus has the ts column, but InsertRow doesn't have ts_dimensions.");
@@ -323,15 +324,15 @@ public class Main {
                 });
 
                 // if no ts_dimensions, it's ok to warp the current time into ts_dimensions.
-                List<TS.TSDimension> tsDimsWrap = ts_dimensions;
+                List<API.TSDimension> tsDimsWrap = ts_dimensions;
                 if (ts_dimensions.isEmpty()) {
-                    tsDimsWrap = Collections.singletonList(TS.TSDimension.newBuilder().setTs(time).build());
+                    tsDimsWrap = Collections.singletonList(API.TSDimension.newBuilder().setTs(time).build());
                 }
                 for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
                     Integer idx = idx2key.getKey();
                     String key = idx2key.getValue();
-                    TS.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
-                    boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(TS.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
+                    API.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
+                    boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(API.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
                     if (needPut) {
                         int segIdx = 0;
                         if (indexInfo.getSegCnt() > 1) {
@@ -364,6 +365,90 @@ public class Main {
         //  save to files? or just a rpc request? Maybe rpc requests is better in demo.
     }
 
+    // TODO(hw): 流程优先，所以先假设可以开MemTable个线程，分别负责。之后再考虑线程数有限的情况。
+    private static void bulkLoadMulti(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
+        // MemTable.size() threads BulkLoadGenerator
+
+        logger.info("query zk for table meta data");
+        RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
+        CuratorFramework client = CuratorFrameworkFactory.newClient("172.24.4.55:6181", retryPolicy);
+        client.start();
+        Nameserver.TableInfo testTable = null;
+        try {
+            String tableInfoPath = "/onebox/table/db_table_data";
+            List<String> tables = client.getChildren().forPath(tableInfoPath);
+            Preconditions.checkNotNull(tables, "zk path {} get child failed.", tableInfoPath);
+
+            for (String tableId : tables) {
+                byte[] tableInfo = client.getData().forPath(tableInfoPath + "/" + tableId);
+                Nameserver.TableInfo info = Nameserver.TableInfo.parseFrom(tableInfo);
+                logger.info(info.toString());
+                if (info.getName().equals(tableName)) {
+                    testTable = info;
+                }
+            }
+            Preconditions.checkNotNull(testTable, "no table info of table {}", tableName);
+
+            for (Nameserver.TablePartition partition : testTable.getTablePartitionList()) {
+                logger.info("pid {}, {}", partition.getPid(), partition.getPartitionMetaList());
+                Nameserver.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(Nameserver.PartitionMeta::getIsLeader).collect(onlyElement());
+                API.GetTableStatusRequest request = API.GetTableStatusRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
+
+                HttpClient httpClient = new HttpClient();
+                PostMethod postMethod = new PostMethod("http://" + leader.getEndpoint() + "/TabletServer/GetTableStatus");
+                postMethod.addRequestHeader("Content-Type", "application/proto;charset=utf-8");
+                postMethod.setRequestEntity(new ByteArrayRequestEntity(request.toByteArray()));
+                httpClient.executeMethod(postMethod);
+
+                API.GetTableStatusResponse resp = API.GetTableStatusResponse.parseFrom(postMethod.getResponseBodyAsStream());
+                logger.info("get resp: {}", resp);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+
+        List<Thread> threads = new ArrayList<>();
+        Map<Integer, BulkLoadGenerator> generators = new HashMap<>();
+        testTable.getTablePartitionList().forEach(tablePartition -> {
+            BulkLoadGenerator generator = new BulkLoadGenerator(tablePartition.getPid());
+            generators.put(tablePartition.getPid(), generator);
+            threads.add(new Thread(generator));
+        });
+
+
+        StringBuilder builder = new StringBuilder("insert into " + tableName + " values(");
+        CSVRecord peekRecord = rows.get(0);
+        for (int i = 0; i < peekRecord.size(); ++i) {
+            builder.append((i == 0) ? "?" : ",?");
+        }
+        builder.append(");");
+        String insertPlaceHolder = builder.toString();
+        for (CSVRecord row : rows) {
+            SQLInsertRow insertRow = router.getInsertRow(dbName, insertPlaceHolder);
+            // TODO(hw): fulfill insertRow
+
+            // TODO(hw): 拿insertRow的dims等信息，需要改sdk swig，但java复制步骤代码量不小，还是改sdk更容易。
+
+            // SQLClusterRouter::ExecuteInsertRow -> SQLClusterRouter::PutRow
+            DimMap dims = insertRow.GetDimensions(); // dims of pid
+            SWIGTYPE_p_std__vectorT_unsigned_long_long_t rowTsDims = insertRow.GetTs();
+            for (Map.Entry<Long, SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t> entry : dims.entrySet()) { // TODO(hw): needs swig support
+                Long pid = entry.getKey();
+                try {
+                    // nameserver pid is int
+                    generators.get(pid.intValue()).feed(insertRow);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    logger.error("feed error, skip this row or retry, or fail all?");
+                }
+            }
+        }
+
+
+    }
+
     public static class SegmentDataMap {
         // TODO(hw): id ?
         final int tsCnt;
@@ -389,7 +474,7 @@ public class Main {
             entryList.get(idxPos).put(time, id);
         }
 
-        public void Put(String key, List<TS.TSDimension> tsDimensions, Integer dataBlockId) {
+        public void Put(String key, List<API.TSDimension> tsDimensions, Integer dataBlockId) {
             if (tsDimensions.isEmpty()) {
                 return;
             }
@@ -400,13 +485,13 @@ public class Main {
                     // tsCnt == 1 & has tsIdxMap, so tsIdxMap only has one element.
                     Preconditions.checkArgument(tsIdxMap.size() == 1);
                     Integer tsIdx = tsIdxMap.keySet().stream().collect(onlyElement());
-                    TS.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
+                    API.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
                     Put(key, this.ONE_IDX, needPutIdx.getTs(), dataBlockId);
                 }
             } else {
                 // tsCnt != 1, KeyEntry array for one key
 
-                for (TS.TSDimension tsDimension : tsDimensions) {
+                for (API.TSDimension tsDimension : tsDimensions) {
                     Integer pos = tsIdxMap.get(tsDimension.getIdx());
                     if (pos == null) {
                         continue;
@@ -421,9 +506,9 @@ public class Main {
     public static class BulkLoadRequest {
         public List<List<SegmentDataMap>> segmentDataMaps;
         public StringBuilder dataBlock = new StringBuilder();
-        public List<TS.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
+        public List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
-        public BulkLoadRequest(TS.BulkLoadInfoResponse bulkLoadInfo) {
+        public BulkLoadRequest(API.BulkLoadInfoResponse bulkLoadInfo) {
             segmentDataMaps = new ArrayList<>();
             bulkLoadInfo.getInnerSegmentsList().forEach(
                     innerSegments -> {
@@ -432,8 +517,8 @@ public class Main {
                                 segmentInfo -> {
                                     // ts_idx_map array to map, proto2 doesn't support map.
                                     Map<Integer, Integer> tsIdxMap = segmentInfo.getTsIdxMapList().stream().collect(Collectors.toMap(
-                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
-                                            TS.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
+                                            API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
+                                            API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
                                     int tsCnt = segmentInfo.getTsCnt();
                                     SegmentDataMap segment = new SegmentDataMap(tsCnt, tsIdxMap);
                                     segments.add(new SegmentDataMap((segmentInfo.getTsCnt()), tsIdxMap));
@@ -443,8 +528,46 @@ public class Main {
                     }
             );
         }
-        // TODO(hw): serialize to TS.BulkLoadRequest
+        // TODO(hw): serialize to API.BulkLoadRequest
 
+    }
+}
+
+class BulkLoadGenerator implements Runnable {
+    private static final Logger logger = LoggerFactory.getLogger(BulkLoadGenerator.class);
+    private final int pid;
+    private final BlockingQueue<SQLInsertRow> queue;
+    private final long pollTimeout;
+    private AtomicBoolean shutdown = new AtomicBoolean(false);
+
+    public BulkLoadGenerator(int pid) {
+        this.pid = pid;
+        this.queue = new ArrayBlockingQueue<SQLInsertRow>(1000);
+        this.pollTimeout = 100;
+    }
+
+    @Override
+    public void run() {
+        logger.info("Thread {} for MemTable(pid {})", Thread.currentThread().getId(), pid);
+        try {
+            // TODO(hw): exit statement - shutdown and no element in queue
+            while (!shutdown.get()) {
+                SQLInsertRow row = this.queue.poll(this.pollTimeout, TimeUnit.MILLISECONDS);
+                if (row != null) {
+
+                }
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void feed(SQLInsertRow row) throws InterruptedException {
+        this.queue.put(row); // blocking put
+    }
+
+    public void shutDown() {
+        this.shutdown.set(true);
     }
 }
 

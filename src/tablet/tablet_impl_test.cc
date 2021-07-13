@@ -5634,7 +5634,7 @@ TEST_F(TabletImplTest, BulkLoad) {
         request.set_pid(1);
         auto index1 = request.add_index_region();
         auto seg1 = index1->add_segment();
-        seg1->add_key_entry()->add_time_entry();
+        seg1->add_key_entries()->add_key_entry()->add_time_entry();
         request.add_index_region();
         ::fedb::api::GeneralResponse response;
         MockClosure closure;

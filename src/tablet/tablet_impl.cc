@@ -4839,20 +4839,24 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
             const auto& inner_index = indexes.Get(i);
             for (int j = 0; j < inner_index.segment_size(); ++j) {
                 const auto& segment_index = inner_index.segment(j);
-                for (int key_idx = 0; key_idx < segment_index.key_entry_size(); ++key_idx) {
-                    const auto& key_entry = segment_index.key_entry(key_idx);
-                    const auto& pk = key_entry.key();
-                    for (int time_idx = 0; time_idx < key_entry.time_entry_size(); ++time_idx) {
-                        const auto& time_entry = key_entry.time_entry(time_idx);
-                        auto* block =
-                            time_entry.block_id() < data_blocks.size() ? data_blocks[time_entry.block_id()] : nullptr;
+                for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
+                    const auto& key_entries = segment_index.key_entries(key_idx);
+                    const auto& pk = key_entries.key();
+                    for (int key_entry_idx = 0; key_entry_idx < key_entries.key_entry_size(); ++key_entry_idx) {
+                        const auto& key_entry = key_entries.key_entry(key_entry_idx);
+                        for (int time_idx = 0; time_idx < key_entry.time_entry_size(); ++time_idx) {
+                            const auto& time_entry = key_entry.time_entry(time_idx);
+                            auto* block = time_entry.block_id() < data_blocks.size()
+                                              ? data_blocks[time_entry.block_id()]
+                                              : nullptr;
 
-                        ::fedb::api::LogEntry entry;
-                        entry.set_pk(pk);
-                        entry.set_ts(time_entry.time());
-                        entry.set_value(block->data, block->size);
-                        entry.set_term(replicator->GetLeaderTerm());
-                        replicator->AppendEntry(entry);
+                            ::fedb::api::LogEntry entry;
+                            entry.set_pk(pk);
+                            entry.set_ts(time_entry.time());
+                            entry.set_value(block->data, block->size);
+                            entry.set_term(replicator->GetLeaderTerm());
+                            replicator->AppendEntry(entry);
+                        }
                     }
                 }
             }
