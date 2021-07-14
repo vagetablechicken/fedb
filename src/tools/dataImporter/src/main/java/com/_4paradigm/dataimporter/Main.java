@@ -4,10 +4,11 @@ import com._4paradigm.fedb.api.API;
 import com._4paradigm.fedb.nameserver.Nameserver;
 import com._4paradigm.hybridsql.fedb.DataType;
 import com._4paradigm.hybridsql.fedb.DimMap;
+import com._4paradigm.hybridsql.fedb.PairStrInt;
 import com._4paradigm.hybridsql.fedb.SQLInsertRow;
-import com._4paradigm.hybridsql.fedb.SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t;
-import com._4paradigm.hybridsql.fedb.SWIGTYPE_p_std__vectorT_unsigned_long_long_t;
 import com._4paradigm.hybridsql.fedb.Schema;
+import com._4paradigm.hybridsql.fedb.VectorPairStrInt;
+import com._4paradigm.hybridsql.fedb.VectorUint64;
 import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
 import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
 import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
@@ -40,6 +41,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -241,8 +243,8 @@ public class Main {
 
             // SQLClusterRouter::ExecuteInsertRow -> SQLClusterRouter::PutRow
             DimMap dims = insertRow.GetDimensions(); // dims of pid
-            SWIGTYPE_p_std__vectorT_unsigned_long_long_t rowTsDims = insertRow.GetTs();
-            for (Map.Entry<Long, SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t> entry : dims.entrySet()) { // TODO(hw): needs swig support
+            VectorUint64 rowTsDims = insertRow.GetTs();
+            for (Map.Entry<Long, VectorPairStrInt> entry : dims.entrySet()) { // TODO(hw): needs swig support
                 Long pid = entry.getKey();
                 // here has tid, pid, dimensions, ts_dimensions(maybe empty->cur_ts)
                 // TODO(hw): check if tablets[pid] existed, this row should be sent to <tid, pid>->MemTable
@@ -252,7 +254,7 @@ public class Main {
                 //                    } else {
                 //                        ret = client->Put(tid, pid, kv.second, row->GetTs(), row->GetRow(), 1);
                 //                    }
-                SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t rowDims = entry.getValue();
+                VectorPairStrInt rowDims = entry.getValue();
 
                 // TODO(hw): if(rowTsDims.isEmpty()) { time = currentTime; }
 
@@ -398,6 +400,7 @@ public class Main {
                 PostMethod postMethod = new PostMethod("http://" + leader.getEndpoint() + "/TabletServer/GetTableStatus");
                 postMethod.addRequestHeader("Content-Type", "application/proto;charset=utf-8");
                 postMethod.setRequestEntity(new ByteArrayRequestEntity(request.toByteArray()));
+                // TODO(hw): how to add attachment? http/h2协议中附件对应message body，没有request attachment的位置了。。。只呢用brpc-java版？
                 httpClient.executeMethod(postMethod);
 
                 API.GetTableStatusResponse resp = API.GetTableStatusResponse.parseFrom(postMethod.getResponseBodyAsStream());
@@ -408,15 +411,24 @@ public class Main {
             e.printStackTrace();
             return;
         }
+        // When bulk loading, cannot AddIndex().
+        //  And MemTable::table_index_ may be modified by AddIndex()/Delete...,
+        //  so we should get table_index_'s info from MemTable, to know the real status.
+        //  And the status can't be changed until bulk lood finished.
+
+        // TODO(hw): fake resp, request tablet server later!!
+        API.BulkLoadInfoResponse indexInfo = API.BulkLoadInfoResponse.newBuilder().build();
 
         List<Thread> threads = new ArrayList<>();
         Map<Integer, BulkLoadGenerator> generators = new HashMap<>();
         testTable.getTablePartitionList().forEach(tablePartition -> {
-            BulkLoadGenerator generator = new BulkLoadGenerator(tablePartition.getPid());
+            Nameserver.PartitionMeta partitionLeader = tablePartition.getPartitionMetaList().stream().filter(Nameserver.PartitionMeta::getIsLeader).collect(onlyElement());
+
+            BulkLoadGenerator generator = new BulkLoadGenerator(tablePartition.getPid(), indexInfo, partitionLeader.getEndpoint());
             generators.put(tablePartition.getPid(), generator);
             threads.add(new Thread(generator));
         });
-
+        logger.info("create {} generators", generators.size());
 
         StringBuilder builder = new StringBuilder("insert into " + tableName + " values(");
         CSVRecord peekRecord = rows.get(0);
@@ -425,20 +437,42 @@ public class Main {
         }
         builder.append(");");
         String insertPlaceHolder = builder.toString();
-        for (CSVRecord row : rows) {
-            SQLInsertRow insertRow = router.getInsertRow(dbName, insertPlaceHolder);
-            // TODO(hw): fulfill insertRow
+        // Try get one insert row to generate stringCols
+        SQLInsertRow insertRowTmp = router.getInsertRow(dbName, insertPlaceHolder);
+        Preconditions.checkNotNull(insertRowTmp);
+        Schema schema = insertRowTmp.GetSchema();
+        List<String> stringCols = InsertImporter.getStringColumnsFromSchema(schema);
 
-            // TODO(hw): 拿insertRow的dims等信息，需要改sdk swig，但java复制步骤代码量不小，还是改sdk更容易。
+        for (CSVRecord record : rows) {
+            SQLInsertRow row = router.getInsertRow(dbName, insertPlaceHolder);
+
+            // TODO(hw): fulfill insertRow
+//            logger.info("{}", record.getParser().getHeaderMap());
+            int strLength = stringCols.stream().mapToInt(col -> record.get(col).length()).sum();
+            row.Init(strLength);
+
+            boolean rowIsValid = true;
+            for (int j = 0; j < schema.GetColumnCnt(); j++) {
+                String v = record.get(schema.GetColumnName(j));
+                DataType type = schema.GetColumnType(j);
+                if (!InsertImporter.appendToRow(v, type, row)) {
+                    logger.warn("append to row failed, can't insert");
+                    rowIsValid = false;
+                    break;
+                }
+            }
+            if (!rowIsValid || !row.Build()) {
+                // TODO(hw): How to handle one invalid row?
+                logger.error("invalid row, exit for simplicity");
+                return;
+            }
 
             // SQLClusterRouter::ExecuteInsertRow -> SQLClusterRouter::PutRow
-            DimMap dims = insertRow.GetDimensions(); // dims of pid
-            SWIGTYPE_p_std__vectorT_unsigned_long_long_t rowTsDims = insertRow.GetTs();
-            for (Map.Entry<Long, SWIGTYPE_p_std__vectorT_std__pairT_std__string_unsigned_int_t_t> entry : dims.entrySet()) { // TODO(hw): needs swig support
-                Long pid = entry.getKey();
+            DimMap dims = row.GetDimensions(); // dims of pid
+            for (Long pid : dims.keySet()) {
                 try {
                     // nameserver pid is int
-                    generators.get(pid.intValue()).feed(insertRow);
+                    generators.get(pid.intValue()).feed(row);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                     logger.error("feed error, skip this row or retry, or fail all?");
@@ -446,7 +480,29 @@ public class Main {
             }
         }
 
+        generators.forEach((integer, bulkLoadGenerator) -> bulkLoadGenerator.shutDown());
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
 
+        if (generators.values().stream().anyMatch(BulkLoadGenerator::hasInternalError)) {
+            logger.error("BulkLoad failed...");
+            return;
+        }
+
+        // TODO(hw): rpc send, multi thread send?
+        generators.values().forEach(bulkLoadGenerator -> {
+            if (!bulkLoadGenerator.sendRequest()) {
+                logger.error("send bulk load request error.");
+            }
+        });
+
+        // TODO(hw): get statistics from generators
+        logger.info("BulkLoad finished.");
     }
 
     public static class SegmentDataMap {
@@ -510,6 +566,7 @@ public class Main {
 
         public BulkLoadRequest(API.BulkLoadInfoResponse bulkLoadInfo) {
             segmentDataMaps = new ArrayList<>();
+
             bulkLoadInfo.getInnerSegmentsList().forEach(
                     innerSegments -> {
                         List<SegmentDataMap> segments = new ArrayList<>();
@@ -531,6 +588,15 @@ public class Main {
         // TODO(hw): serialize to API.BulkLoadRequest
 
     }
+
+    // TODO(hw): murmurhash2 java version
+    static long hash(String key, long seed) {
+        long m = 0x5bd1e995;
+        long r = 24;
+        long len = key.length();
+        long h = seed ^ len;
+        return h;
+    }
 }
 
 class BulkLoadGenerator implements Runnable {
@@ -539,21 +605,122 @@ class BulkLoadGenerator implements Runnable {
     private final BlockingQueue<SQLInsertRow> queue;
     private final long pollTimeout;
     private AtomicBoolean shutdown = new AtomicBoolean(false);
+    private boolean internalErrorOcc = false;
+    private final API.BulkLoadInfoResponse indexInfo; // TODO(hw): not a good name
+    private final Main.BulkLoadRequest bulkLoadRequest;
+    private final List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
+    private final String endpoint;
 
-    public BulkLoadGenerator(int pid) {
+    public BulkLoadGenerator(int pid, API.BulkLoadInfoResponse indexInfo, String endpoint) {
         this.pid = pid;
         this.queue = new ArrayBlockingQueue<SQLInsertRow>(1000);
         this.pollTimeout = 100;
+        this.indexInfo = indexInfo;
+        this.bulkLoadRequest = new Main.BulkLoadRequest(indexInfo); // built from BulkLoadInfoResponse
+        this.endpoint = endpoint;
     }
 
     @Override
     public void run() {
         logger.info("Thread {} for MemTable(pid {})", Thread.currentThread().getId(), pid);
         try {
-            // TODO(hw): exit statement - shutdown and no element in queue
-            while (!shutdown.get()) {
+            // exit statement: shutdown and no element in queue, or internal exit
+            while (!shutdown.get() || !this.queue.isEmpty()) {
                 SQLInsertRow row = this.queue.poll(this.pollTimeout, TimeUnit.MILLISECONDS);
                 if (row != null) {
+                    // TODO(hw): get dims by pid, needs swig support
+                    //  拿insertRow的dims等信息，需要改sdk swig，但java复制步骤代码量不小，还是改sdk更容易。
+                    VectorPairStrInt dimensions = row.GetDimensions().get((long) this.pid);
+                    // tsDimensions[idx] = ts, we convert it to API.TSDimensions for simplicity
+                    VectorUint64 tsDimVec = row.GetTs();
+                    List<API.TSDimension> tsDimensions = new ArrayList<>();
+                    for (int i = 0; i < tsDimVec.size(); i++) {
+                        tsDimensions.add(API.TSDimension.newBuilder().setIdx(i).setTs(tsDimVec.get(i)).build());
+                    }
+                    long time = System.currentTimeMillis();
+
+                    Map<Integer, String> innerIndexKeyMap = new HashMap<>();
+                    // PairStrInt: str-key, int-idx. == message Dimension
+                    for (PairStrInt dim : dimensions) {
+                        String key = dim.getFirst();
+                        long idx = dim.getSecond();
+                        // TODO(hw): idx is uint32, but info size is int
+                        Preconditions.checkElementIndex((int) idx, indexInfo.getInnerIndexCount());
+                        innerIndexKeyMap.put(indexInfo.getInnerIndexPos((int) idx), key);
+                    }
+
+                    // Index Region insert, only use id
+                    int dataBlockId = dataBlockInfoList.size();
+                    // set the dataBlockInfo's ref count when index region insertion
+                    API.DataBlockInfo.Builder dataBlockInfoBuilder = API.DataBlockInfo.newBuilder();
+
+                    // TODO(hw): we use ExecuteInsert logic, so never call `table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());`
+                    //  即，不存在dims不存在却有ts dims的情况
+                    Preconditions.checkState(!dimensions.isEmpty());
+
+                    // TODO(hw): CheckDimessionPut
+
+                    AtomicInteger realRefCnt = new AtomicInteger();
+                    // 1. if tsDimensions is empty, we will put data into `ready Index` without checking.
+                    //      But we'll check the Index whether has the ts column. Mismatch meta returns false.
+                    // 2. if tsDimensions is not empty, we will find the corresponding tsDimensions to put data. If can't find, continue.
+                    innerIndexKeyMap.forEach((k, v) -> {
+                        // TODO(hw): check idx valid
+                        API.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(k);
+                        for (API.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
+                            //
+                            if (tsDimensions.isEmpty() && indexDef.getTsIdx() != -1) {
+                                throw new RuntimeException("IndexStatus has the ts column, but InsertRow doesn't have tsDimensions.");
+                            }
+
+                            if (!tsDimensions.isEmpty()) {
+                                // just continue
+                                if (indexDef.getTsIdx() == -1 || tsDimensions.stream().noneMatch(ts -> ts.getIdx() == indexDef.getTsIdx())) {
+                                    continue;
+                                }
+                                // TODO(hw): But there may be another question.
+                                //  if we can't find here, but indexDef is ready, we may put in the next phase.
+                                //  (foundTs is not corresponding to the put index, we can't ensure that?)
+                            }
+
+                            if (indexDef.getIsReady()) {
+                                realRefCnt.incrementAndGet();
+                            }
+                        }
+                    });
+
+                    // if no tsDimensions, it's ok to warp the current time into tsDimensions.
+                    List<API.TSDimension> tsDimsWrap = tsDimensions;
+                    if (tsDimensions.isEmpty()) {
+                        tsDimsWrap = Collections.singletonList(API.TSDimension.newBuilder().setTs(time).build());
+                    }
+                    for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
+                        Integer idx = idx2key.getKey();
+                        String key = idx2key.getValue();
+                        API.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
+                        boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(API.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
+                        if (needPut) {
+                            int segIdx = 0;
+                            if (indexInfo.getSegCnt() > 1) {
+                                // TODO(hw): hash, use random here util java hash finished.
+                                segIdx = new Random().nextInt();
+                            }
+                            // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
+                            Main.SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
+
+                            // void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
+                            segment.Put(key, tsDimsWrap, dataBlockId);
+                        }
+                    }
+
+                    // TODO(hw): if success, add data & info
+                    StringBuilder sb = bulkLoadRequest.dataBlock;
+                    String rowData = row.GetRow();
+                    int head = sb.length();
+                    sb.append(rowData);
+                    dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length());
+                    dataBlockInfoList.add(dataBlockInfoBuilder.build());
+                    // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
 
                 }
             }
@@ -568,6 +735,15 @@ class BulkLoadGenerator implements Runnable {
 
     public void shutDown() {
         this.shutdown.set(true);
+    }
+
+    public boolean hasInternalError() {
+        return internalErrorOcc;
+    }
+
+    public boolean sendRequest() {
+        // TODO(hw): request -> pb
+        // TODO(hw): send rpc
     }
 }
 
@@ -611,12 +787,7 @@ class InsertImporter implements Runnable {
 
         // TODO(hw): record.getParser().getHeaderMap() check schema? In future, we may read multi files, so check schema in each worker.
         // What if the header of record is missing?
-        List<String> stringCols = new ArrayList<>();
-        for (int i = 0; i < schema.GetColumnCnt(); i++) {
-            if (schema.GetColumnType(i) == DataType.kTypeString) {
-                stringCols.add(schema.GetColumnName(i));
-            }
-        }
+        List<String> stringCols = getStringColumnsFromSchema(schema);
         for (int i = range.getLeft(); i < range.getRight(); i++) {
             // insert placeholder
             SQLInsertRow row = router.getInsertRow(dbName, insertPlaceHolder);
@@ -641,7 +812,18 @@ class InsertImporter implements Runnable {
         }
     }
 
-    public boolean appendToRow(String v, DataType type, SQLInsertRow row) {
+    public static List<String> getStringColumnsFromSchema(Schema schema) {
+        List<String> stringCols = new ArrayList<>();
+        for (int i = 0; i < schema.GetColumnCnt(); i++) {
+            if (schema.GetColumnType(i) == DataType.kTypeString) {
+                // TODO(hw): what if data don't have column names?
+                stringCols.add(schema.GetColumnName(i));
+            }
+        }
+        return stringCols;
+    }
+
+    public static boolean appendToRow(String v, DataType type, SQLInsertRow row) {
         // TODO(hw): true/false case sensitive? is null?
         // csv isSet?
         if (DataType.kTypeBool.equals(type)) {
