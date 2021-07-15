@@ -167,6 +167,7 @@ void Segment::Put(const Slice& key, uint64_t time, DataBlock* row) {
     if (ts_cnt_ > 1) {
         return;
     }
+    LOG(INFO) << "Segment::Put";
     void* entry = NULL;
     uint32_t byte_size = 0;
     std::lock_guard<std::mutex> lock(mu_);

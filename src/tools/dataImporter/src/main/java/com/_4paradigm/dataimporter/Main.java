@@ -42,13 +42,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -58,6 +58,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.google.common.collect.MoreCollectors.onlyElement;
+import static com.google.protobuf.ByteString.copyFromUtf8;
 
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
@@ -112,6 +113,7 @@ public class Main {
             if (!ok) {
                 throw new RuntimeException("recreate table " + tableName + " failed");
             }
+
         } catch (Exception e) {
             logger.warn(e.getMessage());
             return;
@@ -125,9 +127,9 @@ public class Main {
         logger.info("rows {}, peek {}", rows.size(), rows.isEmpty() ? "" : rows.get(0).toString());
         long startTime = System.currentTimeMillis();
 
-//        insertImport(X, rows, router, dbName, tableName);
+        insertImport(X, rows, router, dbName, tableName);
 
-        bulkLoadMulti(X, rows, router, dbName, tableName);
+//        bulkLoadMulti(X, rows, router, dbName, tableName);
 
         long endTime = System.currentTimeMillis();
 
@@ -148,7 +150,6 @@ public class Main {
             start = start + rangeLen;
         }
         logger.info("ranges: {}", ranges);
-
 
         // We can ensure that the schema is match.
         List<Thread> threads = new ArrayList<>();
@@ -346,9 +347,10 @@ public class Main {
                         int segIdx = 0;
                         if (indexInfo.getSegCnt() > 1) {
                             // TODO(hw): hash
+
                         }
                         // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
-                        SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
+                        SegmentIndexRegion segment = bulkLoadRequest.segmentDataMatrix.get(idx).get(segIdx);
 
                         // TODO(hw): void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
                         segment.Put(key, tsDimsWrap, dataBlockId);
@@ -406,7 +408,7 @@ public class Main {
             //  so we should get table_index_'s info from MemTable, to know the real status.
             //  And the status can't be changed until bulk lood finished.
             for (Nameserver.TablePartition partition : testTable.getTablePartitionList()) {
-                logger.info("pid {}, {}", partition.getPid(), partition.getPartitionMetaList());
+                logger.info("tid-pid {}-{}, {}", testTable.getTid(), partition.getPid(), partition.getPartitionMetaList());
                 Nameserver.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(Nameserver.PartitionMeta::getIsLeader).collect(onlyElement());
 
                 //  http/h2 can't add attachment, cuz it use attachment to pass message. So we need to use brpc-java
@@ -438,7 +440,8 @@ public class Main {
             return;
         }
 
-        logger.info("create {} generators", generators.size());
+        logger.info("create {} generators, start bulk load.", generators.size());
+        threads.forEach(Thread::start);
 
         StringBuilder builder = new StringBuilder("insert into " + tableName + " values(");
         CSVRecord peekRecord = rows.get(0);
@@ -508,7 +511,7 @@ public class Main {
         logger.info("BulkLoad finished.");
     }
 
-    public static class SegmentDataMap {
+    public static class SegmentIndexRegion {
         // TODO(hw): id ?
         final int tsCnt;
         final Map<Integer, Integer> tsIdxMap;
@@ -518,7 +521,7 @@ public class Main {
         // TODO(hw): SegmentIndexMap treeMap, can do reverse iter? comparator1, Slice::compare, comparator2, TimeComparator
         Map<String, List<Map<Long, Integer>>> keyEntries = new TreeMap<>();
 
-        public SegmentDataMap(int tsCnt, Map<Integer, Integer> tsIdxMap) {
+        public SegmentIndexRegion(int tsCnt, Map<Integer, Integer> tsIdxMap) {
             this.tsCnt = tsCnt;
             this.tsIdxMap = tsIdxMap; // possibly empty
         }
@@ -529,8 +532,10 @@ public class Main {
                 for (int i = 0; i < tsCnt; i++) {
                     entryList.add(new TreeMap<>());// TODO(hw): comparator?
                 }
+                keyEntries.put(key, entryList);
             }
             entryList.get(idxPos).put(time, id);
+//            logger.info("after put keyEntries: {}", keyEntries.toString());
         }
 
         public void Put(String key, List<API.TSDimension> tsDimensions, Integer dataBlockId) {
@@ -549,7 +554,6 @@ public class Main {
                 }
             } else {
                 // tsCnt != 1, KeyEntry array for one key
-
                 for (API.TSDimension tsDimension : tsDimensions) {
                     Integer pos = tsIdxMap.get(tsDimension.getIdx());
                     if (pos == null) {
@@ -560,27 +564,36 @@ public class Main {
             }
         }
 
-        // TODO(hw): serialize to `message Segment`
+        // serialize to `message Segment`
         public API.Segment toProtobuf() {
             API.Segment.Builder builder = API.Segment.newBuilder();
-
-
+            keyEntries.forEach((key, keyEntry) -> {
+                API.Segment.KeyEntries.Builder keyEntriesBuilder = builder.addKeyEntriesBuilder();
+                keyEntriesBuilder.setKey(copyFromUtf8(key));
+                keyEntry.forEach(timeEntries -> {
+                    API.Segment.KeyEntries.KeyEntry.Builder keyEntryBuilder = keyEntriesBuilder.addKeyEntryBuilder();
+                    timeEntries.forEach((time, blockId) -> {
+                        API.Segment.KeyEntries.KeyEntry.TimeEntry.Builder timeEntryBuilder = keyEntryBuilder.addTimeEntryBuilder();
+                        timeEntryBuilder.setTime(time).setBlockId(blockId);
+                    });
+                });
+            });
             return builder.build();
         }
     }
 
     public static class BulkLoadRequest {
         // TODO(hw): private members below
-        public List<List<SegmentDataMap>> segmentDataMaps;
+        public List<List<SegmentIndexRegion>> segmentDataMatrix;
         public ByteArrayOutputStream dataBlock = new ByteArrayOutputStream();
         public List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
         public BulkLoadRequest(API.BulkLoadInfoResponse bulkLoadInfo) {
-            segmentDataMaps = new ArrayList<>();
+            segmentDataMatrix = new ArrayList<>();
 
             bulkLoadInfo.getInnerSegmentsList().forEach(
                     innerSegments -> {
-                        List<SegmentDataMap> segments = new ArrayList<>();
+                        List<SegmentIndexRegion> segments = new ArrayList<>();
                         innerSegments.getSegmentList().forEach(
                                 segmentInfo -> {
                                     // ts_idx_map array to map, proto2 doesn't support map.
@@ -588,11 +601,12 @@ public class Main {
                                             API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
                                             API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
                                     int tsCnt = segmentInfo.getTsCnt();
-                                    SegmentDataMap segment = new SegmentDataMap(tsCnt, tsIdxMap);
-                                    segments.add(new SegmentDataMap((segmentInfo.getTsCnt()), tsIdxMap));
+                                    logger.info("tsCnt is {}", tsCnt);
+                                    SegmentIndexRegion segment = new SegmentIndexRegion(tsCnt, tsIdxMap);
+                                    segments.add(new SegmentIndexRegion((segmentInfo.getTsCnt()), tsIdxMap));
                                 }
                         );
-                        this.segmentDataMaps.add(segments);
+                        this.segmentDataMatrix.add(segments);
                     }
             );
         }
@@ -602,9 +616,10 @@ public class Main {
             requestBuilder.setTid(tid).setPid(pid);
 
             // segmentDataMaps -> BulkLoadIndex
-            segmentDataMaps.forEach(segmentDataMap -> {
+            segmentDataMatrix.forEach(segmentDataMap -> {
                 API.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
-//                bulkLoadIndexBuilder.setInnerIndexId() need?
+//                // TODO(hw):
+//                bulkLoadIndexBuilder.setInnerIndexId();
                 segmentDataMap.forEach(segment -> {
                     bulkLoadIndexBuilder.addSegment(segment.toProtobuf());
                 });
@@ -616,18 +631,49 @@ public class Main {
         }
 
         public byte[] getDataRegion() {
-            // TODO(hw): hard copy, can be avoided?
+            // TODO(hw): hard copy, can be avoided? utf8?
             return dataBlock.toByteArray();
         }
 
     }
 
-    // TODO(hw): murmurhash2 java version
-    static long hash(String key, long seed) {
-        long m = 0x5bd1e995;
-        long r = 24;
-        long len = key.length();
-        long h = seed ^ len;
+    // TODO(hw): murmurhash2 java version, check correctness
+    public static int hash(final byte[] data, int length, int seed) {
+        // 'm' and 'r' are mixing constants generated offline.
+        // They're not really 'magic', they just happen to work well.
+        final int m = 0x5bd1e995;
+        final int r = 24;
+
+        // Initialize the hash to a random value
+        int h = seed ^ length;
+        int length4 = length / 4;
+
+        for (int i = 0; i < length4; i++) {
+            final int i4 = i * 4;
+            int k = (data[i4 + 0] & 0xff) + ((data[i4 + 1] & 0xff) << 8)
+                    + ((data[i4 + 2] & 0xff) << 16) + ((data[i4 + 3] & 0xff) << 24);
+            k *= m;
+            k ^= k >>> r;
+            k *= m;
+            h *= m;
+            h ^= k;
+        }
+
+        // Handle the last few bytes of the input array
+        switch (length % 4) {
+            case 3:
+                h ^= (data[(length & ~3) + 2] & 0xff) << 16;
+            case 2:
+                h ^= (data[(length & ~3) + 1] & 0xff) << 8;
+            case 1:
+                h ^= (data[length & ~3] & 0xff);
+                h *= m;
+        }
+
+        h ^= h >>> 13;
+        h *= m;
+        h ^= h >>> 15;
+
         return h;
     }
 }
@@ -647,7 +693,7 @@ class BulkLoadGenerator implements Runnable {
     public BulkLoadGenerator(int tid, int pid, API.BulkLoadInfoResponse indexInfo, TabletService service) {
         this.tid = tid;
         this.pid = pid;
-        this.queue = new ArrayBlockingQueue<SQLInsertRow>(1000);
+        this.queue = new ArrayBlockingQueue<>(1000);
         this.pollTimeout = 100;
         this.indexInfo = indexInfo;
         this.bulkLoadRequest = new Main.BulkLoadRequest(indexInfo); // built from BulkLoadInfoResponse
@@ -736,11 +782,10 @@ class BulkLoadGenerator implements Runnable {
                         if (needPut) {
                             int segIdx = 0;
                             if (indexInfo.getSegCnt() > 1) {
-                                // TODO(hw): hash, use random here util java hash finished.
-                                segIdx = new Random().nextInt();
+                                segIdx = Main.hash(key.getBytes(), key.length(), 0xe17a1465) % indexInfo.getSegCnt();
                             }
                             // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
-                            Main.SegmentDataMap segment = bulkLoadRequest.segmentDataMaps.get(idx).get(segIdx);
+                            Main.SegmentIndexRegion segment = bulkLoadRequest.segmentDataMatrix.get(idx).get(segIdx);
 
                             // void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
                             segment.Put(key, tsDimsWrap, dataBlockId);
@@ -750,6 +795,7 @@ class BulkLoadGenerator implements Runnable {
                     // If success, add data & info
                     ByteArrayOutputStream dataBuilder = bulkLoadRequest.dataBlock;
                     String rowData = row.GetRow();
+                    logger.info("bulk load one row data size {}", rowData.length()); // TODO(hw): test data size all 3, is the same with insert mode
                     int head = dataBuilder.size();
                     dataBuilder.write(rowData.getBytes());
                     dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length());
@@ -761,11 +807,13 @@ class BulkLoadGenerator implements Runnable {
             // TODO(hw): force shutdown - don't send rpc
 
             // TODO(hw): request -> pb
-            API.BulkLoadRequest request = bulkLoadRequest.toProtobuf(1, pid);
+            logger.info("bulkLoadRequest brief info: total rows {}, data total size {}", bulkLoadRequest.dataBlockInfoList.size(), bulkLoadRequest.dataBlock.size());
+            API.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid);
+            logger.info("bulk load request {}", request);
             // TODO(hw): send rpc
             RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
-            service.bulkLoad(request);
-
+            API.GeneralResponse response = service.bulkLoad(request);
+            logger.info("bulk load resp: {}", response);
         } catch (InterruptedException | IOException e) {
             // TODO(hw): IOException - byte array write
             e.printStackTrace();
@@ -845,6 +893,7 @@ class InsertImporter implements Runnable {
                 }
             }
             if (rowIsValid) {
+                logger.info("insert one row data size {}", row.GetRow().length());
                 router.executeInsert(dbName, insertPlaceHolder, row);
                 // TODO(hw): retry
             }

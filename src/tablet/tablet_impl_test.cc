@@ -5641,6 +5641,15 @@ TEST_F(TabletImplTest, BulkLoad) {
         LOG(INFO) << "info: " << response.DebugString();
     }
 
+    // hash test
+    {
+        const uint32_t SEED = 0xe17a1465;
+        std::vector<std::string> keys = {"2|1", "1|1", "1|4", "2/6", "4", "6", "1"};
+        for (auto key : keys) {
+            LOG(INFO) << "hash(" << key << ") = " << ::fedb::base::hash(key.data(), key.size(), SEED) % 8;
+        }
+    }
+
     // handle a bulk load request
     {
         ::fedb::api::BulkLoadRequest request;

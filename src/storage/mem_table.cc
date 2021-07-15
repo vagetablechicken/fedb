@@ -750,7 +750,7 @@ bool MemTable::GetBulkLoadInfo(::fedb::api::BulkLoadInfoResponse* response) {
         response->add_inner_index_pos(pos);
         idx++;
     }
-    // repeated InnerIndexSt
+    // repeated InnerIndexSt, all index, even not ready
     auto inner_indexes = table_index_.GetAllInnerIndex();
     for (auto& i : *inner_indexes) {
         i->GetId();
@@ -790,15 +790,10 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
     // TODO(hw): need to reset all segments?
     for (int i = 0; i < indexes.size(); ++i) {
         const auto& inner_index = indexes.Get(i);
-        auto index_def = GetIndex(inner_index.inner_index_id());
-        if (!index_def || !index_def->IsReady()) {
-            return false;
-        }
-
-        uint32_t real_idx = index_def->GetInnerPos();
+        uint32_t real_idx = i;
         for (int j = 0; j < inner_index.segment_size(); ++j) {
             const auto& segment_index = inner_index.segment(j);
-            auto seg_idx = segment_index.id();
+            auto seg_idx = j;
             auto segment = segments_[real_idx][seg_idx];
             for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
                 const auto& key_entries = segment_index.key_entries(key_idx);
@@ -811,11 +806,12 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
                             time_entry.block_id() < data_blocks.size() ? data_blocks[time_entry.block_id()] : nullptr;
                         if (block == nullptr) {
                             // TODO(hw): error handle
-                            DLOG(INFO) << "block info mismatch";
+                            LOG(INFO) << "block info mismatch";
                             return false;
                         }
-                        // TODO(hw): ts_cnt_ is created by ColumnKey.ts_name, only one?
+                        // TODO(hw): ts_cnt_ may > 1, can't use origin Segment::Put
                         // Segment::Put has a lock
+                        PDLOG(INFO, "do one segment put, %u-%u, key %s", real_idx, seg_idx, pk.ToString());
                         segment->Put(pk, time_entry.time(), block);
                     }
                 }
@@ -823,7 +819,7 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
         }
     }
 
-    return false;
+    return true;
 }
 
 MemTableKeyIterator::MemTableKeyIterator(Segment** segments, uint32_t seg_cnt, ::fedb::storage::TTLType ttl_type,

@@ -590,6 +590,9 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
         return;
     }
     bool ok = false;
+    // TODO(hw): why length 80?
+    PDLOG(INFO, "put request: len %d", request->value().length());
+    PDLOG(INFO, "put request: value %s, len %d", request->value(), request->value().length());
     if (request->dimensions_size() > 0) {
         int32_t ret_code = CheckDimessionPut(request, table->GetIdxCnt());
         if (ret_code != 0) {
@@ -4808,7 +4811,7 @@ void TabletImpl::GetBulkLoadInfo(RpcController* controller, const ::fedb::api::B
 void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoadRequest* request,
                           ::fedb::api::GeneralResponse* response, Closure* done) {
     brpc::ClosureGuard done_guard(done);
-    LOG(INFO) << "BulkLoad";
+    PDLOG(INFO, "BulkLoad");
     if (follower_.load(std::memory_order_relaxed)) {
         response->set_code(::fedb::base::ReturnCode::kIsFollowerCluster);
         response->set_msg("is follower cluster");
@@ -4851,6 +4854,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
         auto buf = new char[info.length()];
         iter.copy_and_forward(buf, info.length());
         data_blocks[i] = new DataBlock(info.ref_cnt(), buf, info.length(), true);
+        PDLOG(INFO, "bulk load request(data block): value %s, len %d", std::string(buf, info.length()), info.length());
     }
     if (iter.bytes_left() != 0) {
         // TODO(hw): error
@@ -4858,12 +4862,16 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
         response->set_code(100);
         //        return;
     }
+    PDLOG(INFO, "data_blocks size: %u", data_blocks.size());
     if (!std::dynamic_pointer_cast<MemTable>(table)->BulkLoad(data_blocks, request->index_region())) {
         // TODO(hw): error
         PDLOG(WARNING, "bulk load failed");
         response->set_code(100);
         return;
     }
+    uint64_t load_time = ::baidu::common::timer::get_micros();
+
+    PDLOG(INFO, "tid %u-pid %u, bulk load only load cost %lu ms", request->tid(), request->pid(), load_time - start_time);
 
     response->set_code(::fedb::base::ReturnCode::kOk);
     std::shared_ptr<LogReplicator> replicator;
@@ -4903,7 +4911,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
     } while (false);
     uint64_t end_time = ::baidu::common::timer::get_micros();
 
-    DLOG(INFO) << "bulk load cost" << end_time - start_time << request->tid() << request->pid();
+    PDLOG(INFO, "tid %u-pid %u, bulk load cost %lu ms", request->tid(), request->pid(), end_time - start_time);
 
     if (replicator) {
         if (FLAGS_binlog_notify_on_put) {
