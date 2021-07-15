@@ -338,6 +338,12 @@ class TabletImpl : public ::openmldb::api::TabletServer {
 
     void DropProcedure(RpcController* controller, const ::openmldb::api::DropProcedureRequest* request,
                        ::openmldb::api::GeneralResponse* response, Closure* done);
+                       
+    void GetBulkLoadInfo(RpcController* controller, const ::openmldb::api::BulkLoadInfoRequest* request,
+                  ::openmldb::api::BulkLoadInfoResponse* response, Closure* done);
+
+    void BulkLoad(RpcController* controller, const ::openmldb::api::BulkLoadRequest* request,
+                  ::openmldb::api::GeneralResponse* response, Closure* done);
 
  private:
     bool CreateMultiDir(const std::vector<std::string>& dirs);

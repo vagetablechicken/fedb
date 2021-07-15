@@ -740,6 +740,50 @@ TableIterator* MemTable::NewTraverseIterator(uint32_t index) {
     return new MemTableTraverseIterator(segments_[real_idx], seg_cnt_, ttl->ttl_type, expire_time, expire_cnt, 0);
 }
 
+bool MemTable::GetBulkLoadInfo(::fedb::api::BulkLoadInfoResponse* response) {
+    response->set_seg_cnt(seg_cnt_);
+
+    // TODO(hw): out of range will get -1, only a temporary solution.
+    uint32_t idx = 0;
+    int32_t pos;
+    while ((pos = table_index_.GetInnerIndexPos(idx)) != -1) {
+        response->add_inner_index_pos(pos);
+        idx++;
+    }
+    // repeated InnerIndexSt
+    auto inner_indexes = table_index_.GetAllInnerIndex();
+    for (auto& i : *inner_indexes) {
+        i->GetId();
+        auto pb = response->add_inner_index();
+        for (const auto& index_def : i->GetIndex()) {
+            auto new_def = pb->add_index_def();
+            new_def->set_is_ready(index_def->GetStatus() == IndexStatus::kReady);
+            new_def->set_ts_idx(-1);
+            auto ts_col = index_def->GetTsColumn();
+            if (ts_col) {
+                new_def->set_ts_idx(ts_col->GetTsIdx());
+            }
+        }
+    }
+    // repeated InnerSegments
+    for (decltype(inner_indexes->size()) inner_id = 0; inner_id < inner_indexes->size(); ++inner_id) {
+        auto segments = segments_[inner_id];
+        auto pb_segments = response->add_inner_segments();
+        for (decltype(seg_cnt_) i = 0; i < seg_cnt_; ++i) {
+            auto seg = segments[i];
+            auto pb_seg = pb_segments->add_segment();
+            pb_seg->set_ts_cnt(seg->GetTsCnt());
+            const auto& ts_idx_map = seg->GetTsIdxMap();
+            for (auto entry : ts_idx_map) {
+                auto pb_entry = pb_seg->add_ts_idx_map();
+                pb_entry->set_key(entry.first);
+                pb_entry->set_value(entry.second);
+            }
+        }
+    }
+    return true;
+}
+
 bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
                         const ::google::protobuf::RepeatedPtrField<::fedb::api::BulkLoadIndex>& indexes) {
     // data_block[i] is the block which id == i

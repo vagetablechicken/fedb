@@ -5627,6 +5627,20 @@ TEST_F(TabletImplTest, BulkLoad) {
         tablet.CreateTable(NULL, &request, &response, &closure);
         ASSERT_EQ(0, response.code());
     }
+
+    // get bulk load info
+    {
+        ::fedb::api::BulkLoadInfoRequest request;
+        request.set_tid(id);
+        request.set_pid(1);
+        ::fedb::api::BulkLoadInfoResponse response;
+        MockClosure closure;
+        brpc::Controller cntl;
+        tablet.GetBulkLoadInfo(&cntl, &request, &response, &closure);
+        ASSERT_EQ(0, response.code()) << response.msg();
+        LOG(INFO) << "info: " << response.DebugString();
+    }
+
     // handle a bulk load request
     {
         ::fedb::api::BulkLoadRequest request;

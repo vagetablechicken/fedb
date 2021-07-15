@@ -13,6 +13,12 @@ import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
 import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
 import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
 
+import com.baidu.brpc.RpcContext;
+import com.baidu.brpc.client.BrpcProxy;
+import com.baidu.brpc.client.RpcClient;
+import com.baidu.brpc.client.RpcClientOptions;
+import com.baidu.brpc.loadbalance.LoadBalanceStrategy;
+import com.baidu.brpc.protocol.Options;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
@@ -32,6 +38,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -166,7 +173,7 @@ public class Main {
 
     }
 
-    private static void bulkLoad(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
+    private static void bulkLoad(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) throws IOException {
         // rows->list SQLInsertRow
         // for each Row
         // Use one record to generate insert place holder
@@ -349,10 +356,10 @@ public class Main {
                 }
 
                 // TODO(hw): if success, add data & info
-                StringBuilder sb = bulkLoadRequest.dataBlock;
+                ByteArrayOutputStream sb = bulkLoadRequest.dataBlock;
                 String rowData = insertRow.GetRow();
-                int head = sb.length();
-                sb.append(rowData);
+                int head = sb.size();
+                sb.write(rowData.getBytes());
                 dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length());
                 dataBlockInfoList.add(dataBlockInfoBuilder.build());
                 // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
@@ -376,6 +383,9 @@ public class Main {
         CuratorFramework client = CuratorFrameworkFactory.newClient("172.24.4.55:6181", retryPolicy);
         client.start();
         Nameserver.TableInfo testTable = null;
+        Map<Integer, BulkLoadGenerator> generators = new HashMap<>();
+        List<Thread> threads = new ArrayList<>();
+
         try {
             String tableInfoPath = "/onebox/table/db_table_data";
             List<String> tables = client.getChildren().forPath(tableInfoPath);
@@ -391,43 +401,43 @@ public class Main {
             }
             Preconditions.checkNotNull(testTable, "no table info of table {}", tableName);
 
+            // When bulk loading, cannot AddIndex().
+            //  And MemTable::table_index_ may be modified by AddIndex()/Delete...,
+            //  so we should get table_index_'s info from MemTable, to know the real status.
+            //  And the status can't be changed until bulk lood finished.
             for (Nameserver.TablePartition partition : testTable.getTablePartitionList()) {
                 logger.info("pid {}, {}", partition.getPid(), partition.getPartitionMetaList());
                 Nameserver.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(Nameserver.PartitionMeta::getIsLeader).collect(onlyElement());
-                API.GetTableStatusRequest request = API.GetTableStatusRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
 
-                HttpClient httpClient = new HttpClient();
-                PostMethod postMethod = new PostMethod("http://" + leader.getEndpoint() + "/TabletServer/GetTableStatus");
-                postMethod.addRequestHeader("Content-Type", "application/proto;charset=utf-8");
-                postMethod.setRequestEntity(new ByteArrayRequestEntity(request.toByteArray()));
-                // TODO(hw): how to add attachment? http/h2协议中附件对应message body，没有request attachment的位置了。。。只呢用brpc-java版？
-                httpClient.executeMethod(postMethod);
+                //  http/h2 can't add attachment, cuz it use attachment to pass message. So we need to use brpc-java
+                RpcClientOptions clientOption = new RpcClientOptions();
+                clientOption.setProtocolType(Options.ProtocolType.PROTOCOL_BAIDU_STD_VALUE);
+                clientOption.setWriteTimeoutMillis(1000);
+                clientOption.setReadTimeoutMillis(50000);
+                clientOption.setMaxTotalConnections(1000);
+                clientOption.setMinIdleConnections(10);
+                clientOption.setLoadBalanceType(LoadBalanceStrategy.LOAD_BALANCE_FAIR);
+                clientOption.setCompressType(Options.CompressType.COMPRESS_TYPE_NONE);
 
-                API.GetTableStatusResponse resp = API.GetTableStatusResponse.parseFrom(postMethod.getResponseBodyAsStream());
-                logger.info("get resp: {}", resp);
+                // Must list://
+                String serviceUrl = "list://" + leader.getEndpoint();
+                RpcClient rpcClient = new RpcClient(serviceUrl, clientOption);
+                TabletService tabletService = BrpcProxy.getProxy(rpcClient, TabletService.class);
+                RpcContext.getContext().setLogId((long) partition.getPid());
+                API.BulkLoadInfoRequest infoRequest = API.BulkLoadInfoRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
+                API.BulkLoadInfoResponse info = tabletService.getBulkLoadInfo(infoRequest);
+                logger.info("get bulk load info: {}", info);
+
+                // generate & send requests by BulkLoadGenerator
+                BulkLoadGenerator generator = new BulkLoadGenerator(testTable.getTid(), partition.getPid(), info, tabletService);
+                generators.put(partition.getPid(), generator);
+                threads.add(new Thread(generator));
             }
-
         } catch (Exception e) {
             e.printStackTrace();
             return;
         }
-        // When bulk loading, cannot AddIndex().
-        //  And MemTable::table_index_ may be modified by AddIndex()/Delete...,
-        //  so we should get table_index_'s info from MemTable, to know the real status.
-        //  And the status can't be changed until bulk lood finished.
 
-        // TODO(hw): fake resp, request tablet server later!!
-        API.BulkLoadInfoResponse indexInfo = API.BulkLoadInfoResponse.newBuilder().build();
-
-        List<Thread> threads = new ArrayList<>();
-        Map<Integer, BulkLoadGenerator> generators = new HashMap<>();
-        testTable.getTablePartitionList().forEach(tablePartition -> {
-            Nameserver.PartitionMeta partitionLeader = tablePartition.getPartitionMetaList().stream().filter(Nameserver.PartitionMeta::getIsLeader).collect(onlyElement());
-
-            BulkLoadGenerator generator = new BulkLoadGenerator(tablePartition.getPid(), indexInfo, partitionLeader.getEndpoint());
-            generators.put(tablePartition.getPid(), generator);
-            threads.add(new Thread(generator));
-        });
         logger.info("create {} generators", generators.size());
 
         StringBuilder builder = new StringBuilder("insert into " + tableName + " values(");
@@ -494,13 +504,6 @@ public class Main {
             return;
         }
 
-        // TODO(hw): rpc send, multi thread send?
-        generators.values().forEach(bulkLoadGenerator -> {
-            if (!bulkLoadGenerator.sendRequest()) {
-                logger.error("send bulk load request error.");
-            }
-        });
-
         // TODO(hw): get statistics from generators
         logger.info("BulkLoad finished.");
     }
@@ -517,7 +520,7 @@ public class Main {
 
         public SegmentDataMap(int tsCnt, Map<Integer, Integer> tsIdxMap) {
             this.tsCnt = tsCnt;
-            this.tsIdxMap = tsIdxMap; // could be empty
+            this.tsIdxMap = tsIdxMap; // possibly empty
         }
 
         public void Put(String key, int idxPos, Long time, Integer id) {
@@ -556,12 +559,20 @@ public class Main {
                 }
             }
         }
+
         // TODO(hw): serialize to `message Segment`
+        public API.Segment toProtobuf() {
+            API.Segment.Builder builder = API.Segment.newBuilder();
+
+
+            return builder.build();
+        }
     }
 
     public static class BulkLoadRequest {
+        // TODO(hw): private members below
         public List<List<SegmentDataMap>> segmentDataMaps;
-        public StringBuilder dataBlock = new StringBuilder();
+        public ByteArrayOutputStream dataBlock = new ByteArrayOutputStream();
         public List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
         public BulkLoadRequest(API.BulkLoadInfoResponse bulkLoadInfo) {
@@ -585,7 +596,29 @@ public class Main {
                     }
             );
         }
-        // TODO(hw): serialize to API.BulkLoadRequest
+
+        public API.BulkLoadRequest toProtobuf(int tid, int pid) {
+            API.BulkLoadRequest.Builder requestBuilder = API.BulkLoadRequest.newBuilder();
+            requestBuilder.setTid(tid).setPid(pid);
+
+            // segmentDataMaps -> BulkLoadIndex
+            segmentDataMaps.forEach(segmentDataMap -> {
+                API.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
+//                bulkLoadIndexBuilder.setInnerIndexId() need?
+                segmentDataMap.forEach(segment -> {
+                    bulkLoadIndexBuilder.addSegment(segment.toProtobuf());
+                });
+            });
+            // DataBlockInfo
+            requestBuilder.addAllBlockInfo(dataBlockInfoList);
+
+            return requestBuilder.build();
+        }
+
+        public byte[] getDataRegion() {
+            // TODO(hw): hard copy, can be avoided?
+            return dataBlock.toByteArray();
+        }
 
     }
 
@@ -601,23 +634,24 @@ public class Main {
 
 class BulkLoadGenerator implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(BulkLoadGenerator.class);
+    private final int tid;
     private final int pid;
     private final BlockingQueue<SQLInsertRow> queue;
     private final long pollTimeout;
     private AtomicBoolean shutdown = new AtomicBoolean(false);
-    private boolean internalErrorOcc = false;
+    private AtomicBoolean internalErrorOcc = new AtomicBoolean(false);
     private final API.BulkLoadInfoResponse indexInfo; // TODO(hw): not a good name
     private final Main.BulkLoadRequest bulkLoadRequest;
-    private final List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
-    private final String endpoint;
+    private final TabletService service;
 
-    public BulkLoadGenerator(int pid, API.BulkLoadInfoResponse indexInfo, String endpoint) {
+    public BulkLoadGenerator(int tid, int pid, API.BulkLoadInfoResponse indexInfo, TabletService service) {
+        this.tid = tid;
         this.pid = pid;
         this.queue = new ArrayBlockingQueue<SQLInsertRow>(1000);
         this.pollTimeout = 100;
         this.indexInfo = indexInfo;
         this.bulkLoadRequest = new Main.BulkLoadRequest(indexInfo); // built from BulkLoadInfoResponse
-        this.endpoint = endpoint;
+        this.service = service;
     }
 
     @Override
@@ -650,7 +684,7 @@ class BulkLoadGenerator implements Runnable {
                     }
 
                     // Index Region insert, only use id
-                    int dataBlockId = dataBlockInfoList.size();
+                    int dataBlockId = bulkLoadRequest.dataBlockInfoList.size();
                     // set the dataBlockInfo's ref count when index region insertion
                     API.DataBlockInfo.Builder dataBlockInfoBuilder = API.DataBlockInfo.newBuilder();
 
@@ -713,19 +747,29 @@ class BulkLoadGenerator implements Runnable {
                         }
                     }
 
-                    // TODO(hw): if success, add data & info
-                    StringBuilder sb = bulkLoadRequest.dataBlock;
+                    // If success, add data & info
+                    ByteArrayOutputStream dataBuilder = bulkLoadRequest.dataBlock;
                     String rowData = row.GetRow();
-                    int head = sb.length();
-                    sb.append(rowData);
+                    int head = dataBuilder.size();
+                    dataBuilder.write(rowData.getBytes());
                     dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length());
-                    dataBlockInfoList.add(dataBlockInfoBuilder.build());
+                    bulkLoadRequest.dataBlockInfoList.add(dataBlockInfoBuilder.build());
                     // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
-
                 }
             }
-        } catch (InterruptedException e) {
+
+            // TODO(hw): force shutdown - don't send rpc
+
+            // TODO(hw): request -> pb
+            API.BulkLoadRequest request = bulkLoadRequest.toProtobuf(1, pid);
+            // TODO(hw): send rpc
+            RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
+            service.bulkLoad(request);
+
+        } catch (InterruptedException | IOException e) {
+            // TODO(hw): IOException - byte array write
             e.printStackTrace();
+            internalErrorOcc.set(true);
         }
     }
 
@@ -738,12 +782,7 @@ class BulkLoadGenerator implements Runnable {
     }
 
     public boolean hasInternalError() {
-        return internalErrorOcc;
-    }
-
-    public boolean sendRequest() {
-        // TODO(hw): request -> pb
-        // TODO(hw): send rpc
+        return internalErrorOcc.get();
     }
 }
 

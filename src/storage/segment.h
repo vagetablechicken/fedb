@@ -220,6 +220,8 @@ class Segment {
         return 0;
     }
 
+    const std::map<uint32_t, uint32_t>& GetTsIdxMap() const { return ts_idx_map_; }
+
     inline uint64_t GetIdxByteSize() { return idx_byte_size_.load(std::memory_order_relaxed); }
 
     inline uint64_t GetPkCnt() { return pk_cnt_.load(std::memory_order_relaxed); }

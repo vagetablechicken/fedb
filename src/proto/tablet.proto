@@ -743,7 +743,7 @@ message DataBlockInfo {
 }
 
 message Segment {
-    optional uint32 id = 1;
+    optional uint32 id = 1;  // TODO(hw): need?
     message KeyEntries {
         optional bytes key = 1;
         message KeyEntry {
@@ -753,13 +753,13 @@ message Segment {
             }
             repeated TimeEntry time_entry = 2;
         }
-        repeated KeyEntry key_entry = 2; // ts_cnt_ == key_entry_size()
+        repeated KeyEntry key_entry = 2;  // ts_cnt_ == key_entry_size()
     }
     repeated KeyEntries key_entries = 2;
 }
 
 message BulkLoadIndex {
-    optional uint32 inner_index_id = 1;
+    optional uint32 inner_index_id = 1;  // TODO(hw): need?
     repeated Segment segment = 2;
 }
 
@@ -872,5 +872,6 @@ service TabletServer {
     rpc Refresh(RefreshRequest) returns (GeneralResponse);
     
     // TODO(hw): nameserver call this?
+    rpc GetBulkLoadInfo(BulkLoadInfoRequest) returns (BulkLoadInfoResponse);
     rpc BulkLoad(BulkLoadRequest) returns (GeneralResponse);
 }

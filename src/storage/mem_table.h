@@ -167,6 +167,7 @@ class MemTable : public Table {
 
     bool Put(const Dimensions& dimensions, const TSDimensions& ts_dimensions, const std::string& value) override;
 
+    bool GetBulkLoadInfo(::fedb::api::BulkLoadInfoResponse* response);
     bool BulkLoad(const std::vector<DataBlock*>& data_blocks,
                   const ::google::protobuf::RepeatedPtrField<::fedb::api::BulkLoadIndex>& indexes);
 

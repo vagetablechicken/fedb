@@ -4766,10 +4766,49 @@ void TabletImpl::CreateProcedure(const std::shared_ptr<hybridse::sdk::ProcedureI
     LOG(INFO) << "refresh procedure success! sp_name: " << sp_name << ", db: " << db_name << ", sql: " << sql;
 }
 
+void TabletImpl::GetBulkLoadInfo(RpcController* controller, const ::fedb::api::BulkLoadInfoRequest* request,
+                                 ::fedb::api::BulkLoadInfoResponse* response, Closure* done) {
+    brpc::ClosureGuard done_guard(done);
+    LOG(INFO) << "GetBulkLoadInfo";
+    if (follower_.load(std::memory_order_relaxed)) {
+        response->set_code(::fedb::base::ReturnCode::kIsFollowerCluster);
+        response->set_msg("is follower cluster");
+        return;
+    }
+    uint64_t start_time = ::baidu::common::timer::get_micros();
+    std::shared_ptr<Table> table = GetTable(request->tid(), request->pid());
+    if (!table) {
+        PDLOG(WARNING, "table is not exist. tid %u, pid %u", request->tid(), request->pid());
+        response->set_code(::fedb::base::ReturnCode::kTableIsNotExist);
+        response->set_msg("table is not exist");
+        return;
+    }
+    if (!table->IsLeader()) {
+        response->set_code(::fedb::base::ReturnCode::kTableIsFollower);
+        response->set_msg("table is follower");
+        return;
+    }
+    if (table->GetTableStat() == ::fedb::storage::kLoading) {
+        PDLOG(WARNING, "table is loading. tid %u, pid %u", request->tid(), request->pid());
+        response->set_code(::fedb::base::ReturnCode::kTableIsLoading);
+        response->set_msg("table is loading");
+        return;
+    }
+
+    // TODO(hw): BulkLoadInfoResponse
+    //  TableIndex is inside Table, so let table fulfill the response for us.
+    auto* mem_table = dynamic_cast<MemTable*>(table.get());
+
+    mem_table->GetBulkLoadInfo(response);
+
+    response->set_code(::fedb::base::kOk);
+    response->set_msg("ok");
+}
+
 void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoadRequest* request,
                           ::fedb::api::GeneralResponse* response, Closure* done) {
     brpc::ClosureGuard done_guard(done);
-
+    LOG(INFO) << "BulkLoad";
     if (follower_.load(std::memory_order_relaxed)) {
         response->set_code(::fedb::base::ReturnCode::kIsFollowerCluster);
         response->set_msg("is follower cluster");
