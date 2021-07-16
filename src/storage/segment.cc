@@ -167,7 +167,6 @@ void Segment::Put(const Slice& key, uint64_t time, DataBlock* row) {
     if (ts_cnt_ > 1) {
         return;
     }
-    LOG(INFO) << "Segment::Put";
     void* entry = NULL;
     uint32_t byte_size = 0;
     std::lock_guard<std::mutex> lock(mu_);
@@ -188,6 +187,52 @@ void Segment::Put(const Slice& key, uint64_t time, DataBlock* row) {
         ->count_.fetch_add(1, std::memory_order_relaxed);
     byte_size += GetRecordTsIdxSize(height);
     idx_byte_size_.fetch_add(byte_size, std::memory_order_relaxed);
+}
+
+void Segment::BulkLoadPut(int key_entry_id, const Slice& key, uint64_t time, DataBlock* row) {
+    void* key_entry_or_list = nullptr;
+    uint32_t byte_size = 0;
+    std::lock_guard<std::mutex> lock(mu_);  // TODO(hw): need lock?
+    int ret = entries_->Get(key, key_entry_or_list);
+    if (ts_cnt_ == 1) {
+        if (ret < 0 || key_entry_or_list == nullptr) {
+            char* pk = new char[key.size()];
+            memcpy(pk, key.data(), key.size());
+            // need to delete memory when free node
+            Slice skey(pk, key.size());
+            key_entry_or_list = (void*)new KeyEntry(key_entry_max_height_);  // NOLINT
+            uint8_t height = entries_->Insert(skey, key_entry_or_list);
+            byte_size += GetRecordPkIdxSize(height, key.size(), key_entry_max_height_);
+            pk_cnt_.fetch_add(1, std::memory_order_relaxed);
+        }
+        idx_cnt_.fetch_add(1, std::memory_order_relaxed);
+        uint8_t height = ((KeyEntry*)key_entry_or_list)->entries.Insert(time, row);  // NOLINT
+        ((KeyEntry*)key_entry_or_list)                                               // NOLINT
+            ->count_.fetch_add(1, std::memory_order_relaxed);
+        byte_size += GetRecordTsIdxSize(height);
+        idx_byte_size_.fetch_add(byte_size, std::memory_order_relaxed);
+    } else {
+        if (ret < 0 || key_entry_or_list == nullptr) {
+            char* pk = new char[key.size()];
+            memcpy(pk, key.data(), key.size());
+            Slice skey(pk, key.size());
+            auto** entry_arr_tmp = new KeyEntry*[ts_cnt_];
+            for (uint32_t i = 0; i < ts_cnt_; i++) {
+                entry_arr_tmp[i] = new KeyEntry(key_entry_max_height_);
+            }
+            auto entry_arr = (void*)entry_arr_tmp;  // NOLINT
+            uint8_t height = entries_->Insert(skey, entry_arr);
+            byte_size += GetRecordPkMultiIdxSize(height, key.size(), key_entry_max_height_, ts_cnt_);
+            pk_cnt_.fetch_add(1, std::memory_order_relaxed);
+        }
+        uint8_t height = ((KeyEntry**)key_entry_or_list)[key_entry_id]->entries.Insert(  // NOLINT
+            time, row);
+        ((KeyEntry**)key_entry_or_list)[key_entry_id]->count_.fetch_add(  // NOLINT
+            1, std::memory_order_relaxed);
+        byte_size += GetRecordTsIdxSize(height);
+        idx_byte_size_.fetch_add(byte_size, std::memory_order_relaxed);
+        idx_cnt_vec_[key_entry_id]->fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row) {
@@ -290,8 +335,8 @@ bool Segment::Delete(const Slice& key) {
     return true;
 }
 
-void Segment::FreeList(::openmldb::base::Node<uint64_t, DataBlock*>* node, uint64_t& gc_idx_cnt,
-                       uint64_t& gc_record_cnt, uint64_t& gc_record_byte_size) {
+void Segment::FreeList(::openmldb::base::Node<uint64_t, DataBlock*>* node, uint64_t& gc_idx_cnt, uint64_t& gc_record_cnt,
+                       uint64_t& gc_record_byte_size) {
     while (node != NULL) {
         gc_idx_cnt++;
         ::openmldb::base::Node<uint64_t, DataBlock*>* tmp = node;
@@ -369,9 +414,6 @@ void Segment::GcEntryFreeList(uint64_t version, uint64_t& gc_idx_cnt, uint64_t& 
         delete entry_node;
         ::openmldb::base::Node<uint64_t, ::openmldb::base::Node<Slice, void*>*>* tmp = node;
         node = node->GetNextNoBarrier(0);
-        delete tmp;
-        pk_cnt_.fetch_sub(1, std::memory_order_relaxed);
-    }
 }
 
 void Segment::GcFreeList(uint64_t& gc_idx_cnt, uint64_t& gc_record_cnt, uint64_t& gc_record_byte_size) {
@@ -614,9 +656,6 @@ void Segment::Gc4TTL(const uint64_t time, uint64_t& gc_idx_cnt, uint64_t& gc_rec
         it->Next();
         ::openmldb::base::Node<uint64_t, DataBlock*>* node = entry->entries.GetLast();
         if (node == NULL) {
-            continue;
-        } else if (node->GetKey() > time) {
-            DEBUGLOG(
                 "[Gc4TTL] segment gc with key %lu need not ttl, last node "
                 "key %lu",
                 time, node->GetKey());

@@ -157,6 +157,8 @@ class Segment {
 
     void Put(const Slice& key, uint64_t time, DataBlock* row);
 
+    void BulkLoadPut(int key_entry_id, const Slice& key, uint64_t time, DataBlock* row);
+
     void Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row);
 
     // Get time data

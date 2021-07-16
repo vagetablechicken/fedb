@@ -809,10 +809,10 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
                             LOG(INFO) << "block info mismatch";
                             return false;
                         }
-                        // TODO(hw): ts_cnt_ may > 1, can't use origin Segment::Put
-                        // Segment::Put has a lock
-                        PDLOG(INFO, "do one segment put, %u-%u, key %s", real_idx, seg_idx, pk.ToString());
-                        segment->Put(pk, time_entry.time(), block);
+                        // TODO(hw): DLOG
+                        PDLOG(INFO, "do one segment put, %u-%u, key %s, time %u, key_entry_id %d", real_idx, seg_idx,
+                              pk.ToString(), time_entry.time(), key_entry_id);
+                        segment->BulkLoadPut(key_entry_id, pk, time_entry.time(), block);
                     }
                 }
             }

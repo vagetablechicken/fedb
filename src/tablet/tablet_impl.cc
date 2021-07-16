@@ -590,9 +590,6 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
         return;
     }
     bool ok = false;
-    // TODO(hw): why length 80?
-    PDLOG(INFO, "put request: len %d", request->value().length());
-    PDLOG(INFO, "put request: value %s, len %d", request->value(), request->value().length());
     if (request->dimensions_size() > 0) {
         int32_t ret_code = CheckDimessionPut(request, table->GetIdxCnt());
         if (ret_code != 0) {
@@ -4811,7 +4808,7 @@ void TabletImpl::GetBulkLoadInfo(RpcController* controller, const ::fedb::api::B
 void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoadRequest* request,
                           ::fedb::api::GeneralResponse* response, Closure* done) {
     brpc::ClosureGuard done_guard(done);
-    PDLOG(INFO, "BulkLoad");
+    DLOG(INFO) << "BulkLoad";
     if (follower_.load(std::memory_order_relaxed)) {
         response->set_code(::fedb::base::ReturnCode::kIsFollowerCluster);
         response->set_msg("is follower cluster");
@@ -4862,7 +4859,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
         response->set_code(100);
         //        return;
     }
-    PDLOG(INFO, "data_blocks size: %u", data_blocks.size());
+    DLOG(INFO) << "data_blocks size: " << data_blocks.size();
     if (!std::dynamic_pointer_cast<MemTable>(table)->BulkLoad(data_blocks, request->index_region())) {
         // TODO(hw): error
         PDLOG(WARNING, "bulk load failed");
@@ -4871,7 +4868,8 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
     }
     uint64_t load_time = ::baidu::common::timer::get_micros();
 
-    PDLOG(INFO, "tid %u-pid %u, bulk load only load cost %lu ms", request->tid(), request->pid(), load_time - start_time);
+    PDLOG(INFO, "tid %u-pid %u, bulk load only load cost %lu ms", request->tid(), request->pid(),
+          load_time - start_time);
 
     response->set_code(::fedb::base::ReturnCode::kOk);
     std::shared_ptr<LogReplicator> replicator;
