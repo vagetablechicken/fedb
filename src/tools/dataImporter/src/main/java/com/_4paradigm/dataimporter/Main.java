@@ -21,22 +21,15 @@ import com.baidu.brpc.client.RpcClientOptions;
 import com.baidu.brpc.loadbalance.LoadBalanceStrategy;
 import com.baidu.brpc.protocol.Options;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.Table;
-import org.apache.calcite.interpreter.Row;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.methods.ByteArrayRequestEntity;
-import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +39,6 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -74,10 +66,11 @@ public class Main {
         List<CSVRecord> rows = null;
         try {
 //            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); // 192M
-            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.small"); // 9 rows
+            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.debug"); // debug
             CSVParser parser = new CSVParser(in, CSVFormat.EXCEL.withHeader());
+            // pickup_datetime & dropoff_datetime need to transform to timestamp
             rows = parser.getRecords();
-            // TODO(hw): pickup_datetime & dropoff_datetime need to transform to timestamp first
+            // TODO(hw): CSVParser will read the end empty line, be careful.
         } catch (IOException e) {
             logger.error(e.getMessage());
         }
@@ -111,9 +104,10 @@ public class Main {
                     "dropoff_latitude double,\n" +
                     "store_and_fwd_flag string,\n" +
                     "trip_duration int,\n" +
-                    "index(key=(vendor_id, passenger_count), ts=pickup_datetime),\n" +
-                    "index(key=passenger_count, ts=pickup_datetime)\n" +
-                    ");");
+                    "index(key=id, ts=pickup_datetime))partitionnum=2" +
+//                    "index(key=(vendor_id, passenger_count), ts=pickup_datetime),\n" +
+//                    "index(key=passenger_count, ts=dropoff_datetime))\n" +
+                    ";");
             if (!ok) {
                 throw new RuntimeException("recreate table " + tableName + " failed");
             }
@@ -230,7 +224,7 @@ public class Main {
                 RpcContext.getContext().setLogId((long) partition.getPid());
                 API.BulkLoadInfoRequest infoRequest = API.BulkLoadInfoRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
                 API.BulkLoadInfoResponse info = tabletService.getBulkLoadInfo(infoRequest);
-                logger.info("get bulk load info: {}", info);
+                logger.debug("get bulk load info: {}", info);
 
                 // generate & send requests by BulkLoadGenerator
                 BulkLoadGenerator generator = new BulkLoadGenerator(testTable.getTid(), partition.getPid(), info, tabletService);
@@ -259,22 +253,12 @@ public class Main {
         Preconditions.checkState(peekRecord.size() == schema.GetColumnCnt());
 
         List<String> stringCols = InsertImporter.getStringColumnsFromSchema(schema);
-        // TODO(hw): check header? logger.info("{}", record.getParser().getHeaderMap());
+        // TODO(hw): check header?
+//        logger.info("{}", peekRecord.getParser().getHeaderMap());
         for (CSVRecord record : rows) {
-            // TODO(hw): can't use SQLInsertRow. GetRow() will get the wrong data.
-
-            // TableSyncClientImpl::put(String tname, Map<String, Object> row), Map<String, Object>: column name, value
-
-            // TableClientCommon.parseMapInput(row, th, arrayRow, /*output*/ tsDimensions);
-//            boolean hasTsCol = false;
-//            testTable.getColumnDescList().forEach(columnDesc ->
-//                    { // TODO(hw): ColumnDesc::isTsCol deprecated, getName, getType
-//                        columnDesc.
-//                    }
-//            );
-
+            // TODO(hw): can't use SQLInsertRow. GetRow() will get the wrong data. But we still need it to get dims & tsDims.
             SQLInsertRow row = router.getInsertRow(dbName, insertPlaceHolder);
-
+            logger.info(record.toString());
             // fulfill insertRow
             int strLength = stringCols.stream().mapToInt(col -> record.get(col).length()).sum();
             row.Init(strLength);
@@ -306,9 +290,16 @@ public class Main {
             buffer.rewind();
 //            logger.info("byte buffer len {}", buffer.array().length); // checked
 
-            // SQLClusterRouter::ExecuteInsertRow -> SQLClusterRouter::PutRow
-            // TODO(hw): insertRowTmp GetDimensions is the same? but tsDims is not?
+            // Feed row to the bulk load generators for each MemTable(pid, tid)
             DimMap dims = row.GetDimensions(); // dims of pid
+            if (logger.isDebugEnabled()) {
+                logger.debug("dims {}, tsDims {}", dims.entrySet().stream().map(entry -> entry.getKey().toString() + ": " +
+                                entry.getValue().stream().map(pairStrInt ->
+                                        "<" + pairStrInt.getFirst() + ", " + pairStrInt.getSecond() + ">")
+                                        .collect(Collectors.joining(", ", "(", ")")))
+                                .collect(Collectors.joining("], [", "[", "]")),
+                        row.GetTs().toString());
+            }
             for (Long pid : dims.keySet()) {
                 try {
                     // nameserver pid is int
@@ -383,7 +374,7 @@ public class Main {
             this.tsIdxMap = tsIdxMap; // possibly empty
         }
 
-        public void Put(String key, int idxPos, Long time, Integer id) {
+        private void Put(String key, int idxPos, Long time, Integer id) {
             List<Map<Long, Integer>> entryList = keyEntries.getOrDefault(key, new ArrayList<>());
             if (entryList.isEmpty()) {
                 for (int i = 0; i < tsCnt; i++) {
@@ -395,19 +386,23 @@ public class Main {
 //            logger.info("after put keyEntries: {}", keyEntries.toString());
         }
 
-        public void Put(String key, List<API.TSDimension> tsDimensions, Integer dataBlockId) {
+        // TODO(hw): return val is only for debug
+        public boolean Put(String key, List<API.TSDimension> tsDimensions, Integer dataBlockId) {
             if (tsDimensions.isEmpty()) {
-                return;
+                return false;
             }
+            boolean put = false;
             if (tsCnt == 1) {
                 if (tsDimensions.size() == 1) {
                     Put(key, this.NO_IDX, tsDimensions.get(0).getTs(), dataBlockId);
+                    put = true;
                 } else {
                     // tsCnt == 1 & has tsIdxMap, so tsIdxMap only has one element.
                     Preconditions.checkArgument(tsIdxMap.size() == 1);
                     Integer tsIdx = tsIdxMap.keySet().stream().collect(onlyElement());
                     API.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
                     Put(key, this.ONE_IDX, needPutIdx.getTs(), dataBlockId);
+                    put = true;
                 }
             } else {
                 // tsCnt != 1, KeyEntry array for one key
@@ -417,8 +412,10 @@ public class Main {
                         continue;
                     }
                     Put(key, pos, tsDimension.getTs(), dataBlockId);
+                    put = true;
                 }
             }
+            return put;
         }
 
         // serialize to `message Segment`
@@ -441,12 +438,12 @@ public class Main {
 
     public static class BulkLoadRequest {
         // TODO(hw): private members below
-        public List<List<SegmentIndexRegion>> segmentDataMatrix;
+        public List<List<SegmentIndexRegion>> segmentIndexMatrix;
         public ByteArrayOutputStream dataBlock = new ByteArrayOutputStream();
         public List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
         public BulkLoadRequest(API.BulkLoadInfoResponse bulkLoadInfo) {
-            segmentDataMatrix = new ArrayList<>();
+            segmentIndexMatrix = new ArrayList<>();
 
             bulkLoadInfo.getInnerSegmentsList().forEach(
                     innerSegments -> {
@@ -458,12 +455,10 @@ public class Main {
                                             API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
                                             API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
                                     int tsCnt = segmentInfo.getTsCnt();
-                                    logger.info("tsCnt is {}", tsCnt);
-                                    SegmentIndexRegion segment = new SegmentIndexRegion(tsCnt, tsIdxMap);
-                                    segments.add(new SegmentIndexRegion((segmentInfo.getTsCnt()), tsIdxMap));
+                                    segments.add(new SegmentIndexRegion(tsCnt, tsIdxMap));
                                 }
                         );
-                        this.segmentDataMatrix.add(segments);
+                        this.segmentIndexMatrix.add(segments);
                     }
             );
         }
@@ -473,7 +468,7 @@ public class Main {
             requestBuilder.setTid(tid).setPid(pid);
 
             // segmentDataMaps -> BulkLoadIndex
-            segmentDataMatrix.forEach(segmentDataMap -> {
+            segmentIndexMatrix.forEach(segmentDataMap -> {
                 API.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
 //                // TODO(hw):
 //                bulkLoadIndexBuilder.setInnerIndexId();
@@ -495,6 +490,7 @@ public class Main {
     }
 
     // TODO(hw): murmurhash2 java version, check correctness
+    // signed int
     public static int hash(final byte[] data, int length, int seed) {
         // 'm' and 'r' are mixing constants generated offline.
         // They're not really 'magic', they just happen to work well.
@@ -541,8 +537,8 @@ class BulkLoadGenerator implements Runnable {
     private final int pid;
     private final BlockingQueue<Pair<SQLInsertRow, byte[]>> queue;
     private final long pollTimeout;
-    private AtomicBoolean shutdown = new AtomicBoolean(false);
-    private AtomicBoolean internalErrorOcc = new AtomicBoolean(false);
+    private final AtomicBoolean shutdown = new AtomicBoolean(false);
+    private final AtomicBoolean internalErrorOcc = new AtomicBoolean(false);
     private final API.BulkLoadInfoResponse indexInfo; // TODO(hw): not a good name
     private final Main.BulkLoadRequest bulkLoadRequest;
     private final TabletService service;
@@ -559,13 +555,13 @@ class BulkLoadGenerator implements Runnable {
 
     @Override
     public void run() {
-        logger.info("Thread {} for MemTable(pid {})", Thread.currentThread().getId(), pid);
+        logger.info("Thread {} for MemTable(tid-pid {}-{})", Thread.currentThread().getId(), tid, pid);
         try {
             // exit statement: shutdown and no element in queue, or internal exit
             while (!shutdown.get() || !this.queue.isEmpty()) {
                 Pair<SQLInsertRow, byte[]> pair = this.queue.poll(this.pollTimeout, TimeUnit.MILLISECONDS);
                 if (pair == null) {
-                    logger.warn("queue has a null item");
+                    // poll timeout, queue is still empty
                     continue;
                 }
                 SQLInsertRow row = pair.getLeft();
@@ -647,22 +643,25 @@ class BulkLoadGenerator implements Runnable {
                     API.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfo.getInnerIndex(idx);
                     boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(API.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
                     if (needPut) {
-                        int segIdx = 0;
+                        long segIdx = 0;
                         if (indexInfo.getSegCnt() > 1) {
-                            segIdx = Main.hash(key.getBytes(), key.length(), 0xe17a1465) % indexInfo.getSegCnt();
+                            // hash get signed int, we treat is as unsigned
+                            segIdx = Integer.toUnsignedLong(Main.hash(key.getBytes(), key.length(), 0xe17a1465)) % indexInfo.getSegCnt();
                         }
                         // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
-                        Main.SegmentIndexRegion segment = bulkLoadRequest.segmentDataMatrix.get(idx).get(segIdx);
+                        Main.SegmentIndexRegion segment = bulkLoadRequest.segmentIndexMatrix.get(idx).get((int) segIdx);
 
                         // void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
-                        segment.Put(key, tsDimsWrap, dataBlockId);
+                        boolean put = segment.Put(key, tsDimsWrap, dataBlockId);
+                        if (!put) {
+                            logger.warn("segment.Put no put");
+                        }
                     }
                 }
 
                 // If success, add data & info
                 ByteArrayOutputStream dataBuilder = bulkLoadRequest.dataBlock;
-
-                logger.info("bulk load one row data size {}", rowData.length); // TODO(hw): test data size all 3, is the same with insert mode
+                logger.debug("bulk load one row data size {}", rowData.length);
                 int head = dataBuilder.size();
                 dataBuilder.write(rowData);
                 dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(rowData.length);
@@ -676,12 +675,16 @@ class BulkLoadGenerator implements Runnable {
             // TODO(hw): request -> pb
             logger.info("bulkLoadRequest brief info: total rows {}, data total size {}", bulkLoadRequest.dataBlockInfoList.size(), bulkLoadRequest.dataBlock.size());
             API.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid);
-            logger.info("bulk load request {}", request);
+            if (logger.isDebugEnabled()) {
+                logger.debug("bulk load request {}", request);
+            }
             // TODO(hw): send rpc
             RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
             API.GeneralResponse response = service.bulkLoad(request);
-            logger.info("bulk load resp: {}", response);
-        } catch (InterruptedException | IOException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("bulk load resp: {}", response);
+            }
+        } catch (Exception e) {
             // TODO(hw): IOException - byte array write
             e.printStackTrace();
             internalErrorOcc.set(true);
@@ -760,9 +763,12 @@ class InsertImporter implements Runnable {
                 }
             }
             if (rowIsValid) {
-                logger.info("insert one row data size {}", row.GetRow().length());
-                router.executeInsert(dbName, insertPlaceHolder, row);
+                logger.debug("insert one row data size {}", row.GetRow().length());
+                boolean ok = router.executeInsert(dbName, insertPlaceHolder, row);
                 // TODO(hw): retry
+                if (!ok) {
+                    logger.error("insert one row failed, {}", record);
+                }
             }
         }
     }

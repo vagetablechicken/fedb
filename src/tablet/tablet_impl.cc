@@ -4851,13 +4851,13 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
         auto buf = new char[info.length()];
         iter.copy_and_forward(buf, info.length());
         data_blocks[i] = new DataBlock(info.ref_cnt(), buf, info.length(), true);
-        PDLOG(INFO, "bulk load request(data block): value %s, len %d", std::string(buf, info.length()), info.length());
+        DLOG(INFO) << "bulk load request(data block) len " << info.length();
     }
     if (iter.bytes_left() != 0) {
         // TODO(hw): error
         PDLOG(WARNING, "data info mismatch");
         response->set_code(100);
-        //        return;
+        return;
     }
     DLOG(INFO) << "data_blocks size: " << data_blocks.size();
     if (!std::dynamic_pointer_cast<MemTable>(table)->BulkLoad(data_blocks, request->index_region())) {
@@ -4868,7 +4868,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
     }
     uint64_t load_time = ::baidu::common::timer::get_micros();
 
-    PDLOG(INFO, "tid %u-pid %u, bulk load only load cost %lu ms", request->tid(), request->pid(),
+    PDLOG(INFO, "tid %u-pid %u, bulk load only load cost %lu us", request->tid(), request->pid(),
           load_time - start_time);
 
     response->set_code(::fedb::base::ReturnCode::kOk);
@@ -4909,7 +4909,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
     } while (false);
     uint64_t end_time = ::baidu::common::timer::get_micros();
 
-    PDLOG(INFO, "tid %u-pid %u, bulk load cost %lu ms", request->tid(), request->pid(), end_time - start_time);
+    PDLOG(INFO, "tid %u-pid %u, bulk load cost %lu us", request->tid(), request->pid(), end_time - start_time);
 
     if (replicator) {
         if (FLAGS_binlog_notify_on_put) {
