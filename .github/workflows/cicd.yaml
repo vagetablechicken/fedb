@@ -119,6 +119,54 @@ jobs:
           source /etc/profile.d/enable-rh.sh
           git clean -dfx
 
+  java-sdk:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/4paradigm/hybridsql:0.3.0
+    steps:
+      - uses: actions/checkout@v1
+      - name: build jsdk and package
+        run: |
+          bash steps/init_env.sh
+          mkdir -p build
+          source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=ON -DTESTING_ENABLE=ON .. && make -j$(nproc) sql_javasdk_package && cd ../
+      
+      - name: run jdbc smoke test
+        run: |
+          cd java
+          mvn test -Dscalatest.skip=true
+
+      - name: Upload Java UT Results
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: linux-ut-result-java-${{ github.sha }}
+          path: |
+            java/openmldb-jdbc/target/**/TEST-*.xml
+
+      - name: Upload jsdk and jar
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/upload-artifact@v2
+        with:
+          path: |
+            build/src/sdk/libhybridse*.so
+            java/openmldb-jdbc/target/openmldb-jdbc-*.jar
+            java/openmldb-native/target/openmldb-native-*.jar
+          name: release-artifacts
+      
+  python-sdk:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/4paradigm/hybridsql:0.3.0
+    steps:
+      - uses: actions/checkout@v1
+      - name: build pysdk and sqlalchemy
+        run: |
+          bash steps/init_env.sh
+          mkdir -p build
+          source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=ON -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=ON .. && make -j$(nproc) sql_pysdk_package sqlalchemy_fedb && cd ../
+     # TODO
+
   publish-test-results:
     runs-on: ubuntu-latest
     needs: ["build_and_cpp_ut", "sql_sdk_test", "sql_cluster_test"]
