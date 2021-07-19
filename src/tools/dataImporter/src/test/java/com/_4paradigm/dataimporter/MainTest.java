@@ -1,18 +1,37 @@
 package com._4paradigm.dataimporter;
 
+import com._4paradigm.fedb.api.API;
 import junit.framework.TestCase;
+import org.junit.Assert;
 
-import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 // TODO(hw): run this test instead of running main class, when using system scope dependencies
 public class MainTest extends TestCase {
 
+    public void testSegmentIndexRegion() {
+        Main.SegmentIndexRegion region = new Main.SegmentIndexRegion(1, null);
+        Map<String, List<Map<Long, Integer>>> treeMap = region.keyEntries;
+        // test tree map, should be in reverse order, s11 > s1 > S1
+        List<String> keys = Arrays.asList("s11", "s1", "S1");
+        keys.forEach(key -> treeMap.put(key, null));
+        Assert.assertArrayEquals(keys.toArray(), treeMap.keySet().toArray());
+        treeMap.clear();
+
+        // inner tree map, TimeComparator is in desc order, so the reverse order is ascending order.
+        List<Long> times = Arrays.asList(1111L, 2222L, 3333L);
+        times.forEach(time -> region.Put("s1", Collections.singletonList(API.TSDimension.newBuilder().setTs(time).build()), 0));
+        Object[] timeArray = treeMap.get("s1").get(0).keySet().toArray();
+        Assert.assertArrayEquals(times.toArray(), timeArray);
+    }
+
     public void testBulkLoad() {
         List<String> keys = Arrays.asList("2|1", "1|1", "1|4", "2/6", "4", "6", "1");
         for (String key : keys) {
-            System.out.println(Main.hash(key.getBytes(), key.length(), 0xe17a1465)%8);
+            System.out.println(Main.hash(key.getBytes(), key.length(), 0xe17a1465) % 8);
         }
 //        I0715 21:37:10.869352 13732 tablet_impl_test.cc:5643] hash(2|1) = 0
 //        I0715 21:37:10.869369 13732 tablet_impl_test.cc:5643] hash(1|1) = 2

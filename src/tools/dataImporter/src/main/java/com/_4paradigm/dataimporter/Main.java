@@ -65,8 +65,8 @@ public class Main {
         logger.info("Start...");
         List<CSVRecord> rows = null;
         try {
-//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); // 192M
-            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.debug"); // debug
+            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); //big 1.4G // 192M
+//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.debug"); // debug
             CSVParser parser = new CSVParser(in, CSVFormat.EXCEL.withHeader());
             // pickup_datetime & dropoff_datetime need to transform to timestamp
             rows = parser.getRecords();
@@ -104,7 +104,7 @@ public class Main {
                     "dropoff_latitude double,\n" +
                     "store_and_fwd_flag string,\n" +
                     "trip_duration int,\n" +
-                    "index(key=id, ts=pickup_datetime))partitionnum=2" +
+                    "index(key=id, ts=pickup_datetime))partitionnum=8" +
 //                    "index(key=(vendor_id, passenger_count), ts=pickup_datetime),\n" +
 //                    "index(key=passenger_count, ts=dropoff_datetime))\n" +
                     ";");
@@ -192,7 +192,7 @@ public class Main {
             for (String tableId : tables) {
                 byte[] tableInfo = client.getData().forPath(tableInfoPath + "/" + tableId);
                 Nameserver.TableInfo info = Nameserver.TableInfo.parseFrom(tableInfo);
-                logger.info(info.toString());
+                logger.debug(info.toString());
                 if (info.getName().equals(tableName)) {
                     testTable = info;
                 }
@@ -258,7 +258,9 @@ public class Main {
         for (CSVRecord record : rows) {
             // TODO(hw): can't use SQLInsertRow. GetRow() will get the wrong data. But we still need it to get dims & tsDims.
             SQLInsertRow row = router.getInsertRow(dbName, insertPlaceHolder);
-            logger.info(record.toString());
+            if (logger.isDebugEnabled()) {
+                logger.debug(record.toString());
+            }
             // fulfill insertRow
             int strLength = stringCols.stream().mapToInt(col -> record.get(col).length()).sum();
             row.Init(strLength);
@@ -366,8 +368,8 @@ public class Main {
         public int ONE_IDX = 0;
         public int NO_IDX = 0;
 
-        // TODO(hw): SegmentIndexMap treeMap, can do reverse iter? comparator1, Slice::compare, comparator2, TimeComparator
-        Map<String, List<Map<Long, Integer>>> keyEntries = new TreeMap<>();
+        // String key reverse order, so it's !SliceComparator
+        Map<String, List<Map<Long, Integer>>> keyEntries = new TreeMap<>((a, b) -> -a.compareTo(b));
 
         public SegmentIndexRegion(int tsCnt, Map<Integer, Integer> tsIdxMap) {
             this.tsCnt = tsCnt;
@@ -378,7 +380,8 @@ public class Main {
             List<Map<Long, Integer>> entryList = keyEntries.getOrDefault(key, new ArrayList<>());
             if (entryList.isEmpty()) {
                 for (int i = 0; i < tsCnt; i++) {
-                    entryList.add(new TreeMap<>());// TODO(hw): comparator?
+                    // !TimeComparator, original TimeComparator is reverse ordered, so here use the default.
+                    entryList.add(new TreeMap<>());
                 }
                 keyEntries.put(key, entryList);
             }
@@ -421,6 +424,7 @@ public class Main {
         // serialize to `message Segment`
         public API.Segment toProtobuf() {
             API.Segment.Builder builder = API.Segment.newBuilder();
+
             keyEntries.forEach((key, keyEntry) -> {
                 API.Segment.KeyEntries.Builder keyEntriesBuilder = builder.addKeyEntriesBuilder();
                 keyEntriesBuilder.setKey(copyFromUtf8(key));

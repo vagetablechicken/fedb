@@ -638,6 +638,7 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
         }
         replicator->AppendEntry(entry);
     } while (false);
+
     uint64_t end_time = ::baidu::common::timer::get_micros();
     if (start_time + FLAGS_put_slow_log_threshold < end_time) {
         std::string key;
@@ -657,6 +658,7 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
               request->tid(), request->pid());
     }
     done->Run();
+
     if (replicator) {
         if (FLAGS_binlog_notify_on_put) {
             replicator->Notify();
@@ -4908,7 +4910,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
         }
     } while (false);
     uint64_t end_time = ::baidu::common::timer::get_micros();
-
+    // TODO(hw): binlog percentage, binlog_total_time/log_num => write speed, log_num/total_time =? wps
     PDLOG(INFO, "tid %u-pid %u, bulk load cost %lu us", request->tid(), request->pid(), end_time - start_time);
 
     if (replicator) {
