@@ -13,7 +13,7 @@ import java.util.Map;
 public class MainTest extends TestCase {
 
     public void testSegmentIndexRegion() {
-        Main.SegmentIndexRegion region = new Main.SegmentIndexRegion(1, null);
+        BulkLoadRequest.SegmentIndexRegion region = new BulkLoadRequest.SegmentIndexRegion(1, null);
         Map<String, List<Map<Long, Integer>>> treeMap = region.keyEntries;
         // test tree map, should be in reverse order, s11 > s1 > S1
         List<String> keys = Arrays.asList("s11", "s1", "S1");
