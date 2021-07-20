@@ -32,6 +32,7 @@ public class BulkLoadGenerator implements Runnable {
 
     public static class FeedItem {
         public final Map<Integer, List<Pair<String, Integer>>> dims;
+        public final List<Long> tsDims; // TODO(hw): how to use uint64? BigInteger is low-effective
         public final Map<String, String> valueMap;
 
         public FeedItem(Map<Integer, List<Pair<String, Integer>>> dims, Set<Integer> tsSet, CSVRecord record) {
@@ -40,7 +41,11 @@ public class BulkLoadGenerator implements Runnable {
             // TODO(hw): can't support no header csv now
             Preconditions.checkNotNull(valueMap);
             // TODO(hw): build tsDims here!! copy then improve
-
+            tsDims = new ArrayList<>();
+            for (Integer tsPos : tsSet) {
+                // only kTimeStamp type
+                tsDims.add((Long) buildTypedValues(record.get(tsPos), Type.DataType.kTimestamp));
+            }
         }
     }
 
@@ -73,7 +78,7 @@ public class BulkLoadGenerator implements Runnable {
         try {
             // exit statement: shutdown and no element in queue, or internal exit
             long startTime = System.currentTimeMillis();
-            long generateTotalTime = 0;
+            long realGenTime = 0;
             while (!shutdown.get() || !this.queue.isEmpty()) {
                 FeedItem item = this.queue.poll(this.pollTimeout, TimeUnit.MILLISECONDS);
                 if (item == null) {
@@ -81,6 +86,7 @@ public class BulkLoadGenerator implements Runnable {
                     continue;
                 }
                 long realStartTime = System.currentTimeMillis();
+
                 List<Object> rowValues = new ArrayList<>();
                 for (int j = 0; j < tableInfo.getColumnDescCount(); j++) {
                     Common.ColumnDesc desc = tableInfo.getColumnDesc(j);
@@ -102,16 +108,16 @@ public class BulkLoadGenerator implements Runnable {
                 List<Pair<String, Integer>> dimensions = item.dims.get(this.pid);
 
                 // tsDimensions[idx] has 0 or 1 ts, we convert it to API.TSDimensions for simplicity
-                List<API.TSDimension> tsDimensions = parseTsDims();
-                for (int i = 0; i < tsDimVec.size(); i++) {
-                    tsDimensions.add(API.TSDimension.newBuilder().setIdx(i).setTs(tsDimVec.get(i)).build());
+                List<API.TSDimension> tsDimensions = new ArrayList<>();
+                for (int i = 0; i < item.tsDims.size(); i++) {
+                    tsDimensions.add(API.TSDimension.newBuilder().setIdx(i).setTs(item.tsDims.get(i)).build());
                 }
                 // If no ts, use current time
                 long time = System.currentTimeMillis();
 
                 Map<Integer, String> innerIndexKeyMap = new HashMap<>();
                 // PairStrInt: str-key, int-idx. == message Dimension
-                for (Pair<String, Integer>dim : dimensions) {
+                for (Pair<String, Integer> dim : dimensions) {
                     String key = dim.getKey();
                     long idx = dim.getValue();
                     // TODO(hw): idx is uint32, but info size is int
@@ -196,11 +202,11 @@ public class BulkLoadGenerator implements Runnable {
                 bulkLoadRequest.dataBlockInfoList.add(dataBlockInfoBuilder.build());
                 // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
                 long realEndTime = System.currentTimeMillis();
-                generateTotalTime += (realEndTime - realStartTime);
+                realGenTime += (realEndTime - realStartTime);
             }
             long generateTime = System.currentTimeMillis();
             logger.info("Thread {} for MemTable(tid-pid {}-{}), generate cost {} ms, real cost {} ms",
-                    Thread.currentThread().getId(), tid, pid, generateTime - startTime, generateTotalTime);
+                    Thread.currentThread().getId(), tid, pid, generateTime - startTime, realGenTime);
             // TODO(hw): force shutdown - don't send rpc
 
             // TODO(hw): request -> pb
@@ -223,26 +229,6 @@ public class BulkLoadGenerator implements Runnable {
             e.printStackTrace();
             internalErrorOcc.set(true);
         }
-    }
-
-    private List<API.TSDimension> parseTsDims(Map<String, String> valueMap) {
-        List<API.TSDimension> tsDimensions = new ArrayList<>();
-        for (int idx = 0; idx < table_info_->column_key_size(); ++idx) {
-            for (const auto& column : table_info_->column_key(idx).col_name()) {
-                index_map_[idx].push_back(column_name_map[column]);
-                raw_dimensions_[column_name_map[column]] =
-                        hybridse::codec::NONETOKEN;
-            }
-            if (!table_info_->column_key(idx).ts_name().empty()) {
-                ts_set_.insert(column_name_map[table_info_->column_key(idx).ts_name()]);
-            }
-        }
-
-        for(Common.ColumnDesc desc: tableInfo.getColumnDescList()){
-            if(desc.)
-            valueMap.get(desc.getName())
-        }
-        return null;
     }
 
     public void feed(FeedItem item) throws InterruptedException {
@@ -271,6 +257,7 @@ public class BulkLoadGenerator implements Runnable {
                 return Float.parseFloat(v);
             case kDouble:
                 return Double.parseDouble(v);
+            case kVarchar:
             case kString:
                 return v;
             case kDate:

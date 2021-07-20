@@ -12,8 +12,13 @@ import com.baidu.brpc.RpcContext;
 import com.baidu.brpc.client.BrpcProxy;
 import com.baidu.brpc.client.RpcClient;
 import com.baidu.brpc.client.RpcClientOptions;
+import com.baidu.brpc.exceptions.RpcException;
+import com.baidu.brpc.interceptor.Interceptor;
+import com.baidu.brpc.interceptor.InterceptorChain;
 import com.baidu.brpc.loadbalance.LoadBalanceStrategy;
 import com.baidu.brpc.protocol.Options;
+import com.baidu.brpc.protocol.Request;
+import com.baidu.brpc.protocol.Response;
 import com.google.common.base.Preconditions;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -49,7 +54,7 @@ public class Main {
         List<CSVRecord> rows = null;
         try {
             Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); //big 1.4G // 192M
-//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.debug"); // debug
+//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.small"); // debug
             CSVParser parser = new CSVParser(in, CSVFormat.EXCEL.withHeader());
             // pickup_datetime & dropoff_datetime need to transform to timestamp
             rows = parser.getRecords();
@@ -71,7 +76,7 @@ public class Main {
         option.setZkCluster("172.24.4.55:6181");
         option.setZkPath("/onebox");
 
-        int X = 1; // put_concurrency_limit default is 8
+        int X = 8; // put_concurrency_limit default is 8
 
         try {
             router = new SqlClusterExecutor(option);
@@ -111,9 +116,9 @@ public class Main {
         logger.info("rows {}, peek {}", rows.size(), rows.isEmpty() ? "" : rows.get(0).toString());
         long startTime = System.currentTimeMillis();
 
-        insertImport(X, rows, router, dbName, tableName);
+//        insertImport(X, rows, router, dbName, tableName);
 
-//        bulkLoadMulti(X, rows, router, dbName, tableName);
+        bulkLoadMulti(X, rows, router, dbName, tableName);
 
         long endTime = System.currentTimeMillis();
 
@@ -219,10 +224,26 @@ public class Main {
                 clientOption.setMinIdleConnections(10);
                 clientOption.setLoadBalanceType(LoadBalanceStrategy.LOAD_BALANCE_FAIR);
                 clientOption.setCompressType(Options.CompressType.COMPRESS_TYPE_NONE);
+                List<Interceptor> interceptors = new ArrayList<>();
+                interceptors.add(new Interceptor() {
+                    @Override
+                    public boolean handleRequest(Request request) {
+                        return true;
+                    }
 
+                    @Override
+                    public void handleResponse(Response response) {
+
+                    }
+
+                    @Override
+                    public void aroundProcess(Request request, Response response, InterceptorChain chain) throws RpcException {
+                        chain.intercept(request, response);
+                    }
+                });
                 // Must list://
                 String serviceUrl = "list://" + leader.getEndpoint();
-                RpcClient rpcClient = new RpcClient(serviceUrl, clientOption);
+                RpcClient rpcClient = new RpcClient(serviceUrl, clientOption, interceptors);
                 TabletService tabletService = BrpcProxy.getProxy(rpcClient, TabletService.class);
                 RpcContext.getContext().setLogId((long) partition.getPid());
                 API.BulkLoadInfoRequest infoRequest = API.BulkLoadInfoRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
@@ -260,17 +281,21 @@ public class Main {
                 keyCols.add(nameToIdx.get(colName));
                 keyIndexMap.put(i, keyCols);
             }
-            if(key.hasTsName()) {
+            if (key.hasTsName()) {
                 tsIdxSet.add(nameToIdx.get(key.getTsName()));
             }
         }
 
         for (CSVRecord record : rows) {
+            Map<Integer, List<Pair<String, Integer>>> dims = buildDimensions(record, keyIndexMap, testTable.getPartitionNum());
             if (logger.isDebugEnabled()) {
                 logger.debug(record.toString());
+                logger.debug(dims.entrySet().stream().map(entry -> entry.getKey().toString() + ": " +
+                        entry.getValue().stream().map(pair ->
+                                "<" + pair.getKey() + ", " + pair.getValue() + ">")
+                                .collect(Collectors.joining(", ", "(", ")")))
+                        .collect(Collectors.joining("], [", "[", "]")));
             }
-
-            Map<Integer, List<Pair<String, Integer>>> dims = buildDimensions(record, keyIndexMap, testTable.getPartitionNum());
 
             // Feed row to the bulk load generators for each MemTable(pid, tid)
             for (Integer pid : dims.keySet()) {
@@ -315,11 +340,11 @@ public class Main {
             List<Integer> keyCols = entry.getValue();
             String combinedKey = keyCols.stream().map(record::get).collect(Collectors.joining("|"));
             if (pidNum > 0) {
-                pid = (int) (MurmurHash.hash64(combinedKey) % pidNum);
+                pid = (int) Math.abs(MurmurHash.hash64(combinedKey) % pidNum);
             }
             List<Pair<String, Integer>> dim = dims.getOrDefault(pid, new ArrayList<>());
             dim.add(Pair.of(combinedKey, index));
-            dims.put(index, dim);
+            dims.put(pid, dim);
         }
         return dims;
     }
