@@ -1,12 +1,12 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.hybridsql.fedb.DataType;
-import com._4paradigm.hybridsql.fedb.SQLInsertRow;
-import com._4paradigm.hybridsql.fedb.Schema;
-import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
-import com._4paradigm.hybridsql.fedb.sdk.SqlException;
-import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
-import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
+import com._4paradigm.openmldb.DataType;
+import com._4paradigm.openmldb.SQLInsertRow;
+import com._4paradigm.openmldb.Schema;
+import com._4paradigm.openmldb.sdk.SdkOption;
+import com._4paradigm.openmldb.sdk.SqlException;
+import com._4paradigm.openmldb.sdk.SqlExecutor;
+import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor;
 
 public class Writer {
     private SqlExecutor router;

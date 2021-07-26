@@ -1,8 +1,8 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.fedb.common.Common.ColumnDesc;
-import com._4paradigm.fedb.type.Type.DataType;
-
+import com._4paradigm.openmldb.common.Common.ColumnDesc;
+import com._4paradigm.openmldb.type.Type.DataType;
+import com._4paradigm.openmldb.common.Common;
 import org.joda.time.DateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -301,7 +301,7 @@ public class RowBuilder {
         return true;
     }
 
-    public static ByteBuffer encode(Object[] row, List<ColumnDesc> schema, int schemaVer) throws RuntimeException {
+    public static ByteBuffer encode(Object[] row, List<Common.ColumnDesc> schema, int schemaVer) throws RuntimeException {
         if (row == null || row.length == 0 || schema == null || schema.size() == 0 || row.length != schema.size()) {
             throw new RuntimeException("input error");
         }
@@ -311,7 +311,7 @@ public class RowBuilder {
         ByteBuffer buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
         buffer = builder.setBuffer(buffer, size);
         for (int i = 0; i < schema.size(); i++) {
-            ColumnDesc columnDesc = schema.get(i);
+            Common.ColumnDesc columnDesc = schema.get(i);
             Object column = row[i];
             if (columnDesc.getNotNull()
                     && column == null) {

@@ -1,6 +1,6 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.fedb.api.API;
+import com._4paradigm.openmldb.api.Tablet;
 import com.google.common.base.Preconditions;
 
 import java.io.ByteArrayOutputStream;
@@ -17,9 +17,9 @@ public class BulkLoadRequest {
     // TODO(hw): private members below
     public List<List<SegmentIndexRegion>> segmentIndexMatrix;
     public ByteArrayOutputStream dataBlock = new ByteArrayOutputStream();
-    public List<API.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
+    public List<Tablet.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
 
-    public BulkLoadRequest(API.BulkLoadInfoResponse bulkLoadInfo) {
+    public BulkLoadRequest(Tablet.BulkLoadInfoResponse bulkLoadInfo) {
         segmentIndexMatrix = new ArrayList<>();
 
         bulkLoadInfo.getInnerSegmentsList().forEach(
@@ -29,8 +29,8 @@ public class BulkLoadRequest {
                             segmentInfo -> {
                                 // ts_idx_map array to map, proto2 doesn't support map.
                                 Map<Integer, Integer> tsIdxMap = segmentInfo.getTsIdxMapList().stream().collect(Collectors.toMap(
-                                        API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
-                                        API.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
+                                        Tablet.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getKey,
+                                        Tablet.BulkLoadInfoResponse.InnerSegments.Segment.MapFieldEntry::getValue)); // can't tolerate dup key
                                 int tsCnt = segmentInfo.getTsCnt();
                                 segments.add(new SegmentIndexRegion(tsCnt, tsIdxMap));
                             }
@@ -40,13 +40,13 @@ public class BulkLoadRequest {
         );
     }
 
-    public API.BulkLoadRequest toProtobuf(int tid, int pid) {
-        API.BulkLoadRequest.Builder requestBuilder = API.BulkLoadRequest.newBuilder();
+    public Tablet.BulkLoadRequest toProtobuf(int tid, int pid) {
+        Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
         requestBuilder.setTid(tid).setPid(pid);
 
         // segmentDataMaps -> BulkLoadIndex
         segmentIndexMatrix.forEach(segmentDataMap -> {
-            API.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
+            Tablet.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
 //                // TODO(hw):
 //                bulkLoadIndexBuilder.setInnerIndexId();
             segmentDataMap.forEach(segment -> {
@@ -93,7 +93,7 @@ public class BulkLoadRequest {
         }
 
         // TODO(hw): return val is only for debug
-        public boolean Put(String key, List<API.TSDimension> tsDimensions, Integer dataBlockId) {
+        public boolean Put(String key, List<Tablet.TSDimension> tsDimensions, Integer dataBlockId) {
             if (tsDimensions.isEmpty()) {
                 return false;
             }
@@ -106,13 +106,13 @@ public class BulkLoadRequest {
                     // tsCnt == 1 & has tsIdxMap, so tsIdxMap only has one element.
                     Preconditions.checkArgument(tsIdxMap.size() == 1);
                     Integer tsIdx = tsIdxMap.keySet().stream().collect(onlyElement());
-                    API.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
+                    Tablet.TSDimension needPutIdx = tsDimensions.stream().filter(tsDimension -> tsDimension.getIdx() == tsIdx).collect(onlyElement());
                     Put(key, this.ONE_IDX, needPutIdx.getTs(), dataBlockId);
                     put = true;
                 }
             } else {
                 // tsCnt != 1, KeyEntry array for one key
-                for (API.TSDimension tsDimension : tsDimensions) {
+                for (Tablet.TSDimension tsDimension : tsDimensions) {
                     Integer pos = tsIdxMap.get(tsDimension.getIdx());
                     if (pos == null) {
                         continue;
@@ -125,16 +125,16 @@ public class BulkLoadRequest {
         }
 
         // serialize to `message Segment`
-        public API.Segment toProtobuf() {
-            API.Segment.Builder builder = API.Segment.newBuilder();
+        public Tablet.Segment toProtobuf() {
+            Tablet.Segment.Builder builder = Tablet.Segment.newBuilder();
 
             keyEntries.forEach((key, keyEntry) -> {
-                API.Segment.KeyEntries.Builder keyEntriesBuilder = builder.addKeyEntriesBuilder();
+                Tablet.Segment.KeyEntries.Builder keyEntriesBuilder = builder.addKeyEntriesBuilder();
                 keyEntriesBuilder.setKey(copyFromUtf8(key));
                 keyEntry.forEach(timeEntries -> {
-                    API.Segment.KeyEntries.KeyEntry.Builder keyEntryBuilder = keyEntriesBuilder.addKeyEntryBuilder();
+                    Tablet.Segment.KeyEntries.KeyEntry.Builder keyEntryBuilder = keyEntriesBuilder.addKeyEntryBuilder();
                     timeEntries.forEach((time, blockId) -> {
-                        API.Segment.KeyEntries.KeyEntry.TimeEntry.Builder timeEntryBuilder = keyEntryBuilder.addTimeEntryBuilder();
+                        Tablet.Segment.KeyEntries.KeyEntry.TimeEntry.Builder timeEntryBuilder = keyEntryBuilder.addTimeEntryBuilder();
                         timeEntryBuilder.setTime(time).setBlockId(blockId);
                     });
                 });

@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
+syntax = "proto2";
+
 import "type.proto";
 import "common.proto";
 import "sql_procedure.proto";
 package openmldb.api;
 
 option cc_generic_services = true;
-option java_package = "com._4paradigm.fedb.api";
-option java_outer_classname = "API";
-// TODO(hw): java gen
-option java_generic_services = true;
+option java_package = "com._4paradigm.openmldb.api";
+option java_outer_classname = "Tablet";
 
 enum TableMode {
     kTableLeader = 1;

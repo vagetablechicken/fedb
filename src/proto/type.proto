@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+syntax = "proto2";
+
 package openmldb.type;
 
 option cc_generic_services = false;

@@ -831,7 +831,7 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
     return true;
 }
 
-MemTableKeyIterator::MemTableKeyIterator(Segment** segments, uint32_t seg_cnt, ::fedb::storage::TTLType ttl_type,
+MemTableKeyIterator::MemTableKeyIterator(Segment** segments, uint32_t seg_cnt, ::openmldb::storage::TTLType ttl_type,
                                          uint64_t expire_time, uint64_t expire_cnt, uint32_t ts_index)
     : segments_(segments),
       seg_cnt_(seg_cnt),

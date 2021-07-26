@@ -1,6 +1,6 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.fedb.api.API;
+import com._4paradigm.openmldb.api.Tablet;
 import junit.framework.TestCase;
 import org.junit.Assert;
 
@@ -23,7 +23,7 @@ public class MainTest extends TestCase {
 
         // inner tree map, TimeComparator is in desc order, so the reverse order is ascending order.
         List<Long> times = Arrays.asList(1111L, 2222L, 3333L);
-        times.forEach(time -> region.Put("s1", Collections.singletonList(API.TSDimension.newBuilder().setTs(time).build()), 0));
+        times.forEach(time -> region.Put("s1", Collections.singletonList(Tablet.TSDimension.newBuilder().setTs(time).build()), 0));
         Object[] timeArray = treeMap.get("s1").get(0).keySet().toArray();
         Assert.assertArrayEquals(times.toArray(), timeArray);
     }

@@ -1,9 +1,9 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.hybridsql.fedb.DataType;
-import com._4paradigm.hybridsql.fedb.SQLInsertRow;
-import com._4paradigm.hybridsql.fedb.Schema;
-import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
+import com._4paradigm.openmldb.DataType;
+import com._4paradigm.openmldb.SQLInsertRow;
+import com._4paradigm.openmldb.Schema;
+import com._4paradigm.openmldb.sdk.SqlExecutor;
 import org.apache.commons.csv.CSVRecord;
 import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;

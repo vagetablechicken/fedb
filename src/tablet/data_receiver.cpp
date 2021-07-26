@@ -18,9 +18,9 @@
 
 namespace openmldb {
 namespace tablet {
-bool DataReceiver::DataAppend(int data_part_id, const ::openmldb::api::BulkLoadRequest* request,
+bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request,
                               const butil::IOBuf& data) {
-    // TODO(hw): check part id
+    // TODO(hw): check part id in request
     // We must copy data from IOBuf, cuz the rows have different TTLs, it's not a good idea to keep them together.
     butil::IOBufBytesIterator iter(data);
     std::vector<DataBlock*> data_blocks(request->block_info_size());

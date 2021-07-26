@@ -1,41 +1,27 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.hybridsql.fedb.SQLInsertRow;
-import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
-import com._4paradigm.hybridsql.fedb.sdk.SqlException;
-import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
-import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
-import junit.framework.TestCase;
+import com.csvreader.CsvReader;
+import com.csvreader.CsvWriter;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FileUtil;
-
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-
-import com.csvreader.CsvReader;
-import com.csvreader.CsvWriter;
-
-import org.apache.hadoop.hdfs.MiniDFSCluster;
 
 public class FileSystemManagerTest {
     private static final Logger logger = Logger.getLogger(FileSystemManager.class);
@@ -108,37 +94,6 @@ public class FileSystemManagerTest {
         CsvReader reader = new CsvReader(inStream, ',', StandardCharsets.UTF_8);
         // 跳过表头 如果需要表头的话，这句可以忽略
         reader.readHeaders(); // TODO(hw): check schema if exists
-
-
-        // TODO(hw): write to fedb
-        SdkOption option = new SdkOption();
-        option.setZkPath("");
-        option.setZkCluster("");
-        option.setSessionTimeout(200000);
-
-        try {
-            SqlExecutor router = new SqlClusterExecutor(option);
-            String dbName = "";
-            int cc = reader.getColumnCount();
-
-            StringBuilder insertPlaceholder = new StringBuilder("insert into tsql1010 values("); // TODO(hw): table name
-            for (int i = 0; i < cc; ++i) {
-                insertPlaceholder.append((i == 0) ? "?" : ",?");
-            }
-            insertPlaceholder.append(");");
-            SQLInsertRow insertRow = router.getInsertRow(dbName, insertPlaceholder.toString()); // TODO(hw): rows?
-
-            // 逐行读入除表头的数据
-            while (reader.readRecord()) {
-                String[] values = reader.getValues();
-                insertRow.delete();
-                Writer.Vec2SQLRequestRow(values, insertRow);
-
-            }
-            reader.close();
-        } catch (SqlException e) {
-            e.printStackTrace();
-        }
 
         // TODO(hw): InsertPreparedStatementImpl
 

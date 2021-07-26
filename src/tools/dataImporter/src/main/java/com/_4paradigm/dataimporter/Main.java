@@ -1,13 +1,13 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.fedb.api.API;
-import com._4paradigm.fedb.common.Common;
-import com._4paradigm.fedb.nameserver.Nameserver;
-import com._4paradigm.hybridsql.fedb.SQLInsertRow;
-import com._4paradigm.hybridsql.fedb.Schema;
-import com._4paradigm.hybridsql.fedb.sdk.SdkOption;
-import com._4paradigm.hybridsql.fedb.sdk.SqlExecutor;
-import com._4paradigm.hybridsql.fedb.sdk.impl.SqlClusterExecutor;
+import com._4paradigm.openmldb.SQLInsertRow;
+import com._4paradigm.openmldb.Schema;
+import com._4paradigm.openmldb.api.Tablet;
+import com._4paradigm.openmldb.common.Common;
+import com._4paradigm.openmldb.ns.NS;
+import com._4paradigm.openmldb.sdk.SdkOption;
+import com._4paradigm.openmldb.sdk.SqlExecutor;
+import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor;
 import com.baidu.brpc.RpcContext;
 import com.baidu.brpc.client.BrpcProxy;
 import com.baidu.brpc.client.RpcClient;
@@ -182,7 +182,7 @@ public class Main {
         RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
         CuratorFramework client = CuratorFrameworkFactory.newClient("172.24.4.55:6181", retryPolicy);
         client.start();
-        Nameserver.TableInfo testTable = null;
+        NS.TableInfo testTable = null;
         Map<Integer, BulkLoadGenerator> generators = new HashMap<>();
         List<Thread> threads = new ArrayList<>();
         List<RpcClient> rpcClients = new ArrayList<>();
@@ -194,7 +194,7 @@ public class Main {
 
             for (String tableId : tables) {
                 byte[] tableInfo = client.getData().forPath(tableInfoPath + "/" + tableId);
-                Nameserver.TableInfo info = Nameserver.TableInfo.parseFrom(tableInfo);
+                NS.TableInfo info = NS.TableInfo.parseFrom(tableInfo);
                 logger.debug(info.toString());
                 if (info.getName().equals(tableName)) {
                     testTable = info;
@@ -206,9 +206,9 @@ public class Main {
             //  And MemTable::table_index_ may be modified by AddIndex()/Delete...,
             //  so we should get table_index_'s info from MemTable, to know the real status.
             //  And the status can't be changed until bulk lood finished.
-            for (Nameserver.TablePartition partition : testTable.getTablePartitionList()) {
+            for (NS.TablePartition partition : testTable.getTablePartitionList()) {
                 logger.info("tid-pid {}-{}, {}", testTable.getTid(), partition.getPid(), partition.getPartitionMetaList());
-                Nameserver.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(Nameserver.PartitionMeta::getIsLeader).collect(onlyElement());
+                NS.PartitionMeta leader = partition.getPartitionMetaList().stream().filter(NS.PartitionMeta::getIsLeader).collect(onlyElement());
 
                 //  http/h2 can't add attachment, cuz it use attachment to pass message. So we need to use brpc-java
                 RpcClientOptions clientOption = new RpcClientOptions();
@@ -226,12 +226,12 @@ public class Main {
                 RpcClient rpcClient = new RpcClient(serviceUrl, clientOption);
                 TabletService tabletService = BrpcProxy.getProxy(rpcClient, TabletService.class);
                 RpcContext.getContext().setLogId((long) partition.getPid());
-                API.BulkLoadInfoRequest infoRequest = API.BulkLoadInfoRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
-                API.BulkLoadInfoResponse bulkLoadInfo = tabletService.getBulkLoadInfo(infoRequest);
+                Tablet.BulkLoadInfoRequest infoRequest = Tablet.BulkLoadInfoRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
+                Tablet.BulkLoadInfoResponse bulkLoadInfo = tabletService.getBulkLoadInfo(infoRequest);
                 logger.debug("get bulk load info: {}", bulkLoadInfo);
 
                 // generate & send requests by BulkLoadGenerator
-                // TODO(hw): schema could get from Nameserver.TableInfo?
+                // TODO(hw): schema could get from NS.TableInfo?
                 BulkLoadGenerator generator = new BulkLoadGenerator(testTable.getTid(), partition.getPid(), testTable, bulkLoadInfo, tabletService);
                 generators.put(partition.getPid(), generator);
                 threads.add(new Thread(generator));
@@ -280,7 +280,7 @@ public class Main {
             // Feed row to the bulk load generators for each MemTable(pid, tid)
             for (Integer pid : dims.keySet()) {
                 try {
-                    // nameserver pid is int
+                    // NS pid is int
                     // TODO(hw): no need to calc dims twice
                     generators.get(pid).feed(new BulkLoadGenerator.FeedItem(dims, tsIdxSet, record));
                 } catch (InterruptedException e) {

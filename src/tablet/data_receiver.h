@@ -26,7 +26,7 @@ class DataReceiver {
  public:
     DataReceiver() = default;
     DataReceiver(uint32_t tid, uint32_t pid) : tid_(tid), pid_(pid) {}
-    bool DataAppend(int data_part_id, const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data);
+    bool DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data);
     bool WriteBinlogToReplicator(std::shared_ptr<replica::LogReplicator> replicator,
                                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
 

@@ -23,10 +23,13 @@
 namespace openmldb::tablet {
 class BulkLoadMgr {
  public:
-    bool DataAppend(uint32_t tid, uint32_t pid, int data_part_id, const ::openmldb::api::BulkLoadRequest* request,
+    bool DataAppend(uint32_t tid, uint32_t pid, const ::openmldb::api::BulkLoadRequest* request,
                     const butil::IOBuf& data);
     bool WriteBinlogToReplicator(uint32_t tid, uint32_t pid, std::shared_ptr<replica::LogReplicator> replicator,
                                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
+
+ private:
+    std::shared_ptr<DataReceiver> GetDataReceiver(uint32_t tid, uint32_t pid, bool create);
 
  private:
     // RWLock is not easy when we're using two-level map catalog. Use unique lock for simplicity.

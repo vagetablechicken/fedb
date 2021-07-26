@@ -1,9 +1,7 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.fedb.common.Common.ColumnKey;
-import com._4paradigm.fedb.common.Common.ColumnDesc;
-import com._4paradigm.fedb.type.Type.DataType;
-import com._4paradigm.fedb.type.Type.IndexType;
+import com._4paradigm.openmldb.common.Common.ColumnDesc;
+import com._4paradigm.openmldb.type.Type.DataType;
 
 import java.nio.charset.Charset;
 import java.util.HashMap;

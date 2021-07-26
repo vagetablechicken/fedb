@@ -1,9 +1,9 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.fedb.api.API;
-import com._4paradigm.fedb.common.Common;
-import com._4paradigm.fedb.nameserver.Nameserver;
-import com._4paradigm.fedb.type.Type;
+import com._4paradigm.openmldb.api.Tablet;
+import com._4paradigm.openmldb.common.Common;
+import com._4paradigm.openmldb.ns.NS;
+import com._4paradigm.openmldb.type.Type;
 import com.baidu.brpc.RpcContext;
 import com.google.common.base.Preconditions;
 import org.apache.commons.csv.CSVRecord;
@@ -55,12 +55,12 @@ public class BulkLoadGenerator implements Runnable {
     private final long pollTimeout;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
     private final AtomicBoolean internalErrorOcc = new AtomicBoolean(false);
-    private final Nameserver.TableInfo tableInfo;
-    private final API.BulkLoadInfoResponse indexInfoFromTablet; // TODO(hw): not a good name
+    private final NS.TableInfo tableInfo;
+    private final Tablet.BulkLoadInfoResponse indexInfoFromTablet; // TODO(hw): not a good name
     private final BulkLoadRequest bulkLoadRequest;
     private final TabletService service;
 
-    public BulkLoadGenerator(int tid, int pid, Nameserver.TableInfo tableInfo, API.BulkLoadInfoResponse indexInfo, TabletService service) {
+    public BulkLoadGenerator(int tid, int pid, NS.TableInfo tableInfo, Tablet.BulkLoadInfoResponse indexInfo, TabletService service) {
         this.tid = tid;
         this.pid = pid;
         this.queue = new ArrayBlockingQueue<>(1000);
@@ -107,10 +107,10 @@ public class BulkLoadGenerator implements Runnable {
                 //  拿insertRow的dims等信息，需要改sdk swig，但java复制步骤代码量不小，还是改sdk更容易。
                 List<Pair<String, Integer>> dimensions = item.dims.get(this.pid);
 
-                // tsDimensions[idx] has 0 or 1 ts, we convert it to API.TSDimensions for simplicity
-                List<API.TSDimension> tsDimensions = new ArrayList<>();
+                // tsDimensions[idx] has 0 or 1 ts, we convert it to Tablet.TSDimensions for simplicity
+                List<Tablet.TSDimension> tsDimensions = new ArrayList<>();
                 for (int i = 0; i < item.tsDims.size(); i++) {
-                    tsDimensions.add(API.TSDimension.newBuilder().setIdx(i).setTs(item.tsDims.get(i)).build());
+                    tsDimensions.add(Tablet.TSDimension.newBuilder().setIdx(i).setTs(item.tsDims.get(i)).build());
                 }
                 // If no ts, use current time
                 long time = System.currentTimeMillis();
@@ -128,7 +128,7 @@ public class BulkLoadGenerator implements Runnable {
                 // Index Region insert, only use id
                 int dataBlockId = bulkLoadRequest.dataBlockInfoList.size();
                 // set the dataBlockInfo's ref count when index region insertion
-                API.DataBlockInfo.Builder dataBlockInfoBuilder = API.DataBlockInfo.newBuilder();
+                Tablet.DataBlockInfo.Builder dataBlockInfoBuilder = Tablet.DataBlockInfo.newBuilder();
 
                 // TODO(hw): we use ExecuteInsert logic, so never call `table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());`
                 //  即，不存在dims不存在却有ts dims的情况
@@ -142,8 +142,8 @@ public class BulkLoadGenerator implements Runnable {
                 // 2. if tsDimensions is not empty, we will find the corresponding tsDimensions to put data. If can't find, continue.
                 innerIndexKeyMap.forEach((k, v) -> {
                     // TODO(hw): check idx valid
-                    API.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfoFromTablet.getInnerIndex(k);
-                    for (API.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
+                    Tablet.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfoFromTablet.getInnerIndex(k);
+                    for (Tablet.BulkLoadInfoResponse.InnerIndexSt.IndexDef indexDef : innerIndex.getIndexDefList()) {
                         //
                         if (tsDimensions.isEmpty() && indexDef.getTsIdx() != -1) {
                             throw new RuntimeException("IndexStatus has the ts column, but InsertRow doesn't have tsDimensions.");
@@ -166,15 +166,15 @@ public class BulkLoadGenerator implements Runnable {
                 });
 
                 // if no tsDimensions, it's ok to warp the current time into tsDimensions.
-                List<API.TSDimension> tsDimsWrap = tsDimensions;
+                List<Tablet.TSDimension> tsDimsWrap = tsDimensions;
                 if (tsDimensions.isEmpty()) {
-                    tsDimsWrap = Collections.singletonList(API.TSDimension.newBuilder().setTs(time).build());
+                    tsDimsWrap = Collections.singletonList(Tablet.TSDimension.newBuilder().setTs(time).build());
                 }
                 for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
                     Integer idx = idx2key.getKey();
                     String key = idx2key.getValue();
-                    API.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfoFromTablet.getInnerIndex(idx);
-                    boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(API.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
+                    Tablet.BulkLoadInfoResponse.InnerIndexSt innerIndex = indexInfoFromTablet.getInnerIndex(idx);
+                    boolean needPut = innerIndex.getIndexDefList().stream().anyMatch(Tablet.BulkLoadInfoResponse.InnerIndexSt.IndexDef::getIsReady);
                     if (needPut) {
                         long segIdx = 0;
                         if (indexInfoFromTablet.getSegCnt() > 1) {
@@ -213,13 +213,13 @@ public class BulkLoadGenerator implements Runnable {
             // TODO(hw): request -> pb
             logger.info("bulkLoadRequest brief info: total rows {}, data total size {}",
                     bulkLoadRequest.dataBlockInfoList.size(), bulkLoadRequest.dataBlock.size());
-            API.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid);
+            Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid);
             if (logger.isDebugEnabled()) {
                 logger.debug("bulk load request {}", request);
             }
             // TODO(hw): send rpc
             RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
-            API.GeneralResponse response = service.bulkLoad(request);
+            Tablet.GeneralResponse response = service.bulkLoad(request);
             if (logger.isDebugEnabled()) {
                 logger.debug("bulk load resp: {}", response);
             }
