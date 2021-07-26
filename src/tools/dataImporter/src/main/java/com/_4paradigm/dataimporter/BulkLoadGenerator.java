@@ -204,6 +204,7 @@ public class BulkLoadGenerator implements Runnable {
                 long realEndTime = System.currentTimeMillis();
                 realGenTime += (realEndTime - realStartTime);
             }
+
             long generateTime = System.currentTimeMillis();
             logger.info("Thread {} for MemTable(tid-pid {}-{}), generate cost {} ms, real cost {} ms",
                     Thread.currentThread().getId(), tid, pid, generateTime - startTime, realGenTime);

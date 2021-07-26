@@ -33,6 +33,7 @@
 #include "catalog/schema_adapter.h"
 #include "catalog/tablet_catalog.h"
 #include "common/thread_pool.h"
+#include "data_receiver.h"
 #include "proto/tablet.pb.h"
 #include "replica/log_replicator.h"
 #include "storage/mem_table.h"
@@ -342,6 +343,9 @@ class TabletImpl : public ::openmldb::api::TabletServer {
     void GetBulkLoadInfo(RpcController* controller, const ::openmldb::api::BulkLoadInfoRequest* request,
                   ::openmldb::api::BulkLoadInfoResponse* response, Closure* done);
 
+    void GetBulkLoadInfo(RpcController* controller, const ::openmldb::api::BulkLoadInfoRequest* request,
+                         ::openmldb::api::BulkLoadInfoResponse* response, Closure* done);
+
     void BulkLoad(RpcController* controller, const ::openmldb::api::BulkLoadRequest* request,
                   ::openmldb::api::GeneralResponse* response, Closure* done);
 
@@ -486,6 +490,7 @@ class TabletImpl : public ::openmldb::api::TabletServer {
     std::map<uint64_t, std::list<std::shared_ptr<::openmldb::api::TaskInfo>>> task_map_;
     std::set<std::string> sync_snapshot_set_;
     std::map<std::string, std::shared_ptr<FileReceiver>> file_receiver_map_;
+    std::map<uint32_t, std::map<uint32_t, std::shared_ptr<DataReceiver>>> data_receiver_map_;
     brpc::Server* server_;
     std::vector<std::string> mode_root_paths_;
     std::vector<std::string> mode_recycle_root_paths_;

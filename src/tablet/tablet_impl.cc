@@ -617,6 +617,7 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
         done->Run();
         return;
     }
+
     response->set_code(::openmldb::base::ReturnCode::kOk);
     std::shared_ptr<LogReplicator> replicator;
     do {
@@ -4811,13 +4812,17 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
                           ::fedb::api::GeneralResponse* response, Closure* done) {
     brpc::ClosureGuard done_guard(done);
     DLOG(INFO) << "BulkLoad";
+    response->set_code(::fedb::base::ReturnCode::kOk);
+
     if (follower_.load(std::memory_order_relaxed)) {
         response->set_code(::fedb::base::ReturnCode::kIsFollowerCluster);
         response->set_msg("is follower cluster");
         return;
     }
     uint64_t start_time = ::baidu::common::timer::get_micros();
-    std::shared_ptr<Table> table = GetTable(request->tid(), request->pid());
+    auto tid = request->tid();
+    auto pid = request->pid();
+    std::shared_ptr<Table> table = GetTable(tid, pid);
     if (!table) {
         PDLOG(WARNING, "table is not exist. tid %u, pid %u", request->tid(), request->pid());
         response->set_code(::fedb::base::ReturnCode::kTableIsNotExist);
@@ -4836,38 +4841,48 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
         return;
     }
 
+    // DataRegion & IndexRegion, when we get IndexRegion rpc, empty DataRegion is available
     auto* cntl = dynamic_cast<brpc::Controller*>(controller);
     const auto& data = cntl->request_attachment();
-    if (data.empty()) {
-        // TODO(hw): return error, do not send a empty request
-        PDLOG(WARNING, "empty data");
-        response->set_code(100);
+    // data is a part of MemTable data, DataReceiver of MemTable is in charge of it.
+    if (!data.empty()) {
+        // Get data receiver
+        std::lock_guard<std::mutex> lock(mu_);
+        auto data_receiver = data_receiver_map_[tid][pid];
+        if(!data_receiver){
+            data_receiver.reset(new DataReceiver(tid, pid));
+        }
+        // We must copy data from IOBuf, cuz the rows have different TTLs, it's not a good idea to keep them together.
+        butil::IOBufBytesIterator iter(data);
+        std::vector<DataBlock*> data_blocks(request->block_info_size());
+        for (int i = 0; i < request->block_info_size(); ++i) {
+            const auto& info = request->block_info(i);
+            auto buf = new char[info.length()];
+            iter.copy_and_forward(buf, info.length());
+            data_blocks[i] = new DataBlock(info.ref_cnt(), buf, info.length(), true);
+            DLOG(INFO) << "bulk load request(data block) len " << info.length();
+        }
+        if (iter.bytes_left() != 0) {
+            // TODO(hw): error
+            PDLOG(WARNING, "data info mismatch");
+            response->set_code(::fedb::base::ReturnCode::kReceiveDataError);
+            return;
+        }
+        DLOG(INFO) << "data_blocks size: " << data_blocks.size();
+    }
+
+    if (request->index_region_size() == 0) {
         return;
     }
 
-    // We must copy data from IOBuf, cuz the rows have different TTLs, it's not a good idea to keep them together.
-    butil::IOBufBytesIterator iter(data);
-    std::vector<DataBlock*> data_blocks(request->block_info_size());
-    for (int i = 0; i < request->block_info_size(); ++i) {
-        const auto& info = request->block_info(i);
-        auto buf = new char[info.length()];
-        iter.copy_and_forward(buf, info.length());
-        data_blocks[i] = new DataBlock(info.ref_cnt(), buf, info.length(), true);
-        DLOG(INFO) << "bulk load request(data block) len " << info.length();
-    }
-    if (iter.bytes_left() != 0) {
-        // TODO(hw): error
-        PDLOG(WARNING, "data info mismatch");
-        response->set_code(100);
-        return;
-    }
-    DLOG(INFO) << "data_blocks size: " << data_blocks.size();
+    LOG(INFO) << "get index region, do bulk load";
     if (!std::dynamic_pointer_cast<MemTable>(table)->BulkLoad(data_blocks, request->index_region())) {
         // TODO(hw): error
         PDLOG(WARNING, "bulk load failed");
         response->set_code(100);
         return;
     }
+
     uint64_t load_time = ::baidu::common::timer::get_micros();
 
     PDLOG(INFO, "tid %u-pid %u, bulk load only load cost %lu us", request->tid(), request->pid(),
@@ -4875,6 +4890,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
 
     response->set_code(::fedb::base::ReturnCode::kOk);
     std::shared_ptr<LogReplicator> replicator;
+    uint64_t log_num = 0;
     do {
         replicator = GetReplicator(request->tid(), request->pid());
         if (!replicator) {
@@ -4903,6 +4919,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
                             entry.set_value(block->data, block->size);
                             entry.set_term(replicator->GetLeaderTerm());
                             replicator->AppendEntry(entry);
+                            log_num++;
                         }
                     }
                 }
@@ -4911,7 +4928,8 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::fedb::api::BulkLoad
     } while (false);
     uint64_t end_time = ::baidu::common::timer::get_micros();
     // TODO(hw): binlog percentage, binlog_total_time/log_num => write speed, log_num/total_time =? wps
-    PDLOG(INFO, "tid %u-pid %u, bulk load cost %lu us", request->tid(), request->pid(), end_time - start_time);
+    PDLOG(INFO, "tid %u-pid %u, bulk load cost %lu us, binlog cost %lu, log num %lu", request->tid(), request->pid(),
+          end_time - start_time, end_time - load_time, log_num);
 
     if (replicator) {
         if (FLAGS_binlog_notify_on_put) {

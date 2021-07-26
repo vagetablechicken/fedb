@@ -767,8 +767,9 @@ message BulkLoadIndex {
 message BulkLoadRequest {
     optional uint32 tid = 1;
     optional uint32 pid = 2;
-    repeated BulkLoadIndex index_region = 3;
+    optional int32 data_part_id = 3;
     repeated DataBlockInfo block_info = 4;  // idx is the block id, entries in Index are using the block id
+    repeated BulkLoadIndex index_region = 5;
 }
 
 message BulkLoadInfoRequest {

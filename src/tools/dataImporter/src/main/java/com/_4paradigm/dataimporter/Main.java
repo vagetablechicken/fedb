@@ -12,13 +12,8 @@ import com.baidu.brpc.RpcContext;
 import com.baidu.brpc.client.BrpcProxy;
 import com.baidu.brpc.client.RpcClient;
 import com.baidu.brpc.client.RpcClientOptions;
-import com.baidu.brpc.exceptions.RpcException;
-import com.baidu.brpc.interceptor.Interceptor;
-import com.baidu.brpc.interceptor.InterceptorChain;
 import com.baidu.brpc.loadbalance.LoadBalanceStrategy;
 import com.baidu.brpc.protocol.Options;
-import com.baidu.brpc.protocol.Request;
-import com.baidu.brpc.protocol.Response;
 import com.google.common.base.Preconditions;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -224,26 +219,11 @@ public class Main {
                 clientOption.setMinIdleConnections(10);
                 clientOption.setLoadBalanceType(LoadBalanceStrategy.LOAD_BALANCE_FAIR);
                 clientOption.setCompressType(Options.CompressType.COMPRESS_TYPE_NONE);
-                List<Interceptor> interceptors = new ArrayList<>();
-                interceptors.add(new Interceptor() {
-                    @Override
-                    public boolean handleRequest(Request request) {
-                        return true;
-                    }
+                clientOption.setGlobalThreadPoolSharing(true);
 
-                    @Override
-                    public void handleResponse(Response response) {
-
-                    }
-
-                    @Override
-                    public void aroundProcess(Request request, Response response, InterceptorChain chain) throws RpcException {
-                        chain.intercept(request, response);
-                    }
-                });
                 // Must list://
                 String serviceUrl = "list://" + leader.getEndpoint();
-                RpcClient rpcClient = new RpcClient(serviceUrl, clientOption, interceptors);
+                RpcClient rpcClient = new RpcClient(serviceUrl, clientOption);
                 TabletService tabletService = BrpcProxy.getProxy(rpcClient, TabletService.class);
                 RpcContext.getContext().setLogId((long) partition.getPid());
                 API.BulkLoadInfoRequest infoRequest = API.BulkLoadInfoRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
