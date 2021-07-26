@@ -335,8 +335,8 @@ bool Segment::Delete(const Slice& key) {
     return true;
 }
 
-void Segment::FreeList(::openmldb::base::Node<uint64_t, DataBlock*>* node, uint64_t& gc_idx_cnt, uint64_t& gc_record_cnt,
-                       uint64_t& gc_record_byte_size) {
+void Segment::FreeList(::openmldb::base::Node<uint64_t, DataBlock*>* node, uint64_t& gc_idx_cnt,
+                       uint64_t& gc_record_cnt, uint64_t& gc_record_byte_size) {
     while (node != NULL) {
         gc_idx_cnt++;
         ::openmldb::base::Node<uint64_t, DataBlock*>* tmp = node;
@@ -414,6 +414,9 @@ void Segment::GcEntryFreeList(uint64_t version, uint64_t& gc_idx_cnt, uint64_t& 
         delete entry_node;
         ::openmldb::base::Node<uint64_t, ::openmldb::base::Node<Slice, void*>*>* tmp = node;
         node = node->GetNextNoBarrier(0);
+        delete tmp;
+        pk_cnt_.fetch_sub(1, std::memory_order_relaxed);
+    }
 }
 
 void Segment::GcFreeList(uint64_t& gc_idx_cnt, uint64_t& gc_record_cnt, uint64_t& gc_record_byte_size) {
@@ -656,6 +659,9 @@ void Segment::Gc4TTL(const uint64_t time, uint64_t& gc_idx_cnt, uint64_t& gc_rec
         it->Next();
         ::openmldb::base::Node<uint64_t, DataBlock*>* node = entry->entries.GetLast();
         if (node == NULL) {
+            continue;
+        } else if (node->GetKey() > time) {
+            DEBUGLOG(
                 "[Gc4TTL] segment gc with key %lu need not ttl, last node "
                 "key %lu",
                 time, node->GetKey());

@@ -253,7 +253,7 @@ bool MemTable::Put(const Dimensions& dimensions, const TSDimensions& ts_dimensio
                 seg_idx = ::openmldb::base::hash(kv.second.data(), kv.second.size(), SEED) % seg_cnt_;
             }
             Segment* segment = segments_[kv.first][seg_idx];
-            segment->Put(::openmldb::base::Slice(kv.second), ts_dimemsions, block);
+            segment->Put(::openmldb::base::Slice(kv.second), ts_dimensions, block);
         }
     }
     record_cnt_.fetch_add(1, std::memory_order_relaxed);
@@ -740,7 +740,7 @@ TableIterator* MemTable::NewTraverseIterator(uint32_t index) {
     return new MemTableTraverseIterator(segments_[real_idx], seg_cnt_, ttl->ttl_type, expire_time, expire_cnt, 0);
 }
 
-bool MemTable::GetBulkLoadInfo(::fedb::api::BulkLoadInfoResponse* response) {
+bool MemTable::GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response) {
     response->set_seg_cnt(seg_cnt_);
 
     // TODO(hw): out of range will get -1, only a temporary solution.
@@ -785,7 +785,7 @@ bool MemTable::GetBulkLoadInfo(::fedb::api::BulkLoadInfoResponse* response) {
 }
 
 bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
-                        const ::google::protobuf::RepeatedPtrField<::fedb::api::BulkLoadIndex>& indexes) {
+                        const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
     // data_block[i] is the block which id == i
     // TODO(hw): need to reset all segments?
     std::vector<bool> block_id_used(data_blocks.size(), false);
@@ -812,8 +812,8 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
                         }
 
                         DLOG(INFO) << "do one segment put, tid " << real_idx << "-pid " << seg_idx << ", key"
-                                   << pk.ToString() << ", time " << time_entry.time() << ", key_entry_id " << key_entry_id
-                                   << ", block id " << time_entry.block_id();
+                                   << pk.ToString() << ", time " << time_entry.time() << ", key_entry_id "
+                                   << key_entry_id << ", block id " << time_entry.block_id();
 
                         segment->BulkLoadPut(key_entry_id, pk, time_entry.time(), block);
                         block_id_used.at(time_entry.block_id()) = true;

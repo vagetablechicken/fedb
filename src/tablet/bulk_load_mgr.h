@@ -14,29 +14,25 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TABLET_DATA_RECEIVER_H
-#define SRC_TABLET_DATA_RECEIVER_H
+#ifndef SRC_TABLET_BULK_LOAD_MGR_H
+#define SRC_TABLET_BULK_LOAD_MGR_H
 
+#include "data_receiver.h"
 #include "replica/log_replicator.h"
-#include "storage/segment.h"
 
 namespace openmldb::tablet {
-// TODO(hw): Create a abstract receiver to manage received data. FileReceiver can inherited from it too.
-class DataReceiver {
+class BulkLoadMgr {
  public:
-    DataReceiver() = default;
-    DataReceiver(uint32_t tid, uint32_t pid) : tid_(tid), pid_(pid) {}
-    bool DataAppend(int data_part_id, const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data);
-    bool WriteBinlogToReplicator(std::shared_ptr<replica::LogReplicator> replicator,
+    bool DataAppend(uint32_t tid, uint32_t pid, int data_part_id, const ::openmldb::api::BulkLoadRequest* request,
+                    const butil::IOBuf& data);
+    bool WriteBinlogToReplicator(uint32_t tid, uint32_t pid, std::shared_ptr<replica::LogReplicator> replicator,
                                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
 
  private:
-    // TODO(hw): init val?
-    uint32_t tid_{};
-    uint32_t pid_{};
-    int next_part_id{0};
-    std::vector<storage::DataBlock*> data_blocks_;
+    // RWLock is not easy when we're using two-level map catalog. Use unique lock for simplicity.
+    std::mutex catalog_mu_;
+    std::map<uint32_t, std::map<uint32_t, std::shared_ptr<DataReceiver>>> catalog_;
+    // TODO(hw): support time measurement
 };
-
 }  // namespace openmldb::tablet
-#endif  // SRC_TABLET_DATA_RECEIVER_H
+#endif  // SRC_TABLET_BULK_LOAD_MGR_H
