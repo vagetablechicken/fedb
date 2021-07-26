@@ -16,35 +16,32 @@
 
 #include "data_receiver.h"
 
-namespace openmldb {
-namespace tablet {
-bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request,
-                              const butil::IOBuf& data) {
+#include "storage/segment.h"
+
+namespace openmldb::tablet {
+bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data) {
     // TODO(hw): check part id in request
     // We must copy data from IOBuf, cuz the rows have different TTLs, it's not a good idea to keep them together.
     butil::IOBufBytesIterator iter(data);
-    std::vector<DataBlock*> data_blocks(request->block_info_size());
+    std::vector<storage::DataBlock*> data_blocks(request->block_info_size());
     for (int i = 0; i < request->block_info_size(); ++i) {
         const auto& info = request->block_info(i);
         auto buf = new char[info.length()];
         iter.copy_and_forward(buf, info.length());
-        data_blocks[i] = new DataBlock(info.ref_cnt(), buf, info.length(), true);
+        data_blocks[i] = new storage::DataBlock(info.ref_cnt(), buf, info.length(), true);
         DLOG(INFO) << "bulk load request(data block) len " << info.length();
     }
     if (iter.bytes_left() != 0) {
-        // TODO(hw): error
-        PDLOG(WARNING, "data info mismatch");
-        response->set_code(::openmldb::base::ReturnCode::kReceiveDataError);
-        return;
+        LOG(ERROR) << "data and info mismatch";
+        return false;
     }
     DLOG(INFO) << "data_blocks size: " << data_blocks.size();
-    return false;
+    return true;
 }
 
 bool DataReceiver::WriteBinlogToReplicator(
     std::shared_ptr<replica::LogReplicator> replicator,
     const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
-    const auto& indexes = request->index_region();
     for (int i = 0; i < indexes.size(); ++i) {
         const auto& inner_index = indexes.Get(i);
         for (int j = 0; j < inner_index.segment_size(); ++j) {
@@ -57,7 +54,7 @@ bool DataReceiver::WriteBinlogToReplicator(
                     for (int time_idx = 0; time_idx < key_entry.time_entry_size(); ++time_idx) {
                         const auto& time_entry = key_entry.time_entry(time_idx);
                         auto* block =
-                            time_entry.block_id() < data_blocks.size() ? data_blocks[time_entry.block_id()] : nullptr;
+                            time_entry.block_id() < data_blocks_.size() ? data_blocks_[time_entry.block_id()] : nullptr;
                         if (block == nullptr) {
                             // TODO(hw): valid?
                             continue;
@@ -68,13 +65,12 @@ bool DataReceiver::WriteBinlogToReplicator(
                         entry.set_value(block->data, block->size);
                         entry.set_term(replicator->GetLeaderTerm());
                         replicator->AppendEntry(entry);
-                        log_num++;
                     }
                 }
             }
         }
     }
+    // TODO(hw): after binlog, release data block ptr cache? or delete it when we destroy the whole data receiver?
     return true;
 }
-}  // namespace tablet
-}  // namespace openmldb
+}  // namespace openmldb::tablet

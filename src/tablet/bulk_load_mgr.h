@@ -32,6 +32,7 @@ class BulkLoadMgr {
     std::shared_ptr<DataReceiver> GetDataReceiver(uint32_t tid, uint32_t pid, bool create);
 
  private:
+    static const bool DO_NOT_CREATE = false;
     // RWLock is not easy when we're using two-level map catalog. Use unique lock for simplicity.
     std::mutex catalog_mu_;
     std::map<uint32_t, std::map<uint32_t, std::shared_ptr<DataReceiver>>> catalog_;

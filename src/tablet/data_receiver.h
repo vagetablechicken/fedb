@@ -18,7 +18,6 @@
 #define SRC_TABLET_DATA_RECEIVER_H
 
 #include "replica/log_replicator.h"
-#include "storage/segment.h"
 
 namespace openmldb::tablet {
 // TODO(hw): Create a abstract receiver to manage received data. FileReceiver can inherited from it too.

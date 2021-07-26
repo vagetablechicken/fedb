@@ -35,12 +35,15 @@ bool BulkLoadMgr::DataAppend(uint32_t tid, uint32_t pid, const ::openmldb::api::
 bool BulkLoadMgr::WriteBinlogToReplicator(
     uint32_t tid, uint32_t pid, std::shared_ptr<replica::LogReplicator> replicator,
     const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
-    auto data_receiver = GetDataReceiver(tid, pid, false);
+    auto data_receiver = GetDataReceiver(tid, pid, DO_NOT_CREATE);
     if (!data_receiver) {
         return false;
     }
+    if (!data_receiver->WriteBinlogToReplicator(replicator, indexes)) {
+        return false;
+    }
 
-    return false;
+    return true;
 }
 
 std::shared_ptr<DataReceiver> BulkLoadMgr::GetDataReceiver(uint32_t tid, uint32_t pid, bool create) {
