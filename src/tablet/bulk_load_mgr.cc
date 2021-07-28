@@ -29,7 +29,22 @@ bool BulkLoadMgr::DataAppend(uint32_t tid, uint32_t pid, const ::openmldb::api::
         return false;
     }
 
-    return false;
+    if (!data_receiver->DataAppend(request, data)) {
+        return false;
+    }
+    return true;
+}
+
+bool BulkLoadMgr::BulkLoad(std::shared_ptr<storage::MemTable> table,
+                           const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
+    auto data_receiver = GetDataReceiver(table->GetId(), table->GetPid(), DO_NOT_CREATE);
+    if (!data_receiver) {
+        return false;
+    }
+    if (!data_receiver->BulkLoad(table, indexes)) {
+        return false;
+    }
+    return true;
 }
 
 bool BulkLoadMgr::WriteBinlogToReplicator(
@@ -82,4 +97,5 @@ std::shared_ptr<DataReceiver> BulkLoadMgr::GetDataReceiver(uint32_t tid, uint32_
     } while (false);
     return data_receiver;
 }
+
 }  // namespace openmldb::tablet

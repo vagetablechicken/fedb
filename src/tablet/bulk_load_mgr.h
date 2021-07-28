@@ -19,6 +19,7 @@
 
 #include "data_receiver.h"
 #include "replica/log_replicator.h"
+#include "storage/mem_table.h"
 
 namespace openmldb::tablet {
 class BulkLoadMgr {
@@ -27,6 +28,9 @@ class BulkLoadMgr {
                     const butil::IOBuf& data);
     bool WriteBinlogToReplicator(uint32_t tid, uint32_t pid, std::shared_ptr<replica::LogReplicator> replicator,
                                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
+
+    bool BulkLoad(std::shared_ptr<storage::MemTable> table,
+                  const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
 
  private:
     std::shared_ptr<DataReceiver> GetDataReceiver(uint32_t tid, uint32_t pid, bool create);

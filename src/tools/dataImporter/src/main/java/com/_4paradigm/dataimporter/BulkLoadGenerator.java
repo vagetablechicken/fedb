@@ -200,6 +200,8 @@ public class BulkLoadGenerator implements Runnable {
                 logger.debug("bulk load one row data size {}", length);
                 dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(length);
                 bulkLoadRequest.dataBlockInfoList.add(dataBlockInfoBuilder.build());
+                // TODO(hw): if reach limit, set part id, send data block infos & data.
+
                 // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
                 long realEndTime = System.currentTimeMillis();
                 realGenTime += (realEndTime - realStartTime);
@@ -220,11 +222,12 @@ public class BulkLoadGenerator implements Runnable {
             // TODO(hw): send rpc
             RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
             Tablet.GeneralResponse response = service.bulkLoad(request);
-            if (logger.isDebugEnabled()) {
-                logger.debug("bulk load resp: {}", response);
-            }
+
             long endTime = System.currentTimeMillis();
             logger.info("rpc cost {} ms", endTime - generateTime);
+            if (response.getCode() != 0) {
+                throw new RuntimeException("bulk load rpc failed, " + response);
+            }
         } catch (Exception e) {
             // TODO(hw): IOException - byte array write
             e.printStackTrace();

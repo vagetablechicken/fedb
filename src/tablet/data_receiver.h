@@ -18,22 +18,30 @@
 #define SRC_TABLET_DATA_RECEIVER_H
 
 #include "replica/log_replicator.h"
+#include "storage/mem_table.h"
 
 namespace openmldb::tablet {
 // TODO(hw): Create a abstract receiver to manage received data. FileReceiver can inherited from it too.
 class DataReceiver {
  public:
-    DataReceiver() = default;
+    //    DataReceiver() = default;
     DataReceiver(uint32_t tid, uint32_t pid) : tid_(tid), pid_(pid) {}
+
+    // only one of the methods below executes at the time.s
     bool DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data);
+    bool BulkLoad(std::shared_ptr<storage::MemTable> table,
+                  const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
     bool WriteBinlogToReplicator(std::shared_ptr<replica::LogReplicator> replicator,
                                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
 
  private:
     // TODO(hw): init val?
-    uint32_t tid_{};
-    uint32_t pid_{};
-    int next_part_id{0};
+    const uint32_t tid_{};
+    const uint32_t pid_{};
+    std::mutex mu_;
+    enum ReceiverStatus { DataLoading, BulkLoaded, BinLogWriten };
+    ReceiverStatus status_{DataLoading};
+    int next_part_id_{0};
     std::vector<storage::DataBlock*> data_blocks_;
 };
 

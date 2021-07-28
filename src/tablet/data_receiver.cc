@@ -20,28 +20,67 @@
 
 namespace openmldb::tablet {
 bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data) {
-    // TODO(hw): check part id in request
-    // We must copy data from IOBuf, cuz the rows have different TTLs, it's not a good idea to keep them together.
-    butil::IOBufBytesIterator iter(data);
-    std::vector<storage::DataBlock*> data_blocks(request->block_info_size());
-    for (int i = 0; i < request->block_info_size(); ++i) {
-        const auto& info = request->block_info(i);
-        auto buf = new char[info.length()];
-        iter.copy_and_forward(buf, info.length());
-        data_blocks[i] = new storage::DataBlock(info.ref_cnt(), buf, info.length(), true);
-        DLOG(INFO) << "bulk load request(data block) len " << info.length();
-    }
-    if (iter.bytes_left() != 0) {
-        LOG(ERROR) << "data and info mismatch";
+    std::unique_lock<std::mutex> ul(mu_);
+    if (status_ != DataLoading) {
         return false;
     }
-    DLOG(INFO) << "data_blocks size: " << data_blocks.size();
+    // assert has data part id
+    if (request->data_part_id() != next_part_id_) {
+        LOG(WARNING) << "need part " << next_part_id_ << ", but get part " << request->data_part_id();
+        return false;
+    }
+
+    // We must copy data from IOBuf, cuz the rows have different TTLs, it's not a good idea to keep them together.
+    butil::IOBufBytesIterator iter(data);
+    auto last_block_size = data_blocks_.size();
+    for (int i = 0; i < request->block_info_size(); ++i) {
+        const auto& info = request->block_info(i);
+        auto buf = new char[info.length()];  // TODO(hw): use pool
+        iter.copy_and_forward(buf, info.length());
+        data_blocks_.emplace_back(new storage::DataBlock(info.ref_cnt(), buf, info.length(), true));
+    }
+    if (iter.bytes_left() != 0) {
+        LOG(ERROR) << "data and info mismatch, revert this part";
+        // Not only ptr, DataBlock needs delete.
+        for (auto block_iter = data_blocks_.begin() + last_block_size; block_iter != data_blocks_.end();) {
+            // regardless of dim_cnt_down
+            delete *block_iter;
+            block_iter = data_blocks_.erase(block_iter);
+        }
+        return false;
+    }
+    next_part_id_++;
+    DLOG(INFO) << "inserted into table(" << tid_ << "-" << pid_ << ") " << request->block_info_size()
+               << " rows. Looking forward to part " << next_part_id_ << " or IndexRegion.";
+    return true;
+}
+
+bool DataReceiver::BulkLoad(std::shared_ptr<storage::MemTable> table,
+                            const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
+    std::unique_lock<std::mutex> ul(mu_);
+    DLOG_ASSERT(tid_ == table->GetId() && pid_ == table->GetPid());
+    if (status_ != DataLoading) {
+        LOG(ERROR) << "receiver (" << tid_ << "-" << pid_ << ") status is " << status_ << ", can't do bulk load.";
+        return false;
+    }
+
+    if (!table->BulkLoad(data_blocks_, indexes)) {
+        LOG(ERROR) << "bulk load to mem table(" << tid_ << "-" << pid_ << ") failed.";
+    }
+
+    DLOG(INFO) << "bulk load to mem table(" << tid_ << "-" << pid_ << ") " << data_blocks_.size() << "rows.";
+    status_ = BulkLoaded;
     return true;
 }
 
 bool DataReceiver::WriteBinlogToReplicator(
     std::shared_ptr<replica::LogReplicator> replicator,
     const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
+    std::unique_lock<std::mutex> ul(mu_);
+    if (status_ != BulkLoaded) {
+        LOG(ERROR) << "receiver (" << tid_ << "-" << pid_ << ") status is " << status_ << ", can't write binlog.";
+        return false;
+    }
     for (int i = 0; i < indexes.size(); ++i) {
         const auto& inner_index = indexes.Get(i);
         for (int j = 0; j < inner_index.segment_size(); ++j) {
@@ -71,6 +110,7 @@ bool DataReceiver::WriteBinlogToReplicator(
         }
     }
     // TODO(hw): after binlog, release data block ptr cache? or delete it when we destroy the whole data receiver?
+    status_ = BinLogWriten;
     return true;
 }
 }  // namespace openmldb::tablet

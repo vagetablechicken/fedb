@@ -4847,7 +4847,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::openmldb::api::Bulk
     // data is a part of MemTable data, DataReceiver of MemTable is in charge of it.
     if (request->has_data_part_id()) {
         if (!bulk_load_mgr_.DataAppend(tid, pid, request, data)) {
-            PDLOG(WARNING, "Bulk load data region append failed, tid %u, pid %u", tid, pid);
+            PDLOG(WARNING, "bulk load data region append failed, tid %u, pid %u", tid, pid);
             response->set_code(::openmldb::base::ReturnCode::kReceiveDataError);
         }
         DLOG(INFO) << "tid " << tid << "-pid " << pid << " has loaded data region part " << request->data_part_id();
@@ -4858,13 +4858,14 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::openmldb::api::Bulk
     }
 
     LOG(INFO) << "get index region, do bulk load";
-    // TODO(hw): use bulk load mgr to do this? shared_ptr is ok
-//    if (!std::dynamic_pointer_cast<MemTable>(table)->BulkLoad(request->index_region())) {
-//        // TODO(hw): error
-//        PDLOG(WARNING, "bulk load failed");
-//        response->set_code(100);
-//        return;
-//    }
+    // The request may have both data & index region, data has been appended before. BulkLoadData only do bulk load to
+    // table.
+    if (!bulk_load_mgr_.BulkLoad(std::dynamic_pointer_cast<MemTable>(table), request->index_region())) {
+        response->set_code(::openmldb::base::ReturnCode::kWriteDataFailed);
+        response->set_msg("bulk load to table failed");
+        LOG(WARNING) << response->msg();
+        return;
+    }
 
     uint64_t load_time = ::baidu::common::timer::get_micros();
 

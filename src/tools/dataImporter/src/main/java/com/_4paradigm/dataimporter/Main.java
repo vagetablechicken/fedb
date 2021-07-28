@@ -48,8 +48,8 @@ public class Main {
         logger.info("Start...");
         List<CSVRecord> rows = null;
         try {
-            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); //big 1.4G // 192M
-//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.small"); // debug
+//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); //big 1.4G // 192M
+            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.small"); // debug
             CSVParser parser = new CSVParser(in, CSVFormat.EXCEL.withHeader());
             // pickup_datetime & dropoff_datetime need to transform to timestamp
             rows = parser.getRecords();
@@ -68,7 +68,7 @@ public class Main {
 
         SqlExecutor router = null;
         SdkOption option = new SdkOption();
-        option.setZkCluster("172.24.4.55:6181");
+        option.setZkCluster("172.24.4.55:4181");
         option.setZkPath("/onebox");
 
         int X = 8; // put_concurrency_limit default is 8
@@ -90,10 +90,10 @@ public class Main {
                     "dropoff_latitude double,\n" +
                     "store_and_fwd_flag string,\n" +
                     "trip_duration int,\n" +
-                    "index(key=id, ts=pickup_datetime))partitionnum=" + X +
+                    "index(key=id, ts=pickup_datetime)) OPTIONS (partitionnum=" + X +
 //                    "index(key=(vendor_id, passenger_count), ts=pickup_datetime),\n" +
 //                    "index(key=passenger_count, ts=dropoff_datetime))\n" +
-                    ";");
+                    ");");
             if (!ok) {
                 throw new RuntimeException("recreate table " + tableName + " failed");
             }
@@ -125,15 +125,21 @@ public class Main {
     }
 
     private static void insertImport(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
-        int rangeLen = (rows.size() + X) / X;
+        int quotient = rows.size() / X;
+        int remainder = rows.size() % X;
         List<Pair<Integer, Integer>> ranges = new ArrayList<>();
         int start = 0;
         // [left, right]
-        for (int i = 0; i < X; ++i) {
-            ranges.add(Pair.of(start, Math.min(start + rangeLen, rows.size())));
-            start = start + rangeLen;
+        for (int i = 0; i < remainder; ++i) {
+            int rangeEnd = Math.min(start + quotient + 1, rows.size());
+            ranges.add(Pair.of(start, rangeEnd));
+            start = rangeEnd;
         }
-        logger.info("ranges: {}", ranges);
+        for (int i = remainder; i < X; ++i) {
+            int rangeEnd = Math.min(start + quotient, rows.size());
+            ranges.add(Pair.of(start, rangeEnd));
+            start = rangeEnd;
+        }
 
         // We can ensure that the schema is match.
         List<Thread> threads = new ArrayList<>();
@@ -180,7 +186,7 @@ public class Main {
 
         logger.info("query zk for table meta data");
         RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
-        CuratorFramework client = CuratorFrameworkFactory.newClient("172.24.4.55:6181", retryPolicy);
+        CuratorFramework client = CuratorFrameworkFactory.newClient("172.24.4.55:4181", retryPolicy);
         client.start();
         NS.TableInfo testTable = null;
         Map<Integer, BulkLoadGenerator> generators = new HashMap<>();

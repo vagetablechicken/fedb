@@ -28,7 +28,7 @@ public class MainTest extends TestCase {
         Assert.assertArrayEquals(times.toArray(), timeArray);
     }
 
-    public void testBulkLoad() {
+    public void testHash() {
         List<String> keys = Arrays.asList("2|1", "1|1", "1|4", "2/6", "4", "6", "1");
         for (String key : keys) {
             System.out.println(Main.hash(key.getBytes(), key.length(), 0xe17a1465) % 8);
@@ -40,6 +40,9 @@ public class MainTest extends TestCase {
 //        I0715 21:37:10.869401 13732 tablet_impl_test.cc:5643] hash(4) = 1
 //        I0715 21:37:10.869412 13732 tablet_impl_test.cc:5643] hash(6) = 4
 //        I0715 21:37:10.869423 13732 tablet_impl_test.cc:5643] hash(1) = 6
+    }
+
+    public void testMain() {
         Main.main(null);
     }
 

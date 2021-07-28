@@ -31,7 +31,7 @@ class InsertImporter implements Runnable {
 
     @Override
     public void run() {
-        logger.info("Thread {} insert range {} ", Thread.currentThread().getId(), range);
+        logger.info("Thread {} insert range [{},{}) ", Thread.currentThread().getId(), range.getLeft(), range.getRight());
         if (records.isEmpty()) {
             logger.warn("records is empty");
             return;
