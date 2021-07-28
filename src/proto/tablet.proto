@@ -759,7 +759,7 @@ message Segment {
 }
 
 message BulkLoadIndex {
-    optional uint32 inner_index_id = 1;  // TODO(hw): need?
+    optional uint32 inner_index_id = 1;  // TODO(hw): need? if we split index rpc, it's needed.
     repeated Segment segment = 2;
 }
 

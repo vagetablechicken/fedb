@@ -26,6 +26,7 @@ bool BulkLoadMgr::DataAppend(uint32_t tid, uint32_t pid, const ::openmldb::api::
     auto data_part_id = request->data_part_id();
     auto data_receiver = GetDataReceiver(tid, pid, data_part_id == 0);
     if (!data_receiver) {
+        LOG(ERROR) << "can't get data receiver for " << tid << "-" << pid << ", part id " << data_part_id;
         return false;
     }
 
@@ -39,6 +40,7 @@ bool BulkLoadMgr::BulkLoad(std::shared_ptr<storage::MemTable> table,
                            const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
     auto data_receiver = GetDataReceiver(table->GetId(), table->GetPid(), DO_NOT_CREATE);
     if (!data_receiver) {
+        2LOG(ERROR) << "can't get data receiver for " << tid << "-" << pid;
         return false;
     }
     if (!data_receiver->BulkLoad(table, indexes)) {

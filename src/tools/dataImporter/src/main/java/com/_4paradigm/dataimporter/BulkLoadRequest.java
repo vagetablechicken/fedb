@@ -4,6 +4,7 @@ import com._4paradigm.openmldb.api.Tablet;
 import com.google.common.base.Preconditions;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -40,14 +41,26 @@ public class BulkLoadRequest {
         );
     }
 
+    @Deprecated
     public Tablet.BulkLoadRequest toProtobuf(int tid, int pid) {
         Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
         requestBuilder.setTid(tid).setPid(pid);
+        setIndexAndDataInfo(requestBuilder);
+        return requestBuilder.build();
+    }
 
+    public Tablet.BulkLoadRequest toProtobuf(int tid, int pid, int partId) {
+        Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
+        requestBuilder.setTid(tid).setPid(pid).setDataPartId(partId);
+        setIndexAndDataInfo(requestBuilder);
+        return requestBuilder.build();
+    }
+
+    private void setIndexAndDataInfo(Tablet.BulkLoadRequest.Builder requestBuilder) {
         // segmentDataMaps -> BulkLoadIndex
         segmentIndexMatrix.forEach(segmentDataMap -> {
             Tablet.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
-//                // TODO(hw):
+//                // TODO(hw): if we split index rpc, matrix should be a map.
 //                bulkLoadIndexBuilder.setInnerIndexId();
             segmentDataMap.forEach(segment -> {
                 bulkLoadIndexBuilder.addSegment(segment.toProtobuf());
@@ -55,13 +68,37 @@ public class BulkLoadRequest {
         });
         // DataBlockInfo
         requestBuilder.addAllBlockInfo(dataBlockInfoList);
-
-        return requestBuilder.build();
     }
 
     public byte[] getDataRegion() {
         // TODO(hw): hard copy, can be avoided? utf8?
         return dataBlock.toByteArray();
+    }
+
+    public int nextId() {
+        return dataBlockInfoList.size();
+    }
+
+    public boolean appendData(byte[] data, int refCnt) {
+        int head = nextDataHead();
+        try {
+            dataBlock.write(data);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+        int length = dataBlock.size() - head;
+        dataBlockInfoList.add(Tablet.DataBlockInfo.newBuilder().setRefCnt(refCnt).setOffset(head).setLength(length).build());
+        return true;
+    }
+
+    public int nextDataHead() {
+        return dataBlock.size();
+    }
+
+    // TODO(hw):  only data size? how about index size?
+    public int size() {
+        return dataBlock.size();
     }
 
     public static class SegmentIndexRegion {

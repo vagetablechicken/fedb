@@ -11,7 +11,6 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -57,10 +56,12 @@ public class BulkLoadGenerator implements Runnable {
     private final AtomicBoolean internalErrorOcc = new AtomicBoolean(false);
     private final NS.TableInfo tableInfo;
     private final Tablet.BulkLoadInfoResponse indexInfoFromTablet; // TODO(hw): not a good name
-    private final BulkLoadRequest bulkLoadRequest;
+    private BulkLoadRequest bulkLoadRequest;
     private final TabletService service;
+    private final int rpcDataSizeLimit;
+    private int partId = 0;
 
-    public BulkLoadGenerator(int tid, int pid, NS.TableInfo tableInfo, Tablet.BulkLoadInfoResponse indexInfo, TabletService service) {
+    public BulkLoadGenerator(int tid, int pid, NS.TableInfo tableInfo, Tablet.BulkLoadInfoResponse indexInfo, TabletService service, int rpcDataSizeLimit) {
         this.tid = tid;
         this.pid = pid;
         this.queue = new ArrayBlockingQueue<>(1000);
@@ -69,6 +70,7 @@ public class BulkLoadGenerator implements Runnable {
         this.indexInfoFromTablet = indexInfo;
         this.bulkLoadRequest = new BulkLoadRequest(indexInfoFromTablet); // built from BulkLoadInfoResponse
         this.service = service;
+        this.rpcDataSizeLimit = rpcDataSizeLimit;
     }
 
     @Override
@@ -125,17 +127,14 @@ public class BulkLoadGenerator implements Runnable {
                     innerIndexKeyMap.put(indexInfoFromTablet.getInnerIndexPos((int) idx), key);
                 }
 
-                // Index Region insert, only use id
-                int dataBlockId = bulkLoadRequest.dataBlockInfoList.size();
-                // set the dataBlockInfo's ref count when index region insertion
-                Tablet.DataBlockInfo.Builder dataBlockInfoBuilder = Tablet.DataBlockInfo.newBuilder();
-
-                // TODO(hw): we use ExecuteInsert logic, so never call `table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());`
+                // TODO(hw): we use ExecuteInsert logic, so won't call
+                //  `table->Put(request->pk(), request->time(), request->value().c_str(), request->value().size());`
                 //  即，不存在dims不存在却有ts dims的情况
                 Preconditions.checkState(!dimensions.isEmpty());
 
                 // TODO(hw): CheckDimessionPut
 
+                // set the dataBlockInfo's ref count when index region insertion
                 AtomicInteger realRefCnt = new AtomicInteger();
                 // 1. if tsDimensions is empty, we will put data into `ready Index` without checking.
                 //      But we'll check the Index whether has the ts column. Mismatch meta returns false.
@@ -170,6 +169,9 @@ public class BulkLoadGenerator implements Runnable {
                 if (tsDimensions.isEmpty()) {
                     tsDimsWrap = Collections.singletonList(Tablet.TSDimension.newBuilder().setTs(time).build());
                 }
+
+                // Index Region insert, only use id
+                int dataBlockId = bulkLoadRequest.nextId();
                 for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
                     Integer idx = idx2key.getKey();
                     String key = idx2key.getValue();
@@ -193,15 +195,20 @@ public class BulkLoadGenerator implements Runnable {
                 }
 
                 // If success, add data & info
-                ByteArrayOutputStream dataBuilder = bulkLoadRequest.dataBlock;
-                int head = dataBuilder.size();
-                dataBuilder.write(dataBuffer.array());
-                int length = dataBuilder.size() - head;
-                logger.debug("bulk load one row data size {}", length);
-                dataBlockInfoBuilder.setRefCnt(realRefCnt.get()).setOffset(head).setLength(length);
-                bulkLoadRequest.dataBlockInfoList.add(dataBlockInfoBuilder.build());
+                if (!bulkLoadRequest.appendData(dataBuffer.array(), realRefCnt.get())) {
+                    throw new RuntimeException("write data block info to request failed");
+                }
                 // TODO(hw): if reach limit, set part id, send data block infos & data.
-
+                if (bulkLoadRequest.size() > rpcDataSizeLimit) {
+                    Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId);
+                    RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
+                    Tablet.GeneralResponse response = service.bulkLoad(request);
+                    if (response.getCode() != 0) {
+                        throw new RuntimeException("bulk load data rpc failed, " + response);
+                    }
+                    partId++;
+                    bulkLoadRequest = new BulkLoadRequest(indexInfoFromTablet);
+                }
                 // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
                 long realEndTime = System.currentTimeMillis();
                 realGenTime += (realEndTime - realStartTime);
@@ -213,9 +220,7 @@ public class BulkLoadGenerator implements Runnable {
             // TODO(hw): force shutdown - don't send rpc
 
             // TODO(hw): request -> pb
-            logger.info("bulkLoadRequest brief info: total rows {}, data total size {}",
-                    bulkLoadRequest.dataBlockInfoList.size(), bulkLoadRequest.dataBlock.size());
-            Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid);
+            Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId);
             if (logger.isDebugEnabled()) {
                 logger.debug("bulk load request {}", request);
             }
@@ -226,11 +231,10 @@ public class BulkLoadGenerator implements Runnable {
             long endTime = System.currentTimeMillis();
             logger.info("rpc cost {} ms", endTime - generateTime);
             if (response.getCode() != 0) {
-                throw new RuntimeException("bulk load rpc failed, " + response);
+                throw new RuntimeException("bulk load index rpc failed, " + response);
             }
-        } catch (Exception e) {
-            // TODO(hw): IOException - byte array write
-            e.printStackTrace();
+        } catch (RuntimeException | InterruptedException e) {
+            logger.error("Thread {} for MemTable(tid-pid {}-{}) got err: {}", Thread.currentThread().getId(), tid, pid, e.getMessage());
             internalErrorOcc.set(true);
         }
     }

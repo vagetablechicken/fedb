@@ -72,6 +72,7 @@ public class Main {
         option.setZkPath("/onebox");
 
         int X = 8; // put_concurrency_limit default is 8
+        int rpcDataSizeLimit = 2 * 1000 * 1000; // 2MB
 
         try {
             router = new SqlClusterExecutor(option);
@@ -113,7 +114,7 @@ public class Main {
 
 //        insertImport(X, rows, router, dbName, tableName);
 
-        bulkLoadMulti(X, rows, router, dbName, tableName);
+        bulkLoadMulti(X, rows, router, dbName, tableName, rpcDataSizeLimit);
 
         long endTime = System.currentTimeMillis();
 
@@ -165,7 +166,7 @@ public class Main {
     }
 
     // TODO(hw): 流程优先，所以先假设可以开MemTable个线程，分别负责。之后再考虑线程数有限的情况。
-    private static void bulkLoadMulti(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
+    private static void bulkLoadMulti(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName, int rpcDataSizeLimit) {
         // MemTable.size() threads BulkLoadGenerator
         logger.info("get schema by sdk");
         StringBuilder builder = new StringBuilder("insert into " + tableName + " values(");
@@ -238,7 +239,7 @@ public class Main {
 
                 // generate & send requests by BulkLoadGenerator
                 // TODO(hw): schema could get from NS.TableInfo?
-                BulkLoadGenerator generator = new BulkLoadGenerator(testTable.getTid(), partition.getPid(), testTable, bulkLoadInfo, tabletService);
+                BulkLoadGenerator generator = new BulkLoadGenerator(testTable.getTid(), partition.getPid(), testTable, bulkLoadInfo, tabletService, rpcDataSizeLimit);
                 generators.put(partition.getPid(), generator);
                 threads.add(new Thread(generator));
                 // To close all clients

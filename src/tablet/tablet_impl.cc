@@ -4847,8 +4847,10 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::openmldb::api::Bulk
     // data is a part of MemTable data, DataReceiver of MemTable is in charge of it.
     if (request->has_data_part_id()) {
         if (!bulk_load_mgr_.DataAppend(tid, pid, request, data)) {
-            PDLOG(WARNING, "bulk load data region append failed, tid %u, pid %u", tid, pid);
             response->set_code(::openmldb::base::ReturnCode::kReceiveDataError);
+            response->set_msg("bulk load data region append failed");
+            LOG(WARNING) << "tid " << tid << "-pid " << pid << response->msg();
+            return;
         }
         DLOG(INFO) << "tid " << tid << "-pid " << pid << " has loaded data region part " << request->data_part_id();
     }
@@ -4863,7 +4865,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::openmldb::api::Bulk
     if (!bulk_load_mgr_.BulkLoad(std::dynamic_pointer_cast<MemTable>(table), request->index_region())) {
         response->set_code(::openmldb::base::ReturnCode::kWriteDataFailed);
         response->set_msg("bulk load to table failed");
-        LOG(WARNING) << response->msg();
+        LOG(WARNING) << "tid " << tid << "-pid " << pid << response->msg();
         return;
     }
 
