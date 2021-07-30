@@ -22,11 +22,13 @@ namespace openmldb::tablet {
 bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data) {
     std::unique_lock<std::mutex> ul(mu_);
     if (status_ != DataLoading) {
+        LOG(WARNING) << tid_ << "-" << pid_ << " data receiver status is not loading, st: " << status_;
         return false;
     }
     // assert has data part id
     if (request->data_part_id() != next_part_id_) {
-        LOG(WARNING) << "need part " << next_part_id_ << ", but get part " << request->data_part_id();
+        LOG(WARNING) << tid_ << "-" << pid_ << " data receiver needs part " << next_part_id_ << ", but get part "
+                     << request->data_part_id();
         return false;
     }
 
@@ -40,7 +42,7 @@ bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request, c
         data_blocks_.emplace_back(new storage::DataBlock(info.ref_cnt(), buf, info.length(), true));
     }
     if (iter.bytes_left() != 0) {
-        LOG(ERROR) << "data and info mismatch, revert this part";
+        LOG(ERROR) << tid_ << "-" << pid_ << " data and info mismatch, revert this part";
         // Not only ptr, DataBlock needs delete.
         for (auto block_iter = data_blocks_.begin() + last_block_size; block_iter != data_blocks_.end();) {
             // regardless of dim_cnt_down

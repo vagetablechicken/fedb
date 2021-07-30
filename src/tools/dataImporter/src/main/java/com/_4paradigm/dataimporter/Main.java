@@ -1,19 +1,14 @@
 package com._4paradigm.dataimporter;
 
-import com._4paradigm.openmldb.SQLInsertRow;
-import com._4paradigm.openmldb.Schema;
 import com._4paradigm.openmldb.api.Tablet;
 import com._4paradigm.openmldb.common.Common;
 import com._4paradigm.openmldb.ns.NS;
 import com._4paradigm.openmldb.sdk.SdkOption;
 import com._4paradigm.openmldb.sdk.SqlExecutor;
 import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor;
-import com.baidu.brpc.RpcContext;
 import com.baidu.brpc.client.BrpcProxy;
 import com.baidu.brpc.client.RpcClient;
 import com.baidu.brpc.client.RpcClientOptions;
-import com.baidu.brpc.loadbalance.LoadBalanceStrategy;
-import com.baidu.brpc.protocol.Options;
 import com.google.common.base.Preconditions;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -48,10 +43,11 @@ public class Main {
         logger.info("Start...");
         List<CSVRecord> rows = null;
         try {
-//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); //big 1.4G // 192M
-            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.small"); // debug
+            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv"); //big 1.4G // 192M
+//            Reader in = new FileReader("/home/huangwei/NYCTaxiDataset/train.csv.small"); // debug
             CSVParser parser = new CSVParser(in, CSVFormat.EXCEL.withHeader());
             // pickup_datetime & dropoff_datetime need to transform to timestamp
+            // ETL?
             rows = parser.getRecords();
             // TODO(hw): CSVParser will read the end empty line, be careful.
         } catch (IOException e) {
@@ -105,16 +101,15 @@ public class Main {
         }
         // reader, perhaps needs hdfs writer later
         // reader can read dir | file | *.xx?
-        // support range? -> to use multi-threads
 
         logger.info("set thread num {}", X);
 
         logger.info("rows {}, peek {}", rows.size(), rows.isEmpty() ? "" : rows.get(0).toString());
         long startTime = System.currentTimeMillis();
 
-//        insertImport(X, rows, router, dbName, tableName);
+        insertImport(X, rows, router, dbName, tableName);
 
-        bulkLoadMulti(X, rows, router, dbName, tableName, rpcDataSizeLimit);
+//        bulkLoadMulti(X, rows, router, dbName, tableName, rpcDataSizeLimit);
 
         long endTime = System.currentTimeMillis();
 
@@ -128,9 +123,9 @@ public class Main {
     private static void insertImport(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
         int quotient = rows.size() / X;
         int remainder = rows.size() % X;
+        // range is [left, right)
         List<Pair<Integer, Integer>> ranges = new ArrayList<>();
         int start = 0;
-        // [left, right]
         for (int i = 0; i < remainder; ++i) {
             int rangeEnd = Math.min(start + quotient + 1, rows.size());
             ranges.add(Pair.of(start, rangeEnd));
@@ -142,16 +137,10 @@ public class Main {
             start = rangeEnd;
         }
 
-        // We can ensure that the schema is match.
         List<Thread> threads = new ArrayList<>();
         for (Pair<Integer, Integer> range : ranges) {
             threads.add(new Thread(new InsertImporter(router, dbName, tableName, rows, range)));
         }
-        // ETL?
-
-        // dst: cluster name, db & table name
-        // write to dst, by sdk, what about one row failed? ——关系到什么操作是原子的，以及如何组织插入，比如是否支持指定多路径对
-        // 一张表，即使用户是散开写的，我们可以整合？如果用单条put的话，好像没啥意义。
 
         threads.forEach(Thread::start);
 
@@ -165,24 +154,10 @@ public class Main {
 
     }
 
-    // TODO(hw): 流程优先，所以先假设可以开MemTable个线程，分别负责。之后再考虑线程数有限的情况。
+    // BulkLoadGenerators size == MemTables size, X is useless
+    // TODO(hw): multi-threading insert into one MemTable? or threads num is less than MemTable size?
     private static void bulkLoadMulti(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName, int rpcDataSizeLimit) {
-        // MemTable.size() threads BulkLoadGenerator
-        logger.info("get schema by sdk");
-        StringBuilder builder = new StringBuilder("insert into " + tableName + " values(");
-        CSVRecord peekRecord = rows.get(0);
-        for (int i = 0; i < peekRecord.size(); ++i) {
-            builder.append((i == 0) ? "?" : ",?");
-        }
-        builder.append(");");
-        String insertPlaceHolder = builder.toString();
-        // Try get one insert row to generate stringCols
-        SQLInsertRow insertRowTmp = router.getInsertRow(dbName, insertPlaceHolder);
-        Preconditions.checkNotNull(insertRowTmp);
-        Schema schema = insertRowTmp.GetSchema();
-        Preconditions.checkState(peekRecord.size() == schema.GetColumnCnt());
-
-        // TODO(hw): check header?
+        // TODO(hw): check csv header?
         //  logger.info("{}", peekRecord.getParser().getHeaderMap());
 
         logger.info("query zk for table meta data");
@@ -219,26 +194,22 @@ public class Main {
 
                 //  http/h2 can't add attachment, cuz it use attachment to pass message. So we need to use brpc-java
                 RpcClientOptions clientOption = new RpcClientOptions();
-                clientOption.setProtocolType(Options.ProtocolType.PROTOCOL_BAIDU_STD_VALUE);
-                clientOption.setWriteTimeoutMillis(1000);
-                clientOption.setReadTimeoutMillis(50000);
-                clientOption.setMaxTotalConnections(1000);
-                clientOption.setMinIdleConnections(10);
-                clientOption.setLoadBalanceType(LoadBalanceStrategy.LOAD_BALANCE_FAIR);
-                clientOption.setCompressType(Options.CompressType.COMPRESS_TYPE_NONE);
-                clientOption.setGlobalThreadPoolSharing(true);
+//                clientOption.setWriteTimeoutMillis(1000);
+//                clientOption.setReadTimeoutMillis(50000);
+//                clientOption.setMinIdleConnections(10);
+//                clientOption.setCompressType(Options.CompressType.COMPRESS_TYPE_NONE);
+//                clientOption.setGlobalThreadPoolSharing(true);
 
                 // Must list://
                 String serviceUrl = "list://" + leader.getEndpoint();
                 RpcClient rpcClient = new RpcClient(serviceUrl, clientOption);
                 TabletService tabletService = BrpcProxy.getProxy(rpcClient, TabletService.class);
-                RpcContext.getContext().setLogId((long) partition.getPid());
                 Tablet.BulkLoadInfoRequest infoRequest = Tablet.BulkLoadInfoRequest.newBuilder().setTid(testTable.getTid()).setPid(partition.getPid()).build();
                 Tablet.BulkLoadInfoResponse bulkLoadInfo = tabletService.getBulkLoadInfo(infoRequest);
-                logger.debug("get bulk load info: {}", bulkLoadInfo);
+                logger.debug("get bulk load info of {} : {}", leader.getEndpoint(), bulkLoadInfo);
 
                 // generate & send requests by BulkLoadGenerator
-                // TODO(hw): schema could get from NS.TableInfo?
+                // we need schema to parsing raw data in generator, got from NS.TableInfo
                 BulkLoadGenerator generator = new BulkLoadGenerator(testTable.getTid(), partition.getPid(), testTable, bulkLoadInfo, tabletService, rpcDataSizeLimit);
                 generators.put(partition.getPid(), generator);
                 threads.add(new Thread(generator));
@@ -253,25 +224,13 @@ public class Main {
         logger.info("create {} generators, start bulk load.", generators.size());
         threads.forEach(Thread::start);
 
-        // testTable(TableInfo) to index map
+        // testTable(TableInfo) to index map, needed by buildDimensions.
+        // We build dimensions here, to distribute data to MemTables which should load the data.
         Preconditions.checkState(testTable.getColumnKeyCount() > 0); // TODO(hw): no col key is available?
-        Map<String, Integer> nameToIdx = new HashMap<>();
-        for (int i = 0; i < testTable.getColumnDescCount(); i++) {
-            nameToIdx.put(testTable.getColumnDesc(i).getName(), i);
-        }
+
         Map<Integer, List<Integer>> keyIndexMap = new HashMap<>();
         Set<Integer> tsIdxSet = new HashSet<>();
-        for (int i = 0; i < testTable.getColumnKeyCount(); i++) {
-            Common.ColumnKey key = testTable.getColumnKey(i);
-            for (String colName : key.getColNameList()) {
-                List<Integer> keyCols = keyIndexMap.getOrDefault(i, new ArrayList<>());
-                keyCols.add(nameToIdx.get(colName));
-                keyIndexMap.put(i, keyCols);
-            }
-            if (key.hasTsName()) {
-                tsIdxSet.add(nameToIdx.get(key.getTsName()));
-            }
-        }
+        parseIndexMapAndTsSet(testTable, keyIndexMap, tsIdxSet);
 
         for (CSVRecord record : rows) {
             Map<Integer, List<Pair<String, Integer>>> dims = buildDimensions(record, keyIndexMap, testTable.getPartitionNum());
@@ -284,11 +243,11 @@ public class Main {
                         .collect(Collectors.joining("], [", "[", "]")));
             }
 
-            // Feed row to the bulk load generators for each MemTable(pid, tid)
+            // distribute the row to the bulk load generators for each MemTable(tid, pid)
             for (Integer pid : dims.keySet()) {
                 try {
-                    // NS pid is int
-                    // TODO(hw): no need to calc dims twice
+                    // Note: NS pid is int
+                    // no need to calc dims twice, pass it to BulkLoadGenerator
                     generators.get(pid).feed(new BulkLoadGenerator.FeedItem(dims, tsIdxSet, record));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
@@ -315,6 +274,24 @@ public class Main {
 
         // rpc client release
         rpcClients.forEach(RpcClient::stop);
+    }
+
+    private static void parseIndexMapAndTsSet(NS.TableInfo table, Map<Integer, List<Integer>> keyIndexMap, Set<Integer> tsIdxSet) {
+        Map<String, Integer> nameToIdx = new HashMap<>();
+        for (int i = 0; i < table.getColumnDescCount(); i++) {
+            nameToIdx.put(table.getColumnDesc(i).getName(), i);
+        }
+        for (int i = 0; i < table.getColumnKeyCount(); i++) {
+            Common.ColumnKey key = table.getColumnKey(i);
+            for (String colName : key.getColNameList()) {
+                List<Integer> keyCols = keyIndexMap.getOrDefault(i, new ArrayList<>());
+                keyCols.add(nameToIdx.get(colName));
+                keyIndexMap.put(i, keyCols);
+            }
+            if (key.hasTsName()) {
+                tsIdxSet.add(nameToIdx.get(key.getTsName()));
+            }
+        }
     }
 
     // ref SQLInsertRow::GetDimensions()

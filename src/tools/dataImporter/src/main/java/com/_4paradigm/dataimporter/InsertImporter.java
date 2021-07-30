@@ -58,7 +58,6 @@ class InsertImporter implements Runnable {
             // insert placeholder
             SQLInsertRow row = router.getInsertRow(dbName, insertPlaceHolder);
             CSVRecord record = records.get(i);
-//            logger.info("{}", record.getParser().getHeaderMap());
             int strLength = stringCols.stream().mapToInt(col -> record.get(col).length()).sum();
 
             row.Init(strLength);
@@ -77,6 +76,7 @@ class InsertImporter implements Runnable {
                 // TODO(hw): retry
                 if (!ok) {
                     logger.error("insert one row failed, {}", record);
+                    // TODO(hw): what if failed after retry?
                 }
             }
         }

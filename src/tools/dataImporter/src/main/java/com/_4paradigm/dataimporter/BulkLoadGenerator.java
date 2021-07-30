@@ -89,24 +89,20 @@ public class BulkLoadGenerator implements Runnable {
                 }
                 long realStartTime = System.currentTimeMillis();
 
+                // build data buffer
                 List<Object> rowValues = new ArrayList<>();
                 for (int j = 0; j < tableInfo.getColumnDescCount(); j++) {
                     Common.ColumnDesc desc = tableInfo.getColumnDesc(j);
                     String v = item.valueMap.get(desc.getName());
                     Type.DataType type = desc.getDataType();
-                    // TODO(hw): DataType doesn't have varchar, only string
                     Object obj = buildTypedValues(v, type);
                     Preconditions.checkNotNull(obj);
                     rowValues.add(obj);
                 }
-
-                // getColumnDescList -> ColumnDesc.Type has varchar
                 ByteBuffer dataBuffer = RowBuilder.encode(rowValues.toArray(), tableInfo.getColumnDescList(), 1);
-                Preconditions.checkState(tableInfo.getCompressType() == Type.CompressType.kNoCompress); // TODO(hw): snappy later
+                Preconditions.checkState(tableInfo.getCompressType() == Type.CompressType.kNoCompress); // TODO(hw): support snappy later
                 dataBuffer.rewind();
 
-                // TODO(hw): get dims by pid, needs swig support
-                //  拿insertRow的dims等信息，需要改sdk swig，但java复制步骤代码量不小，还是改sdk更容易。
                 List<Pair<String, Integer>> dimensions = item.dims.get(this.pid);
 
                 // tsDimensions[idx] has 0 or 1 ts, we convert it to Tablet.TSDimensions for simplicity
@@ -118,7 +114,6 @@ public class BulkLoadGenerator implements Runnable {
                 long time = System.currentTimeMillis();
 
                 Map<Integer, String> innerIndexKeyMap = new HashMap<>();
-                // PairStrInt: str-key, int-idx. == message Dimension
                 for (Pair<String, Integer> dim : dimensions) {
                     String key = dim.getKey();
                     long idx = dim.getValue();
@@ -183,12 +178,13 @@ public class BulkLoadGenerator implements Runnable {
                             // hash get signed int, we treat is as unsigned
                             segIdx = Integer.toUnsignedLong(Main.hash(key.getBytes(), key.length(), 0xe17a1465)) % indexInfoFromTablet.getSegCnt();
                         }
-                        // TODO(hw): segment[k][segIdx]->Put. only in-memory first.
-                        BulkLoadRequest.SegmentIndexRegion segment = bulkLoadRequest.segmentIndexMatrix.get(idx).get((int) segIdx);
+                        // segment[k][segIdx]->Put
+                        BulkLoadRequest.SegmentIndexRegion segment = bulkLoadRequest.getSegmentIndexRegion(idx, (int) segIdx);
 
                         // void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
                         boolean put = segment.Put(key, tsDimsWrap, dataBlockId);
                         if (!put) {
+                            // TODO(hw): for debug
                             logger.warn("segment.Put no put");
                         }
                     }
@@ -198,9 +194,9 @@ public class BulkLoadGenerator implements Runnable {
                 if (!bulkLoadRequest.appendData(dataBuffer.array(), realRefCnt.get())) {
                     throw new RuntimeException("write data block info to request failed");
                 }
-                // TODO(hw): if reach limit, set part id, send data block infos & data.
-                if (bulkLoadRequest.size() > rpcDataSizeLimit) {
-                    Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId);
+                // If reach limit, set part id, send data block infos & data, no index region.
+                if (bulkLoadRequest.dataSize() > rpcDataSizeLimit) {
+                    Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId, false);
                     RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
                     Tablet.GeneralResponse response = service.bulkLoad(request);
                     if (response.getCode() != 0) {
@@ -209,7 +205,6 @@ public class BulkLoadGenerator implements Runnable {
                     partId++;
                     bulkLoadRequest = new BulkLoadRequest(indexInfoFromTablet);
                 }
-                // TODO(hw): multi-threading insert into one MemTable dataHolder: needs lock?
                 long realEndTime = System.currentTimeMillis();
                 realGenTime += (realEndTime - realStartTime);
             }
@@ -217,14 +212,17 @@ public class BulkLoadGenerator implements Runnable {
             long generateTime = System.currentTimeMillis();
             logger.info("Thread {} for MemTable(tid-pid {}-{}), generate cost {} ms, real cost {} ms",
                     Thread.currentThread().getId(), tid, pid, generateTime - startTime, realGenTime);
-            // TODO(hw): force shutdown - don't send rpc
 
-            // TODO(hw): request -> pb
-            Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId);
+            // request -> pb
+            if (bulkLoadRequest.indexCount() == 0) {
+                logger.info("MemTable(tid-pid {}-{}) doesn't need bulk loading", tid, pid);
+                return;
+            }
+            Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId, true);
             if (logger.isDebugEnabled()) {
                 logger.debug("bulk load request {}", request);
             }
-            // TODO(hw): send rpc
+            // May have some data left
             RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
             Tablet.GeneralResponse response = service.bulkLoad(request);
 
@@ -243,6 +241,7 @@ public class BulkLoadGenerator implements Runnable {
         this.queue.put(item); // blocking put
     }
 
+    // Shutdown will wait for queue empty.
     public void shutDown() {
         this.shutdown.set(true);
     }

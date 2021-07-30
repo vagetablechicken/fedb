@@ -2,6 +2,8 @@ package com._4paradigm.dataimporter;
 
 import com._4paradigm.openmldb.api.Tablet;
 import junit.framework.TestCase;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.junit.Assert;
 
 import java.util.Arrays;
@@ -33,6 +35,7 @@ public class MainTest extends TestCase {
         for (String key : keys) {
             System.out.println(Main.hash(key.getBytes(), key.length(), 0xe17a1465) % 8);
         }
+//        c++ hash result
 //        I0715 21:37:10.869352 13732 tablet_impl_test.cc:5643] hash(2|1) = 0
 //        I0715 21:37:10.869369 13732 tablet_impl_test.cc:5643] hash(1|1) = 2
 //        I0715 21:37:10.869380 13732 tablet_impl_test.cc:5643] hash(1|4) = 3

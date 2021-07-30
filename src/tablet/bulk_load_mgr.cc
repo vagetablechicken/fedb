@@ -20,13 +20,14 @@ namespace openmldb::tablet {
 
 bool BulkLoadMgr::DataAppend(uint32_t tid, uint32_t pid, const ::openmldb::api::BulkLoadRequest* request,
                              const butil::IOBuf& data) {
-    if (!request->has_data_part_id() || data.empty()) {
+    if (data.empty() || !request->has_data_part_id()) {
+        LOG(ERROR) << "DataAppend: data is empty or don't have part id";
         return false;
     }
     auto data_part_id = request->data_part_id();
     auto data_receiver = GetDataReceiver(tid, pid, data_part_id == 0);
     if (!data_receiver) {
-        LOG(ERROR) << "can't get data receiver for " << tid << "-" << pid << ", part id " << data_part_id;
+        LOG(ERROR) << "DataAppend: can't get data receiver for " << tid << "-" << pid << ", part id " << data_part_id;
         return false;
     }
 
@@ -40,7 +41,7 @@ bool BulkLoadMgr::BulkLoad(std::shared_ptr<storage::MemTable> table,
                            const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
     auto data_receiver = GetDataReceiver(table->GetId(), table->GetPid(), DO_NOT_CREATE);
     if (!data_receiver) {
-        2LOG(ERROR) << "can't get data receiver for " << tid << "-" << pid;
+        LOG(ERROR) << "BulkLoad: can't get data receiver for " << table->GetId() << "-" << table->GetPid();
         return false;
     }
     if (!data_receiver->BulkLoad(table, indexes)) {
@@ -79,10 +80,11 @@ std::shared_ptr<DataReceiver> BulkLoadMgr::GetDataReceiver(uint32_t tid, uint32_
             catalog_[tid] = pid_cat;
             break;
         }
-        auto pid_cat = table_cat_iter->second;
+        auto& pid_cat = table_cat_iter->second;
         auto iter = pid_cat.find(pid);
         if (iter == pid_cat.end()) {
             if (!create) {
+                DLOG(INFO) << "pid" << pid << " not found";
                 break;
             }
             data_receiver.reset(new DataReceiver(tid, pid));
@@ -92,7 +94,7 @@ std::shared_ptr<DataReceiver> BulkLoadMgr::GetDataReceiver(uint32_t tid, uint32_
 
         // catalog has the receiver for tid-pid, we treat it as error. // TODO(hw): or should treat it as covering?
         if (create) {
-            DLOG(INFO) << "already has receiver for " << tid << "-" << pid << ", but want to create a new one";
+            DLOG(INFO) << "already has the receiver for " << tid << "-" << pid << ", but want to create a new one";
             break;
         }
         data_receiver = iter->second;

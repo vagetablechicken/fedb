@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.google.common.collect.MoreCollectors.onlyElement;
@@ -45,29 +46,41 @@ public class BulkLoadRequest {
     public Tablet.BulkLoadRequest toProtobuf(int tid, int pid) {
         Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
         requestBuilder.setTid(tid).setPid(pid);
-        setIndexAndDataInfo(requestBuilder);
+        setIndexAndDataInfo(requestBuilder, true);
         return requestBuilder.build();
     }
 
-    public Tablet.BulkLoadRequest toProtobuf(int tid, int pid, int partId) {
+    public Tablet.BulkLoadRequest toProtobuf(int tid, int pid, int partId, boolean takeIndexRegion) {
         Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
         requestBuilder.setTid(tid).setPid(pid).setDataPartId(partId);
-        setIndexAndDataInfo(requestBuilder);
+        setIndexAndDataInfo(requestBuilder, takeIndexRegion);
         return requestBuilder.build();
     }
 
-    private void setIndexAndDataInfo(Tablet.BulkLoadRequest.Builder requestBuilder) {
+    private void setIndexAndDataInfo(Tablet.BulkLoadRequest.Builder requestBuilder, boolean takeIndexRegion) {
         // segmentDataMaps -> BulkLoadIndex
-        segmentIndexMatrix.forEach(segmentDataMap -> {
-            Tablet.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
-//                // TODO(hw): if we split index rpc, matrix should be a map.
+        if (takeIndexRegion && indexCount() > 0) {
+            segmentIndexMatrix.forEach(segmentDataMap -> {
+                Tablet.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
+                // TODO(hw): if we split index rpc, matrix should be a map.
 //                bulkLoadIndexBuilder.setInnerIndexId();
-            segmentDataMap.forEach(segment -> {
-                bulkLoadIndexBuilder.addSegment(segment.toProtobuf());
+                segmentDataMap.forEach(segment -> {
+                    bulkLoadIndexBuilder.addSegment(segment.toProtobuf());
+                });
             });
-        });
+        }
         // DataBlockInfo
         requestBuilder.addAllBlockInfo(dataBlockInfoList);
+    }
+
+    public int indexCount() {
+        AtomicInteger total = new AtomicInteger();
+        segmentIndexMatrix.forEach(segmentDataMap -> {
+            segmentDataMap.forEach(segment -> {
+                total.addAndGet(segment.entryCount());
+            });
+        });
+        return total.get();
     }
 
     public byte[] getDataRegion() {
@@ -97,8 +110,12 @@ public class BulkLoadRequest {
     }
 
     // TODO(hw):  only data size? how about index size?
-    public int size() {
+    public int dataSize() {
         return dataBlock.size();
+    }
+
+    public SegmentIndexRegion getSegmentIndexRegion(int idx, int segIdx) {
+        return segmentIndexMatrix.get(idx).get(segIdx);
     }
 
     public static class SegmentIndexRegion {
@@ -159,6 +176,14 @@ public class BulkLoadRequest {
                 }
             }
             return put;
+        }
+
+        public int entryCount() {
+            AtomicInteger count = new AtomicInteger();
+            keyEntries.forEach((key, keyEntry) -> {
+                count.addAndGet(keyEntry.size());
+            });
+            return count.get();
         }
 
         // serialize to `message Segment`
