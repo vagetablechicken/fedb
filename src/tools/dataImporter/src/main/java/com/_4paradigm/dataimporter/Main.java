@@ -62,13 +62,13 @@ public class Main {
         String dbName = "testdb";
         String tableName = "t1";
 
-        SqlExecutor router = null;
+        SqlExecutor router;
         SdkOption option = new SdkOption();
         option.setZkCluster("172.24.4.55:4181");
         option.setZkPath("/onebox");
 
-        int X = 8; // put_concurrency_limit default is 8
-        int rpcDataSizeLimit = 2 * 1000 * 1000; // 2MB
+        int X = 1; // put_concurrency_limit default is 8
+        int rpcDataSizeLimit = 52 * 1024 * 1024; // 2MB
 
         try {
             router = new SqlClusterExecutor(option);
@@ -107,9 +107,9 @@ public class Main {
         logger.info("rows {}, peek {}", rows.size(), rows.isEmpty() ? "" : rows.get(0).toString());
         long startTime = System.currentTimeMillis();
 
-        insertImport(X, rows, router, dbName, tableName);
+//        insertImport(X, rows, router, dbName, tableName);
 
-//        bulkLoadMulti(X, rows, router, dbName, tableName, rpcDataSizeLimit);
+        bulkLoadMulti(X, rows, router, dbName, tableName, rpcDataSizeLimit);
 
         long endTime = System.currentTimeMillis();
 
@@ -195,10 +195,10 @@ public class Main {
                 //  http/h2 can't add attachment, cuz it use attachment to pass message. So we need to use brpc-java
                 RpcClientOptions clientOption = new RpcClientOptions();
 //                clientOption.setWriteTimeoutMillis(1000);
-//                clientOption.setReadTimeoutMillis(50000);
+                clientOption.setReadTimeoutMillis(50000); // index rpc may take time, cuz need to do bulk load
 //                clientOption.setMinIdleConnections(10);
 //                clientOption.setCompressType(Options.CompressType.COMPRESS_TYPE_NONE);
-//                clientOption.setGlobalThreadPoolSharing(true);
+                clientOption.setGlobalThreadPoolSharing(true);
 
                 // Must list://
                 String serviceUrl = "list://" + leader.getEndpoint();
@@ -221,7 +221,7 @@ public class Main {
             return;
         }
 
-        logger.info("create {} generators, start bulk load.", generators.size());
+        logger.info("create {} generators, start bulk load...", generators.size());
         threads.forEach(Thread::start);
 
         // testTable(TableInfo) to index map, needed by buildDimensions.
@@ -231,32 +231,31 @@ public class Main {
         Map<Integer, List<Integer>> keyIndexMap = new HashMap<>();
         Set<Integer> tsIdxSet = new HashSet<>();
         parseIndexMapAndTsSet(testTable, keyIndexMap, tsIdxSet);
+        try {
+            for (CSVRecord record : rows) {
+                Map<Integer, List<Pair<String, Integer>>> dims = buildDimensions(record, keyIndexMap, testTable.getPartitionNum());
+                if (logger.isDebugEnabled()) {
+                    logger.debug(record.toString());
+                    logger.debug(dims.entrySet().stream().map(entry -> entry.getKey().toString() + ": " +
+                            entry.getValue().stream().map(pair ->
+                                    "<" + pair.getKey() + ", " + pair.getValue() + ">")
+                                    .collect(Collectors.joining(", ", "(", ")")))
+                            .collect(Collectors.joining("], [", "[", "]")));
+                }
 
-        for (CSVRecord record : rows) {
-            Map<Integer, List<Pair<String, Integer>>> dims = buildDimensions(record, keyIndexMap, testTable.getPartitionNum());
-            if (logger.isDebugEnabled()) {
-                logger.debug(record.toString());
-                logger.debug(dims.entrySet().stream().map(entry -> entry.getKey().toString() + ": " +
-                        entry.getValue().stream().map(pair ->
-                                "<" + pair.getKey() + ", " + pair.getValue() + ">")
-                                .collect(Collectors.joining(", ", "(", ")")))
-                        .collect(Collectors.joining("], [", "[", "]")));
-            }
-
-            // distribute the row to the bulk load generators for each MemTable(tid, pid)
-            for (Integer pid : dims.keySet()) {
-                try {
+                // distribute the row to the bulk load generators for each MemTable(tid, pid)
+                for (Integer pid : dims.keySet()) {
                     // Note: NS pid is int
                     // no need to calc dims twice, pass it to BulkLoadGenerator
                     generators.get(pid).feed(new BulkLoadGenerator.FeedItem(dims, tsIdxSet, record));
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                    logger.error("feed error, skip this row or retry, or fail all?");
                 }
             }
+        } catch (Exception e) {
+            logger.error("feeding failed, {}", e.getMessage());
         }
 
-        generators.forEach((integer, bulkLoadGenerator) -> bulkLoadGenerator.shutDown());
+        generators.forEach((integer, bulkLoadGenerator) -> bulkLoadGenerator.shutdownGracefully());
+        logger.info("shutdown gracefully, waiting threads...");
         for (Thread thread : threads) {
             try {
                 thread.join();
@@ -265,8 +264,7 @@ public class Main {
             }
         }
         if (generators.values().stream().anyMatch(BulkLoadGenerator::hasInternalError)) {
-            logger.error("BulkLoad failed...");
-            return;
+            logger.error("BulkLoad has failed.");
         }
 
         // TODO(hw): get statistics from generators

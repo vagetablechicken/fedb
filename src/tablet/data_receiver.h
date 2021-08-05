@@ -27,20 +27,21 @@ class DataReceiver {
     //    DataReceiver() = default;
     DataReceiver(uint32_t tid, uint32_t pid) : tid_(tid), pid_(pid) {}
 
-    // only one of the methods below executes at the time.s
+    // only one of the methods below executes at the time.
     bool DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data);
-    bool BulkLoad(std::shared_ptr<storage::MemTable> table,
-                  const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
+    bool BulkLoad(std::shared_ptr<storage::MemTable> table, const ::openmldb::api::BulkLoadRequest* request);
     bool WriteBinlogToReplicator(std::shared_ptr<replica::LogReplicator> replicator,
                                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
+
+ private:
+    bool PartValidation(int part_id);
 
  private:
     // TODO(hw): init val?
     const uint32_t tid_{};
     const uint32_t pid_{};
+
     std::mutex mu_;
-    enum ReceiverStatus { DataLoading, BulkLoaded, BinLogWriten };
-    ReceiverStatus status_{DataLoading};
     int next_part_id_{0};
     std::vector<storage::DataBlock*> data_blocks_;
 };

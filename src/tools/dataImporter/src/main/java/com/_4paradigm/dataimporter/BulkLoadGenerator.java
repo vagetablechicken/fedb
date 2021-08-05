@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021 4Paradigm
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com._4paradigm.dataimporter;
 
 import com._4paradigm.openmldb.api.Tablet;
@@ -11,6 +27,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -56,21 +73,24 @@ public class BulkLoadGenerator implements Runnable {
     private final AtomicBoolean internalErrorOcc = new AtomicBoolean(false);
     private final NS.TableInfo tableInfo;
     private final Tablet.BulkLoadInfoResponse indexInfoFromTablet; // TODO(hw): not a good name
-    private BulkLoadRequest bulkLoadRequest;
+    private final DataRegionBuilder dataRegionBuilder;
+    private final IndexRegionBuilder indexRegionBuilder;
     private final TabletService service;
     private final int rpcDataSizeLimit;
-    private int partId = 0;
 
-    public BulkLoadGenerator(int tid, int pid, NS.TableInfo tableInfo, Tablet.BulkLoadInfoResponse indexInfo, TabletService service, int rpcDataSizeLimit) {
+    private int statistics = 0;
+
+    public BulkLoadGenerator(int tid, int pid, NS.TableInfo tableInfo, Tablet.BulkLoadInfoResponse indexInfo, TabletService service, int rpcSizeLimit) {
         this.tid = tid;
         this.pid = pid;
         this.queue = new ArrayBlockingQueue<>(1000);
         this.pollTimeout = 100;
         this.tableInfo = tableInfo;
         this.indexInfoFromTablet = indexInfo;
-        this.bulkLoadRequest = new BulkLoadRequest(indexInfoFromTablet); // built from BulkLoadInfoResponse
+        this.dataRegionBuilder = new DataRegionBuilder(tid, pid, rpcSizeLimit);
+        this.indexRegionBuilder = new IndexRegionBuilder(tid, pid, indexInfoFromTablet); // built from BulkLoadInfoResponse
         this.service = service;
-        this.rpcDataSizeLimit = rpcDataSizeLimit;
+        this.rpcDataSizeLimit = rpcSizeLimit;
     }
 
     @Override
@@ -81,8 +101,8 @@ public class BulkLoadGenerator implements Runnable {
             // exit statement: shutdown and no element in queue, or internal exit
             long startTime = System.currentTimeMillis();
             long realGenTime = 0;
-            while (!shutdown.get() || !this.queue.isEmpty()) {
-                FeedItem item = this.queue.poll(this.pollTimeout, TimeUnit.MILLISECONDS);
+            while (!shutdown.get() || !queue.isEmpty()) {
+                FeedItem item = queue.poll(pollTimeout, TimeUnit.MILLISECONDS);
                 if (item == null) {
                     // poll timeout, queue is still empty
                     continue;
@@ -90,18 +110,7 @@ public class BulkLoadGenerator implements Runnable {
                 long realStartTime = System.currentTimeMillis();
 
                 // build data buffer
-                List<Object> rowValues = new ArrayList<>();
-                for (int j = 0; j < tableInfo.getColumnDescCount(); j++) {
-                    Common.ColumnDesc desc = tableInfo.getColumnDesc(j);
-                    String v = item.valueMap.get(desc.getName());
-                    Type.DataType type = desc.getDataType();
-                    Object obj = buildTypedValues(v, type);
-                    Preconditions.checkNotNull(obj);
-                    rowValues.add(obj);
-                }
-                ByteBuffer dataBuffer = RowBuilder.encode(rowValues.toArray(), tableInfo.getColumnDescList(), 1);
-                Preconditions.checkState(tableInfo.getCompressType() == Type.CompressType.kNoCompress); // TODO(hw): support snappy later
-                dataBuffer.rewind();
+                ByteBuffer dataBuffer = buildData(item.valueMap);
 
                 List<Pair<String, Integer>> dimensions = item.dims.get(this.pid);
 
@@ -166,7 +175,7 @@ public class BulkLoadGenerator implements Runnable {
                 }
 
                 // Index Region insert, only use id
-                int dataBlockId = bulkLoadRequest.nextId();
+                int dataBlockId = dataRegionBuilder.nextId();
                 for (Map.Entry<Integer, String> idx2key : innerIndexKeyMap.entrySet()) {
                     Integer idx = idx2key.getKey();
                     String key = idx2key.getValue();
@@ -179,7 +188,7 @@ public class BulkLoadGenerator implements Runnable {
                             segIdx = Integer.toUnsignedLong(Main.hash(key.getBytes(), key.length(), 0xe17a1465)) % indexInfoFromTablet.getSegCnt();
                         }
                         // segment[k][segIdx]->Put
-                        BulkLoadRequest.SegmentIndexRegion segment = bulkLoadRequest.getSegmentIndexRegion(idx, (int) segIdx);
+                        IndexRegionBuilder.SegmentIndexRegion segment = indexRegionBuilder.getSegmentIndexRegion(idx, (int) segIdx);
 
                         // void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
                         boolean put = segment.Put(key, tsDimsWrap, dataBlockId);
@@ -191,20 +200,22 @@ public class BulkLoadGenerator implements Runnable {
                 }
 
                 // If success, add data & info
-                if (!bulkLoadRequest.appendData(dataBuffer.array(), realRefCnt.get())) {
-                    throw new RuntimeException("write data block info to request failed");
-                }
+                dataRegionBuilder.addDataBlock(dataBuffer, realRefCnt.get());
+
                 // If reach limit, set part id, send data block infos & data, no index region.
-                if (bulkLoadRequest.dataSize() > rpcDataSizeLimit) {
-                    Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId, false);
-                    RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
-                    Tablet.GeneralResponse response = service.bulkLoad(request);
-                    if (response.getCode() != 0) {
-                        throw new RuntimeException("bulk load data rpc failed, " + response);
-                    }
-                    partId++;
-                    bulkLoadRequest = new BulkLoadRequest(indexInfoFromTablet);
-                }
+                // BulkLoadRequest won't add index region util data region all sent.
+                Tablet.BulkLoadRequest.Builder builder = Tablet.BulkLoadRequest.newBuilder();
+
+//                byte[] attachment;
+//                RpcContext.getContext().setRequestBinaryAttachment(attachment);
+                ByteArrayOutputStream attachmentStream = new ByteArrayOutputStream();
+                Tablet.BulkLoadRequest request = dataRegionBuilder.buildPartialRequest(false, attachmentStream);
+
+//                if (indexRegionBuilder.dataAndInfoSize() > rpcDataSizeLimit) {
+//                    logger.info("dataSize()={}", indexRegionBuilder.dataAndInfoSize());
+//                    sendRequest(false);
+//                }
+
                 long realEndTime = System.currentTimeMillis();
                 realGenTime += (realEndTime - realStartTime);
             }
@@ -214,35 +225,61 @@ public class BulkLoadGenerator implements Runnable {
                     Thread.currentThread().getId(), tid, pid, generateTime - startTime, realGenTime);
 
             // request -> pb
-            if (bulkLoadRequest.indexCount() == 0) {
+            if (indexRegionBuilder.indexCount() == 0) {
                 logger.info("MemTable(tid-pid {}-{}) doesn't need bulk loading", tid, pid);
                 return;
             }
-            Tablet.BulkLoadRequest request = bulkLoadRequest.toProtobuf(tid, pid, partId, true);
-            if (logger.isDebugEnabled()) {
-                logger.debug("bulk load request {}", request);
-            }
-            // May have some data left
-            RpcContext.getContext().setRequestBinaryAttachment(bulkLoadRequest.getDataRegion());
-            Tablet.GeneralResponse response = service.bulkLoad(request);
-
+            // TODO(hw): IndexRegion may be big too. e.g. 40M index message for 1.4M rows
+            sendRequest();
             long endTime = System.currentTimeMillis();
-            logger.info("rpc cost {} ms", endTime - generateTime);
-            if (response.getCode() != 0) {
-                throw new RuntimeException("bulk load index rpc failed, " + response);
-            }
-        } catch (RuntimeException | InterruptedException e) {
-            logger.error("Thread {} for MemTable(tid-pid {}-{}) got err: {}", Thread.currentThread().getId(), tid, pid, e.getMessage());
+            logger.info("last rpc(has index region) cost {} ms", endTime - generateTime);
+
+            logger.info("total row count {}", statistics);
+        } catch (Exception e) {
+            logger.error("Thread {} for MemTable(tid-pid {}-{}) got err: {}. Exit...", Thread.currentThread().getId(), tid, pid, e.getMessage());
             internalErrorOcc.set(true);
         }
     }
 
+    private ByteBuffer buildData(Map<String, String> valueMap) {
+        List<Object> rowValues = new ArrayList<>();
+        for (int j = 0; j < tableInfo.getColumnDescCount(); j++) {
+            Common.ColumnDesc desc = tableInfo.getColumnDesc(j);
+            String v = valueMap.get(desc.getName());
+            Type.DataType type = desc.getDataType();
+            Object obj = buildTypedValues(v, type);
+            Preconditions.checkNotNull(obj);
+            rowValues.add(obj);
+        }
+        ByteBuffer dataBuffer = RowBuilder.encode(rowValues.toArray(), tableInfo.getColumnDescList(), 1);
+        Preconditions.checkState(tableInfo.getCompressType() == Type.CompressType.kNoCompress); // TODO(hw): support snappy later
+        dataBuffer.rewind(); // TODO(hw): need?
+        return dataBuffer;
+    }
+
+    private void sendRequest() {
+        Tablet.BulkLoadRequest request = indexRegionBuilder.buildIndexRequest();
+        Tablet.GeneralResponse response = service.bulkLoad(request);
+        statistics += request.getBlockInfoCount();
+        logger.info("sent rpc. index message size {}", request.getSerializedSize());
+        if (response.getCode() != 0) {
+            throw new RuntimeException("bulk load data rpc failed, " + response);
+        }
+    }
+
     public void feed(FeedItem item) throws InterruptedException {
-        this.queue.put(item); // blocking put
+        do {
+            if (hasInternalError()) {
+                throw new RuntimeException("generator has inter err");
+            }
+        } while (!queue.offer(item, 100, TimeUnit.MILLISECONDS));
+        // offer() returns false if no space is available, waiting up to the specified wait time if necessary for space
+        // to become available(and waiting up can avoid frequent switching).
+        // If the generator works properly, we should keep retrying.
     }
 
     // Shutdown will wait for queue empty.
-    public void shutDown() {
+    public void shutdownGracefully() {
         this.shutdown.set(true);
     }
 

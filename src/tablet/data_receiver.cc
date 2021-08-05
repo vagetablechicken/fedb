@@ -21,14 +21,11 @@
 namespace openmldb::tablet {
 bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data) {
     std::unique_lock<std::mutex> ul(mu_);
-    if (status_ != DataLoading) {
-        LOG(WARNING) << tid_ << "-" << pid_ << " data receiver status is not loading, st: " << status_;
-        return false;
-    }
-    // assert has data part id
-    if (request->data_part_id() != next_part_id_) {
-        LOG(WARNING) << tid_ << "-" << pid_ << " data receiver needs part " << next_part_id_ << ", but get part "
-                     << request->data_part_id();
+
+    if (!request->has_data_part_id() || !PartValidation(request->data_part_id())) {
+        LOG(WARNING) << tid_ << "-" << pid_ << " data receiver received invalid part id, expect " << next_part_id_
+                     << ", actual "
+                     << (request->has_data_part_id() ? "no id" : std::to_string(request->data_part_id()));
         return false;
     }
 
@@ -51,27 +48,38 @@ bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request, c
         }
         return false;
     }
-    next_part_id_++;
+
     DLOG(INFO) << "inserted into table(" << tid_ << "-" << pid_ << ") " << request->block_info_size()
                << " rows. Looking forward to part " << next_part_id_ << " or IndexRegion.";
     return true;
 }
 
-bool DataReceiver::BulkLoad(std::shared_ptr<storage::MemTable> table,
-                            const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
+bool DataReceiver::PartValidation(int part_id) {
+    if (part_id != next_part_id_) {
+        LOG(WARNING) << tid_ << "-" << pid_ << " data receiver needs part " << next_part_id_ << ", but get part "
+                     << part_id;
+        return false;
+    }
+    next_part_id_++;
+    return true;
+}
+
+bool DataReceiver::BulkLoad(std::shared_ptr<storage::MemTable> table, const ::openmldb::api::BulkLoadRequest* request) {
     std::unique_lock<std::mutex> ul(mu_);
     DLOG_ASSERT(tid_ == table->GetId() && pid_ == table->GetPid());
-    if (status_ != DataLoading) {
-        LOG(ERROR) << "receiver (" << tid_ << "-" << pid_ << ") status is " << status_ << ", can't do bulk load.";
+
+    if (!request->has_data_part_id() || !PartValidation(request->data_part_id())) {
+        LOG(WARNING) << tid_ << "-" << pid_ << " data receiver received invalid part id, expect " << next_part_id_
+                     << ", actual "
+                     << (request->has_data_part_id() ? "no id" : std::to_string(request->data_part_id()));
         return false;
     }
 
-    if (!table->BulkLoad(data_blocks_, indexes)) {
+    if (!table->BulkLoad(data_blocks_, request->index_region())) {
         LOG(ERROR) << "bulk load to mem table(" << tid_ << "-" << pid_ << ") failed.";
     }
 
-    DLOG(INFO) << "bulk load to mem table(" << tid_ << "-" << pid_ << ") " << data_blocks_.size() << "rows.";
-    status_ = BulkLoaded;
+    DLOG(INFO) << "bulk load to mem table(" << tid_ << "-" << pid_ << ") " << data_blocks_.size() << " rows.";
     return true;
 }
 
@@ -79,10 +87,7 @@ bool DataReceiver::WriteBinlogToReplicator(
     std::shared_ptr<replica::LogReplicator> replicator,
     const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
     std::unique_lock<std::mutex> ul(mu_);
-    if (status_ != BulkLoaded) {
-        LOG(ERROR) << "receiver (" << tid_ << "-" << pid_ << ") status is " << status_ << ", can't write binlog.";
-        return false;
-    }
+
     for (int i = 0; i < indexes.size(); ++i) {
         const auto& inner_index = indexes.Get(i);
         for (int j = 0; j < inner_index.segment_size(); ++j) {
@@ -112,7 +117,6 @@ bool DataReceiver::WriteBinlogToReplicator(
         }
     }
     // TODO(hw): after binlog, release data block ptr cache? or delete it when we destroy the whole data receiver?
-    status_ = BinLogWriten;
     return true;
 }
 }  // namespace openmldb::tablet

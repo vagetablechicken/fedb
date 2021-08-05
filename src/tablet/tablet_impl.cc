@@ -4857,47 +4857,50 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::openmldb::api::Bulk
         DLOG(INFO) << tid << "-" << pid << " has loaded data region part " << request->data_part_id();
     }
 
-    if (request->index_region_size() == 0) {
-        DLOG(INFO) << tid << "-" << pid << " get only data rpc";
-        return;
+    if (request->index_region_size() > 0) {
+        DLOG(INFO) << tid << "-" << pid << " get index region, do bulk load";
+        // The request may have both data & index region, data has been appended before. BulkLoadData only do bulk load
+        // to table.
+        if (!bulk_load_mgr_.BulkLoad(std::dynamic_pointer_cast<MemTable>(table), request)) {
+            response->set_code(::openmldb::base::ReturnCode::kWriteDataFailed);
+            response->set_msg("bulk load to table failed");
+            LOG(WARNING) << tid << "-" << pid << " " << response->msg();
+            return;
+        }
+        // TODO(hw):  how to find the last bulk load? or index rpcs all do {bulk load; write bin log}?
+
+        uint64_t load_time = ::baidu::common::timer::get_micros();
+        PDLOG(INFO, "%u-%u, bulk load only load cost %lu us", request->tid(), request->pid(), load_time - start_time);
+
+        response->set_code(::openmldb::base::ReturnCode::kOk);
+        std::shared_ptr<LogReplicator> replicator;
+        do {
+            replicator = GetReplicator(request->tid(), request->pid());
+            if (!replicator) {
+                PDLOG(WARNING, "fail to find table tid %u pid %u leader's log replicator", request->tid(),
+                      request->pid());
+                break;
+            }
+
+            auto ok = bulk_load_mgr_.WriteBinlogToReplicator(tid, pid, replicator, request->index_region());
+            if (!ok) {
+                DLOG(INFO) << "write binlog failed";
+            }
+        } while (false);
+        uint64_t end_time = ::baidu::common::timer::get_micros();
+        PDLOG(INFO, "%u-%u, binlog cost %lu us", request->tid(), request->pid(), end_time - load_time);
+
+        if (replicator) {
+            if (FLAGS_binlog_notify_on_put) {
+                replicator->Notify();
+            }
+        }
     }
 
-    DLOG(INFO) << tid << "-" << pid << " get index region, do bulk load";
-    // The request may have both data & index region, data has been appended before. BulkLoadData only do bulk load to
-    // table.
-    if (!bulk_load_mgr_.BulkLoad(std::dynamic_pointer_cast<MemTable>(table), request->index_region())) {
-        response->set_code(::openmldb::base::ReturnCode::kWriteDataFailed);
-        response->set_msg("bulk load to table failed");
-        LOG(WARNING) << tid << "-" << pid << " " << response->msg();
-        return;
-    }
+    if(request->eof()){
+        // no more jobs to do, clean up the data receiver
+        // TODO(hw): what about the data in MemTable?
 
-    uint64_t load_time = ::baidu::common::timer::get_micros();
-
-    PDLOG(INFO, "%u-%u, bulk load only load cost %lu us", request->tid(), request->pid(), load_time - start_time);
-
-    response->set_code(::openmldb::base::ReturnCode::kOk);
-    std::shared_ptr<LogReplicator> replicator;
-    do {
-        replicator = GetReplicator(request->tid(), request->pid());
-        if (!replicator) {
-            PDLOG(WARNING, "fail to find table tid %u pid %u leader's log replicator", request->tid(), request->pid());
-            break;
-        }
-
-        auto ok = bulk_load_mgr_.WriteBinlogToReplicator(tid, pid, replicator, request->index_region());
-        if (!ok) {
-            DLOG(INFO) << "write binlog failed";
-        }
-    } while (false);
-    uint64_t end_time = ::baidu::common::timer::get_micros();
-    PDLOG(INFO, "%u-%u, bulk load cost %lu us, binlog cost %lu us", request->tid(), request->pid(),
-          end_time - start_time, end_time - load_time);
-
-    if (replicator) {
-        if (FLAGS_binlog_notify_on_put) {
-            replicator->Notify();
-        }
     }
 }
 

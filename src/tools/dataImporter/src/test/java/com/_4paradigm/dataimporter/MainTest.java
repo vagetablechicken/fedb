@@ -2,8 +2,6 @@ package com._4paradigm.dataimporter;
 
 import com._4paradigm.openmldb.api.Tablet;
 import junit.framework.TestCase;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.core.config.Configurator;
 import org.junit.Assert;
 
 import java.util.Arrays;
@@ -15,7 +13,7 @@ import java.util.Map;
 public class MainTest extends TestCase {
 
     public void testSegmentIndexRegion() {
-        BulkLoadRequest.SegmentIndexRegion region = new BulkLoadRequest.SegmentIndexRegion(1, null);
+        IndexRegionBuilder.SegmentIndexRegion region = new IndexRegionBuilder.SegmentIndexRegion(1, null);
         Map<String, List<Map<Long, Integer>>> treeMap = region.keyEntries;
         // test tree map, should be in reverse order, s11 > s1 > S1
         List<String> keys = Arrays.asList("s11", "s1", "S1");

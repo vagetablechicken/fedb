@@ -29,8 +29,7 @@ class BulkLoadMgr {
     bool WriteBinlogToReplicator(uint32_t tid, uint32_t pid, std::shared_ptr<replica::LogReplicator> replicator,
                                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
 
-    bool BulkLoad(std::shared_ptr<storage::MemTable> table,
-                  const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
+    bool BulkLoad(std::shared_ptr<storage::MemTable> table, const ::openmldb::api::BulkLoadRequest* request);
 
  protected:
     std::shared_ptr<DataReceiver> GetDataReceiver(uint32_t tid, uint32_t pid, bool create);

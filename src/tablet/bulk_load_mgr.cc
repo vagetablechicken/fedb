@@ -37,14 +37,13 @@ bool BulkLoadMgr::DataAppend(uint32_t tid, uint32_t pid, const ::openmldb::api::
     return true;
 }
 
-bool BulkLoadMgr::BulkLoad(std::shared_ptr<storage::MemTable> table,
-                           const google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
+bool BulkLoadMgr::BulkLoad(std::shared_ptr<storage::MemTable> table, const ::openmldb::api::BulkLoadRequest* request) {
     auto data_receiver = GetDataReceiver(table->GetId(), table->GetPid(), DO_NOT_CREATE);
     if (!data_receiver) {
         LOG(ERROR) << "BulkLoad: can't get data receiver for " << table->GetId() << "-" << table->GetPid();
         return false;
     }
-    if (!data_receiver->BulkLoad(table, indexes)) {
+    if (!data_receiver->BulkLoad(table, request)) {
         return false;
     }
     return true;
@@ -94,7 +93,7 @@ std::shared_ptr<DataReceiver> BulkLoadMgr::GetDataReceiver(uint32_t tid, uint32_
 
         // catalog has the receiver for tid-pid, we treat it as error. // TODO(hw): or should treat it as covering?
         if (create) {
-            DLOG(INFO) << "already has the receiver for " << tid << "-" << pid << ", but want to create a new one";
+            LOG(WARNING) << "already has the receiver for " << tid << "-" << pid << ", but want to create a new one";
             break;
         }
         data_receiver = iter->second;

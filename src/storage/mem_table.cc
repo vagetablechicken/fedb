@@ -791,10 +791,10 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
     std::vector<bool> block_id_used(data_blocks.size(), false);
     for (int i = 0; i < indexes.size(); ++i) {
         const auto& inner_index = indexes.Get(i);
-        uint32_t real_idx = i;
+        auto real_idx = inner_index.inner_index_id(); // TODO(hw): check
         for (int j = 0; j < inner_index.segment_size(); ++j) {
             const auto& segment_index = inner_index.segment(j);
-            auto seg_idx = j;
+            auto seg_idx = segment_index.id(); // TODO(hw): check
             auto segment = segments_[real_idx][seg_idx];
             for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
                 const auto& key_entries = segment_index.key_entries(key_idx);

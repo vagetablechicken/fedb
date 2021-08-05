@@ -1,7 +1,25 @@
+/*
+ * Copyright 2021 4Paradigm
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com._4paradigm.dataimporter;
 
 import com._4paradigm.openmldb.api.Tablet;
 import com.google.common.base.Preconditions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -15,13 +33,20 @@ import java.util.stream.Collectors;
 import static com.google.common.collect.MoreCollectors.onlyElement;
 import static com.google.protobuf.ByteString.copyFromUtf8;
 
-public class BulkLoadRequest {
-    // TODO(hw): private members below
-    public List<List<SegmentIndexRegion>> segmentIndexMatrix;
-    public ByteArrayOutputStream dataBlock = new ByteArrayOutputStream();
-    public List<Tablet.DataBlockInfo> dataBlockInfoList = new ArrayList<>();
+// IndexRegionBuilder builds requests of index region(split by size).
+// Must build and send index requests after all data requests have been sent.
+public class IndexRegionBuilder {
+    private static final Logger logger = LoggerFactory.getLogger(IndexRegionBuilder.class);
 
-    public BulkLoadRequest(Tablet.BulkLoadInfoResponse bulkLoadInfo) {
+    private final int tid;
+    private final int pid;
+    private final List<List<SegmentIndexRegion>> segmentIndexMatrix; // TODO(hw): to map?
+
+    private int partId = 0; // TODO(hw): start after data region part id
+
+    public IndexRegionBuilder(int tid, int pid, Tablet.BulkLoadInfoResponse bulkLoadInfo) {
+        this.tid = tid;
+        this.pid = pid;
         segmentIndexMatrix = new ArrayList<>();
 
         bulkLoadInfo.getInnerSegmentsList().forEach(
@@ -42,77 +67,39 @@ public class BulkLoadRequest {
         );
     }
 
-    @Deprecated
-    public Tablet.BulkLoadRequest toProtobuf(int tid, int pid) {
+
+
+    public Tablet.BulkLoadRequest buildIndexRequest() {
         Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
-        requestBuilder.setTid(tid).setPid(pid);
-        setIndexAndDataInfo(requestBuilder, true);
+        setRequest(requestBuilder);
+        // TODO(hw): hard copy, can be avoided? utf8?
         return requestBuilder.build();
     }
 
-    public Tablet.BulkLoadRequest toProtobuf(int tid, int pid, int partId, boolean takeIndexRegion) {
-        Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
-        requestBuilder.setTid(tid).setPid(pid).setDataPartId(partId);
-        setIndexAndDataInfo(requestBuilder, takeIndexRegion);
-        return requestBuilder.build();
-    }
-
-    private void setIndexAndDataInfo(Tablet.BulkLoadRequest.Builder requestBuilder, boolean takeIndexRegion) {
+    private void setRequest(Tablet.BulkLoadRequest.Builder requestBuilder) {
         // segmentDataMaps -> BulkLoadIndex
-        if (takeIndexRegion && indexCount() > 0) {
+        int indexCount = indexCount();
+        if (indexCount > 0) {
+            logger.info("index count {}", indexCount);
             segmentIndexMatrix.forEach(segmentDataMap -> {
                 Tablet.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
-                // TODO(hw): if we split index rpc, matrix should be a map.
+                // TODO(hw): if we split index rpc, matrix should be a map？
 //                bulkLoadIndexBuilder.setInnerIndexId();
-                segmentDataMap.forEach(segment -> {
-                    bulkLoadIndexBuilder.addSegment(segment.toProtobuf());
-                });
+                segmentDataMap.forEach(segment -> bulkLoadIndexBuilder.addSegment(segment.toProtobuf()));
             });
         }
-        // DataBlockInfo
-        requestBuilder.addAllBlockInfo(dataBlockInfoList);
+
+        requestBuilder.setTid(tid).setPid(pid).setDataPartId(partId);
+        partId++;
     }
 
     public int indexCount() {
         AtomicInteger total = new AtomicInteger();
-        segmentIndexMatrix.forEach(segmentDataMap -> {
-            segmentDataMap.forEach(segment -> {
-                total.addAndGet(segment.entryCount());
-            });
-        });
+        segmentIndexMatrix.forEach(segmentDataMap -> segmentDataMap.forEach(segment -> total.addAndGet(segment.entryCount())));
         return total.get();
     }
 
-    public byte[] getDataRegion() {
-        // TODO(hw): hard copy, can be avoided? utf8?
-        return dataBlock.toByteArray();
-    }
-
-    public int nextId() {
-        return dataBlockInfoList.size();
-    }
-
-    public boolean appendData(byte[] data, int refCnt) {
-        int head = nextDataHead();
-        try {
-            dataBlock.write(data);
-        } catch (IOException e) {
-            e.printStackTrace();
-            return false;
-        }
-        int length = dataBlock.size() - head;
-        dataBlockInfoList.add(Tablet.DataBlockInfo.newBuilder().setRefCnt(refCnt).setOffset(head).setLength(length).build());
-        return true;
-    }
-
-    public int nextDataHead() {
-        return dataBlock.size();
-    }
-
     // TODO(hw):  only data size? how about index size?
-    public int dataSize() {
-        return dataBlock.size();
-    }
 
     public SegmentIndexRegion getSegmentIndexRegion(int idx, int segIdx) {
         return segmentIndexMatrix.get(idx).get(segIdx);
@@ -180,9 +167,7 @@ public class BulkLoadRequest {
 
         public int entryCount() {
             AtomicInteger count = new AtomicInteger();
-            keyEntries.forEach((key, keyEntry) -> {
-                count.addAndGet(keyEntry.size());
-            });
+            keyEntries.forEach((key, keyEntry) -> count.addAndGet(keyEntry.size()));
             return count.get();
         }
 
