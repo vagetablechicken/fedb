@@ -67,9 +67,14 @@ public class IndexRegionBuilder {
         );
     }
 
+    public void setStartPartId(int startPartId) {
+        this.partId = startPartId;
+    }
 
-
-    public Tablet.BulkLoadRequest buildIndexRequest() {
+    // If null, no more index region rpc.
+    public Tablet.BulkLoadRequest buildPartialRequest() {
+        // TODO(hw): reqReservedSize should be a common class?
+        //  check the index region size growth
         Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
         setRequest(requestBuilder);
         // TODO(hw): hard copy, can be avoided? utf8?
@@ -89,7 +94,7 @@ public class IndexRegionBuilder {
             });
         }
 
-        requestBuilder.setTid(tid).setPid(pid).setDataPartId(partId);
+        requestBuilder.setTid(tid).setPid(pid).setPartId(partId);
         partId++;
     }
 

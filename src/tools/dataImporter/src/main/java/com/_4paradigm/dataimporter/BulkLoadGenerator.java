@@ -203,23 +203,20 @@ public class BulkLoadGenerator implements Runnable {
                 dataRegionBuilder.addDataBlock(dataBuffer, realRefCnt.get());
 
                 // If reach limit, set part id, send data block infos & data, no index region.
-                // BulkLoadRequest won't add index region util data region all sent.
-                Tablet.BulkLoadRequest.Builder builder = Tablet.BulkLoadRequest.newBuilder();
-
-//                byte[] attachment;
-//                RpcContext.getContext().setRequestBinaryAttachment(attachment);
                 ByteArrayOutputStream attachmentStream = new ByteArrayOutputStream();
                 Tablet.BulkLoadRequest request = dataRegionBuilder.buildPartialRequest(false, attachmentStream);
-
-//                if (indexRegionBuilder.dataAndInfoSize() > rpcDataSizeLimit) {
-//                    logger.info("dataSize()={}", indexRegionBuilder.dataAndInfoSize());
-//                    sendRequest(false);
-//                }
+                if (request != null) {
+                    sendRequest(request, attachmentStream);
+                }
 
                 long realEndTime = System.currentTimeMillis();
                 realGenTime += (realEndTime - realStartTime);
             }
-
+            ByteArrayOutputStream attachmentStream = new ByteArrayOutputStream();
+            Tablet.BulkLoadRequest request = dataRegionBuilder.buildPartialRequest(true, attachmentStream);
+            if (request != null) {
+                sendRequest(request, attachmentStream);
+            }
             long generateTime = System.currentTimeMillis();
             logger.info("Thread {} for MemTable(tid-pid {}-{}), generate cost {} ms, real cost {} ms",
                     Thread.currentThread().getId(), tid, pid, generateTime - startTime, realGenTime);
@@ -230,7 +227,7 @@ public class BulkLoadGenerator implements Runnable {
                 return;
             }
             // TODO(hw): IndexRegion may be big too. e.g. 40M index message for 1.4M rows
-            sendRequest();
+//            sendRequest(request);
             long endTime = System.currentTimeMillis();
             logger.info("last rpc(has index region) cost {} ms", endTime - generateTime);
 
@@ -253,15 +250,14 @@ public class BulkLoadGenerator implements Runnable {
         }
         ByteBuffer dataBuffer = RowBuilder.encode(rowValues.toArray(), tableInfo.getColumnDescList(), 1);
         Preconditions.checkState(tableInfo.getCompressType() == Type.CompressType.kNoCompress); // TODO(hw): support snappy later
-        dataBuffer.rewind(); // TODO(hw): need?
         return dataBuffer;
     }
 
-    private void sendRequest() {
-        Tablet.BulkLoadRequest request = indexRegionBuilder.buildIndexRequest();
+    private void sendRequest(Tablet.BulkLoadRequest request, ByteArrayOutputStream attachmentStream) {
+        RpcContext.getContext().setRequestBinaryAttachment(attachmentStream.toByteArray());
         Tablet.GeneralResponse response = service.bulkLoad(request);
         statistics += request.getBlockInfoCount();
-        logger.info("sent rpc. index message size {}", request.getSerializedSize());
+        logger.info("sent rpc, message size {}, attachment size {}", request.getSerializedSize(), attachmentStream.size());
         if (response.getCode() != 0) {
             throw new RuntimeException("bulk load data rpc failed, " + response);
         }

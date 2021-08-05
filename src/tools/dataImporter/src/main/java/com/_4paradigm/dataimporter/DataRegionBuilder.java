@@ -17,7 +17,6 @@
 package com._4paradigm.dataimporter;
 
 import com._4paradigm.openmldb.api.Tablet;
-import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,8 +37,10 @@ public class DataRegionBuilder {
     private final List<ByteBuffer> dataList = new ArrayList<>(); // TODO(hw): to queue?
     private int absoluteDataLength = 0;
     private int absoluteNextId = 0;
-    private int currentTotalSize = 0;
-    private int shouldBeSentEnd = 0; // idx in dataBlockInfoList -> [0...end) should be sent.
+    private int estimatedTotalSize = 0;
+    public static final int reqReservedSize = 6; // TODO(hw): 6 is tid/pid/partid, each cost 2B.
+    public static final int estimateInfoSize = 8; // Tablet.DataBlockInfo 6B, but it'll be added into the list, more 2B.
+
     private int partId = 0;
 
     // RPC sizeLimit won't be changed frequently, so it could be final.
@@ -54,6 +55,11 @@ public class DataRegionBuilder {
         return absoluteNextId;
     }
 
+    // After data region all sent, index region RPCs need start after the last part, loader(TabletServer) will check the order.
+    public int getNextPartId() {
+        return partId;
+    }
+
     public void addDataBlock(ByteBuffer data, int refCnt) {
         int head = absoluteDataLength;
         dataList.add(data);
@@ -62,41 +68,47 @@ public class DataRegionBuilder {
         dataBlockInfoList.add(info);
         absoluteDataLength += length;
         absoluteNextId++;
-
-        currentTotalSize += info.getSerializedSize() + length;
-        logger.info("test info size {}, data length {}, current total size {}", info.getSerializedSize(), length, currentTotalSize);
-        if (currentTotalSize <= rpcSizeLimit) {
-            shouldBeSentEnd = dataBlockInfoList.size();
-        }
+        estimatedTotalSize += estimateInfoSize + length;
+        logger.info("after size {}(exclude header 6)", estimatedTotalSize);
     }
 
     public Tablet.BulkLoadRequest buildPartialRequest(boolean force, ByteArrayOutputStream attachmentStream) throws IOException {
         // if current size < sizeLimit, no need to send.
-        if (!force && currentTotalSize <= rpcSizeLimit) {
+        if (!force && reqReservedSize + estimatedTotalSize <= rpcSizeLimit) {
             return null;
         }
-        // To limit the size properly, request message + attachment will be <= rpcSizeLimit, it's recorded by `shouldBeSentEnd`.
-
-        Preconditions.checkState(!(shouldBeSentEnd == 0 && currentTotalSize != 0),
-                "contains one too big data block, can't build < {} rpc", rpcSizeLimit);
+        // To limit the size properly, request message + attachment will be <= rpcSizeLimit
+        // We need to add data blocks one by one.
 
         Tablet.BulkLoadRequest.Builder builder = Tablet.BulkLoadRequest.newBuilder();
         builder.setTid(tid).setPid(pid);
-        // [0..end) should be sent.
-        builder.addAllBlockInfo(dataBlockInfoList.subList(0, shouldBeSentEnd));
-        Preconditions.checkState(builder.getBlockInfoCount() == shouldBeSentEnd);
 
-        for (int i = 0; i < shouldBeSentEnd; i++) {
-            // if throw Exception, let upper level know
+        int shouldBeSentEnd = 0;
+        int sentTotalSize = 0;
+        attachmentStream.reset();
+        for (int i = 0; i < dataBlockInfoList.size(); i++) {
+            int add = dataBlockInfoList.get(i).getLength() + estimateInfoSize;
+            if (sentTotalSize + add > rpcSizeLimit) {
+                break;
+            }
+            builder.addBlockInfo(dataBlockInfoList.get(i));
             attachmentStream.write(dataList.get(i).array());
+            sentTotalSize += add;
+            shouldBeSentEnd++;
         }
 
-        // clear sent data
+        // clear sent data [0..End)
+        logger.debug("sent {} data blocks, remain {} blocks", shouldBeSentEnd, dataBlockInfoList.size() - shouldBeSentEnd);
         dataBlockInfoList.subList(0, shouldBeSentEnd).clear();
         dataList.subList(0, shouldBeSentEnd).clear();
-        shouldBeSentEnd = 0;
+        estimatedTotalSize -= (estimateInfoSize * shouldBeSentEnd + attachmentStream.size());
+        // TODO(hw): for debug
+        logger.info("estimate data rpc size = {}", estimateInfoSize * shouldBeSentEnd + attachmentStream.size());
+        builder.setPartId(partId);
 
-        builder.setDataPartId(partId);
+        if (force && shouldBeSentEnd == 0) {
+            return null;
+        }
         partId++;
         return builder.build();
     }

@@ -4854,7 +4854,7 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::openmldb::api::Bulk
             LOG(WARNING) << tid << "-" << pid << " " << response->msg();
             return;
         }
-        DLOG(INFO) << tid << "-" << pid << " has loaded data region part " << request->data_part_id();
+        DLOG(INFO) << tid << "-" << pid << " has loaded data region part " << request->part_id();
     }
 
     if (request->index_region_size() > 0) {

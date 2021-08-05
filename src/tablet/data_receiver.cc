@@ -22,10 +22,10 @@ namespace openmldb::tablet {
 bool DataReceiver::DataAppend(const ::openmldb::api::BulkLoadRequest* request, const butil::IOBuf& data) {
     std::unique_lock<std::mutex> ul(mu_);
 
-    if (!request->has_data_part_id() || !PartValidation(request->data_part_id())) {
+    if (!request->has_part_id() || !PartValidation(request->part_id())) {
         LOG(WARNING) << tid_ << "-" << pid_ << " data receiver received invalid part id, expect " << next_part_id_
                      << ", actual "
-                     << (request->has_data_part_id() ? "no id" : std::to_string(request->data_part_id()));
+                     << (request->has_part_id() ? "no id" : std::to_string(request->part_id()));
         return false;
     }
 
@@ -68,10 +68,10 @@ bool DataReceiver::BulkLoad(std::shared_ptr<storage::MemTable> table, const ::op
     std::unique_lock<std::mutex> ul(mu_);
     DLOG_ASSERT(tid_ == table->GetId() && pid_ == table->GetPid());
 
-    if (!request->has_data_part_id() || !PartValidation(request->data_part_id())) {
+    if (!request->has_part_id() || !PartValidation(request->part_id())) {
         LOG(WARNING) << tid_ << "-" << pid_ << " data receiver received invalid part id, expect " << next_part_id_
                      << ", actual "
-                     << (request->has_data_part_id() ? "no id" : std::to_string(request->data_part_id()));
+                     << (request->has_part_id() ? "no id" : std::to_string(request->part_id()));
         return false;
     }
 
