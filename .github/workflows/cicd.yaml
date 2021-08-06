@@ -133,10 +133,10 @@ jobs:
       
       - name: run jdbc smoke test
         run: |
-          sh step/ut_zookeeper.sh start
+          sh steps/ut_zookeeper.sh start
           cd java
           mvn test -Dscalatest.skip=true
-          sh step/ut_zookeeper.sh stop
+          sh steps/ut_zookeeper.sh stop
 
       - name: Upload Java UT Results
         if: always()
@@ -169,6 +169,7 @@ jobs:
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=ON -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=OFF .. && make -j$(nproc) sql_pysdk_package sqlalchemy_openmldb && cd ../
       - name: test sqlalchemy
         run: |
+          python3 -m easy_install nose
           bash steps/fesql_test_python.sh
       - name: Upload Python UT Results
         if: always()
