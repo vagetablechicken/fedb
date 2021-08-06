@@ -18,6 +18,7 @@ ROOT_DIR=`pwd`
 test -d /rambuild/ut_zookeeper && rm -rf /rambuild/ut_zookeeper/*
 cp steps/zoo.cfg thirdsrc/zookeeper-3.4.14/conf
 cd thirdsrc/zookeeper-3.4.14
+# TODO(hw): macos -p
 netstat -anp | grep 6181 | awk '{print $NF}' | awk -F '/' '{print $1}'| xargs kill -9
 ./bin/zkServer.sh start && cd $ROOT_DIR
 sleep 5
@@ -28,10 +29,11 @@ echo "ROOT_DIR:${ROOT_DIR}"
 
 cd ${ROOT_DIR}
 cd ${ROOT_DIR}/build/python/dist/
-whl_name=`ls | grep *.whl | grep sqlalchemy_fedb`
+whl_name=`ls | grep *.whl | grep openmldb`
 echo "whl_name:${whl_name}"
 python3 -m pip install ${whl_name} -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 cd -
-cd ${ROOT_DIR}/src/sdk/python/sqlalchemy-test && nosetests --with-xunit
+# needs nosetests: easy_install nose
+cd ${ROOT_DIR}/python/sqlalchemy-test && nosetests --with-xunit
 

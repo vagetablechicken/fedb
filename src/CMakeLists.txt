@@ -102,9 +102,9 @@ if(TESTING_ENABLE)
     compile_test(apiserver)
 endif()
 
-add_executable(parse_log tools/parse_log.cc  $<TARGET_OBJECTS:fedb_proto>)
+add_executable(parse_log tools/parse_log.cc  $<TARGET_OBJECTS:openmldb_proto>)
 
-set(LINK_LIBS log fedb_proto base protobuf glog gflags ssl crypto z snappy dl pthread)
+set(LINK_LIBS log openmldb_proto base protobuf glog gflags ssl crypto z snappy dl pthread)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(APPEND LINK_LIBS unwind)
 endif()
