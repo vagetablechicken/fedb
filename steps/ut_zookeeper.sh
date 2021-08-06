@@ -14,10 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-WORK_DIR=`pwd`
+WORK_DIR=$(pwd)
 
 if [ $# -ne 1 ]; then
-    echo "./zk_onbeox.sh [start|stop]"
+    echo "./ut_zookeeper.sh [start|stop]"
     exit 1
 fi
 
@@ -27,23 +27,14 @@ case $OP in
     start)
         echo "Starting zk ... "
         cp steps/zoo.cfg thirdsrc/zookeeper-3.4.14/conf
-        cd thirdsrc/zookeeper-3.4.14 && ./bin/zkServer.sh start && cd $WORK_DIR
+        cd thirdsrc/zookeeper-3.4.14 && ./bin/zkServer.sh start && cd "$WORK_DIR" || exit
         sleep 5
         echo "start zk succeed"
-        cd -
         ;;
     stop)
         echo "Stopping zk ... "
         cd thirdsrc/zookeeper-3.4.14 && ./bin/zkServer.sh stop
-        cd -
         ;;
     *)
         echo "Only support {start|stop}" >&2
 esac
-
-
-
-TMPFILE="code.tmp"
-
-
-exit $code
