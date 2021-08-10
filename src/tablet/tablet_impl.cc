@@ -4898,9 +4898,9 @@ void TabletImpl::BulkLoad(RpcController* controller, const ::openmldb::api::Bulk
     }
 
     if(request->eof()){
-        // no more jobs to do, clean up the data receiver
-        // TODO(hw): what about the data in MemTable?
-
+        // no more jobs to do
+        LOG(INFO) << "get eof rpc, clean up the data receiver";
+        bulk_load_mgr_.RemoveReceiver(tid, pid);
     }
 }
 

@@ -76,7 +76,6 @@ public class BulkLoadGenerator implements Runnable {
     private final DataRegionBuilder dataRegionBuilder;
     private final IndexRegionBuilder indexRegionBuilder;
     private final TabletService service;
-    private final int rpcDataSizeLimit;
 
     private int statistics = 0;
 
@@ -88,9 +87,9 @@ public class BulkLoadGenerator implements Runnable {
         this.tableInfo = tableInfo;
         this.indexInfoFromTablet = indexInfo;
         this.dataRegionBuilder = new DataRegionBuilder(tid, pid, rpcSizeLimit);
-        this.indexRegionBuilder = new IndexRegionBuilder(tid, pid, indexInfoFromTablet); // built from BulkLoadInfoResponse
+        // TODO(hw): size limit improve
+        this.indexRegionBuilder = new IndexRegionBuilder(tid, pid, indexInfoFromTablet, rpcSizeLimit); // built from BulkLoadInfoResponse
         this.service = service;
-        this.rpcDataSizeLimit = rpcSizeLimit;
     }
 
     @Override
@@ -185,11 +184,10 @@ public class BulkLoadGenerator implements Runnable {
                         long segIdx = 0;
                         if (indexInfoFromTablet.getSegCnt() > 1) {
                             // hash get signed int, we treat is as unsigned
-                            segIdx = Integer.toUnsignedLong(Main.hash(key.getBytes(), key.length(), 0xe17a1465)) % indexInfoFromTablet.getSegCnt();
+                            segIdx = Integer.toUnsignedLong(MurmurHash.hash32(key.getBytes(), key.length(), 0xe17a1465)) % indexInfoFromTablet.getSegCnt();
                         }
                         // segment[k][segIdx]->Put
                         IndexRegionBuilder.SegmentIndexRegion segment = indexRegionBuilder.getSegmentIndexRegion(idx, (int) segIdx);
-
                         // void Segment::Put(const Slice& key, const TSDimensions& ts_dimension, DataBlock* row)
                         boolean put = segment.Put(key, tsDimsWrap, dataBlockId);
                         if (!put) {
@@ -212,29 +210,36 @@ public class BulkLoadGenerator implements Runnable {
                 long realEndTime = System.currentTimeMillis();
                 realGenTime += (realEndTime - realStartTime);
             }
+            // We try to send after add one block. So there is no more or only one request to build.
             ByteArrayOutputStream attachmentStream = new ByteArrayOutputStream();
             Tablet.BulkLoadRequest request = dataRegionBuilder.buildPartialRequest(true, attachmentStream);
             if (request != null) {
                 sendRequest(request, attachmentStream);
             }
+            Preconditions.checkState(dataRegionBuilder.buildPartialRequest(true, attachmentStream)
+                    == null, "shouldn't has more data to send");
+
             long generateTime = System.currentTimeMillis();
             logger.info("Thread {} for MemTable(tid-pid {}-{}), generate cost {} ms, real cost {} ms",
                     Thread.currentThread().getId(), tid, pid, generateTime - startTime, realGenTime);
 
-            // request -> pb
-            if (indexRegionBuilder.indexCount() == 0) {
-                logger.info("MemTable(tid-pid {}-{}) doesn't need bulk loading", tid, pid);
-                return;
+            // IndexRegion may be big too. e.g. 40M index message for 1.4M rows
+            // the last index rpc will set eof to true.
+            indexRegionBuilder.setStartPartId(dataRegionBuilder.getNextPartId());
+            Tablet.BulkLoadRequest req;
+            while ((req = indexRegionBuilder.buildPartialRequest()) != null) {
+                logger.info("send index region part {}, eof {}, size {}", req.getPartId(), req.getEof(), req.getSerializedSize());
+                logger.debug("{}", req);
+                sendRequest(req, null);
             }
-            // TODO(hw): IndexRegion may be big too. e.g. 40M index message for 1.4M rows
-//            sendRequest(request);
             long endTime = System.currentTimeMillis();
-            logger.info("last rpc(has index region) cost {} ms", endTime - generateTime);
+            logger.info("index region rpcs cost {} ms", endTime - generateTime);
 
             logger.info("total row count {}", statistics);
         } catch (Exception e) {
             logger.error("Thread {} for MemTable(tid-pid {}-{}) got err: {}. Exit...", Thread.currentThread().getId(), tid, pid, e.getMessage());
             internalErrorOcc.set(true);
+            e.printStackTrace();
         }
     }
 
@@ -254,10 +259,14 @@ public class BulkLoadGenerator implements Runnable {
     }
 
     private void sendRequest(Tablet.BulkLoadRequest request, ByteArrayOutputStream attachmentStream) {
-        RpcContext.getContext().setRequestBinaryAttachment(attachmentStream.toByteArray());
+        if (attachmentStream != null) {
+            RpcContext.getContext().setRequestBinaryAttachment(attachmentStream.toByteArray());
+        }
+
         Tablet.GeneralResponse response = service.bulkLoad(request);
         statistics += request.getBlockInfoCount();
-        logger.info("sent rpc, message size {}, attachment size {}", request.getSerializedSize(), attachmentStream.size());
+        logger.info("sent rpc, message size {}, attachment {}", request.getSerializedSize(),
+                attachmentStream == null ? "empty" : attachmentStream.size());
         if (response.getCode() != 0) {
             throw new RuntimeException("bulk load data rpc failed, " + response);
         }

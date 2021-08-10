@@ -101,4 +101,20 @@ std::shared_ptr<DataReceiver> BulkLoadMgr::GetDataReceiver(uint32_t tid, uint32_
     return data_receiver;
 }
 
+void BulkLoadMgr::RemoveReceiver(uint32_t tid, uint32_t pid) {
+    std::unique_lock<std::mutex> ul(catalog_mu_);
+    auto table_cat_iter = catalog_.find(tid);
+    if (table_cat_iter == catalog_.end()) {
+        LOG(WARNING) << "not existed table, " << tid << "-" << pid;
+        return;
+    }
+    auto& pid_cat = table_cat_iter->second;
+    auto iter = pid_cat.find(pid);
+    if (iter == pid_cat.end()) {
+        LOG(WARNING) << "not existed partition, " << tid << "-" << pid;
+        return;
+    }
+    pid_cat.erase(iter);
+    LOG(INFO) << "data receiver for " << tid << "-" << pid << " removed";
+}
 }  // namespace openmldb::tablet

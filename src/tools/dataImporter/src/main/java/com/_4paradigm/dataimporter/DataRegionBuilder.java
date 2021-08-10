@@ -17,6 +17,7 @@
 package com._4paradigm.dataimporter;
 
 import com._4paradigm.openmldb.api.Tablet;
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,8 +39,6 @@ public class DataRegionBuilder {
     private int absoluteDataLength = 0;
     private int absoluteNextId = 0;
     private int estimatedTotalSize = 0;
-    public static final int reqReservedSize = 6; // TODO(hw): 6 is tid/pid/partid, each cost 2B.
-    public static final int estimateInfoSize = 8; // Tablet.DataBlockInfo 6B, but it'll be added into the list, more 2B.
 
     private int partId = 0;
 
@@ -68,26 +67,30 @@ public class DataRegionBuilder {
         dataBlockInfoList.add(info);
         absoluteDataLength += length;
         absoluteNextId++;
-        estimatedTotalSize += estimateInfoSize + length;
-        logger.info("after size {}(exclude header 6)", estimatedTotalSize);
+        estimatedTotalSize += BulkLoadRequestSize.estimateInfoSize + length;
+        logger.debug("after size {}(exclude header 6)", estimatedTotalSize);
     }
 
+    // not force: if data size > limit, send x(x<=limit), remain size-x. If size <= limit, return null, needs to force build.
+    // force: only send x(x<=limit) too. data size > limit is available, you may need to force build more than once until returns null.
     public Tablet.BulkLoadRequest buildPartialRequest(boolean force, ByteArrayOutputStream attachmentStream) throws IOException {
         // if current size < sizeLimit, no need to send.
-        if (!force && reqReservedSize + estimatedTotalSize <= rpcSizeLimit) {
+        if (!force && BulkLoadRequestSize.reqReservedSize + estimatedTotalSize <= rpcSizeLimit) {
             return null;
         }
         // To limit the size properly, request message + attachment will be <= rpcSizeLimit
         // We need to add data blocks one by one.
 
         Tablet.BulkLoadRequest.Builder builder = Tablet.BulkLoadRequest.newBuilder();
-        builder.setTid(tid).setPid(pid);
+        builder.setTid(tid).setPid(pid).setPartId(partId);
 
-        int shouldBeSentEnd = 0;
-        int sentTotalSize = 0;
+        // TODO(hw): refactor this
+        int shouldBeSentEnd = 0; // is block info size
+        int sentTotalSize = BulkLoadRequestSize.reqReservedSize;
         attachmentStream.reset();
+        // TODO(hw): builder can get serialized size in every loop? estimateInfoSize is too big. May use removeBlockInfo()
         for (int i = 0; i < dataBlockInfoList.size(); i++) {
-            int add = dataBlockInfoList.get(i).getLength() + estimateInfoSize;
+            int add = dataBlockInfoList.get(i).getLength() + BulkLoadRequestSize.estimateInfoSize;
             if (sentTotalSize + add > rpcSizeLimit) {
                 break;
             }
@@ -101,15 +104,20 @@ public class DataRegionBuilder {
         logger.debug("sent {} data blocks, remain {} blocks", shouldBeSentEnd, dataBlockInfoList.size() - shouldBeSentEnd);
         dataBlockInfoList.subList(0, shouldBeSentEnd).clear();
         dataList.subList(0, shouldBeSentEnd).clear();
-        estimatedTotalSize -= (estimateInfoSize * shouldBeSentEnd + attachmentStream.size());
-        // TODO(hw): for debug
-        logger.info("estimate data rpc size = {}", estimateInfoSize * shouldBeSentEnd + attachmentStream.size());
-        builder.setPartId(partId);
+        estimatedTotalSize -= (BulkLoadRequestSize.estimateInfoSize * shouldBeSentEnd + attachmentStream.size());
 
-        if (force && shouldBeSentEnd == 0) {
+        if (shouldBeSentEnd == 0) {
+            Preconditions.checkState(estimatedTotalSize == 0 && dataList.isEmpty() && dataBlockInfoList.isEmpty(),
+                    "remain data can't be sent, maybe too big, or builder has internal error");
             return null;
         }
+
         partId++;
+
+        logger.debug("estimate data rpc size = {}, real size = {}",
+                BulkLoadRequestSize.estimateInfoSize * shouldBeSentEnd + attachmentStream.size(),
+                builder.build().getSerializedSize() + attachmentStream.size());
+        Preconditions.checkState(builder.build().getSerializedSize() <= rpcSizeLimit);
         return builder.build();
     }
 }

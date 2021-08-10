@@ -787,7 +787,6 @@ bool MemTable::GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response) 
 bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
                         const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
     // data_block[i] is the block which id == i
-    // TODO(hw): need to reset all segments? segment->Release()
     std::vector<bool> block_id_used(data_blocks.size(), false);
     for (int i = 0; i < indexes.size(); ++i) {
         const auto& inner_index = indexes.Get(i);
@@ -799,8 +798,10 @@ bool MemTable::BulkLoad(const std::vector<DataBlock*>& data_blocks,
             for (int key_idx = 0; key_idx < segment_index.key_entries_size(); ++key_idx) {
                 const auto& key_entries = segment_index.key_entries(key_idx);
                 auto pk = Slice(key_entries.key());
-                for (int key_entry_id = 0; key_entry_id < key_entries.key_entry_size(); ++key_entry_id) {
-                    const auto& key_entry = key_entries.key_entry(key_entry_id);
+                for (int key_entry_idx = 0; key_entry_idx < key_entries.key_entry_size(); ++key_entry_idx) {
+                    // TODO(hw): key_entry_id
+                    const auto& key_entry = key_entries.key_entry(key_entry_idx);
+                    auto key_entry_id = key_entry.key_entry_id();
                     for (int time_idx = 0; time_idx < key_entry.time_entry_size(); ++time_idx) {
                         const auto& time_entry = key_entry.time_entry(time_idx);
                         auto* block =

@@ -31,6 +31,8 @@ class BulkLoadMgr {
 
     bool BulkLoad(std::shared_ptr<storage::MemTable> table, const ::openmldb::api::BulkLoadRequest* request);
 
+    void RemoveReceiver(uint32_t tid, uint32_t pid);
+
  protected:
     std::shared_ptr<DataReceiver> GetDataReceiver(uint32_t tid, uint32_t pid, bool create);
 

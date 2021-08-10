@@ -21,17 +21,15 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.google.common.collect.MoreCollectors.onlyElement;
 import static com.google.protobuf.ByteString.copyFromUtf8;
+import static java.lang.Math.max;
 
 // IndexRegionBuilder builds requests of index region(split by size).
 // Must build and send index requests after all data requests have been sent.
@@ -40,11 +38,13 @@ public class IndexRegionBuilder {
 
     private final int tid;
     private final int pid;
+    private final int rpcSizeLimit;
     private final List<List<SegmentIndexRegion>> segmentIndexMatrix; // TODO(hw): to map?
 
+    int realIdxCursor = 0, segIdxCursor = 0;
     private int partId = 0; // TODO(hw): start after data region part id
 
-    public IndexRegionBuilder(int tid, int pid, Tablet.BulkLoadInfoResponse bulkLoadInfo) {
+    public IndexRegionBuilder(int tid, int pid, Tablet.BulkLoadInfoResponse bulkLoadInfo, int rpcSizeLimit) {
         this.tid = tid;
         this.pid = pid;
         segmentIndexMatrix = new ArrayList<>();
@@ -65,6 +65,7 @@ public class IndexRegionBuilder {
                     this.segmentIndexMatrix.add(segments);
                 }
         );
+        this.rpcSizeLimit = rpcSizeLimit;
     }
 
     public void setStartPartId(int startPartId) {
@@ -73,52 +74,73 @@ public class IndexRegionBuilder {
 
     // If null, no more index region rpc.
     public Tablet.BulkLoadRequest buildPartialRequest() {
-        // TODO(hw): reqReservedSize should be a common class?
-        //  check the index region size growth
         Tablet.BulkLoadRequest.Builder requestBuilder = Tablet.BulkLoadRequest.newBuilder();
-        setRequest(requestBuilder);
-        // TODO(hw): hard copy, can be avoided? utf8?
-        return requestBuilder.build();
+        return setRequest(requestBuilder) ? requestBuilder.build() : null;
     }
 
-    private void setRequest(Tablet.BulkLoadRequest.Builder requestBuilder) {
-        // segmentDataMaps -> BulkLoadIndex
-        int indexCount = indexCount();
-        if (indexCount > 0) {
-            logger.info("index count {}", indexCount);
-            segmentIndexMatrix.forEach(segmentDataMap -> {
-                Tablet.BulkLoadIndex.Builder bulkLoadIndexBuilder = requestBuilder.addIndexRegionBuilder();
-                // TODO(hw): if we split index rpc, matrix should be a map？
-//                bulkLoadIndexBuilder.setInnerIndexId();
-                segmentDataMap.forEach(segment -> bulkLoadIndexBuilder.addSegment(segment.toProtobuf()));
-            });
+    private boolean setRequest(Tablet.BulkLoadRequest.Builder requestBuilder) {
+        if (realIdxCursor == segmentIndexMatrix.size()) {
+            return false;
         }
-
         requestBuilder.setTid(tid).setPid(pid).setPartId(partId);
+
+        int realIdx = realIdxCursor, segIdx = segIdxCursor;
+        // SegmentIndexRegion may be empty.
+        for (; realIdx < segmentIndexMatrix.size(); realIdx++) {
+            List<SegmentIndexRegion> segs = segmentIndexMatrix.get(realIdx);
+            Tablet.BulkLoadIndex.Builder innerIndexBuilder = requestBuilder.addIndexRegionBuilder().setInnerIndexId(realIdx);
+            for (; segIdx < segs.size(); segIdx++) {
+                SegmentIndexRegion seg = segs.get(segIdx);
+                if (seg.buildCompleted()) {
+                    continue;
+                }
+                int used = requestBuilder.build().getSerializedSize();
+                // seg is not completed now
+                // increased size >= segMsg size, cuz it's a repeated field. So we set smaller limit.
+                Tablet.Segment segMsg = seg.buildPartialSegment(segIdx, max(rpcSizeLimit - used - BulkLoadRequestSize.repeatedTolerance, 0));
+                if (segMsg != null) {
+                    innerIndexBuilder.addSegment(segMsg);
+                }
+                if (!seg.buildCompleted()) {
+                    logger.debug("used {}, limit {}", requestBuilder.build().getSerializedSize(), rpcSizeLimit);
+                    updateSegmentCursor(realIdx, segIdx);
+                    partId++;
+                    return true;
+                }
+                Preconditions.checkState(!(segMsg == null && seg.buildCompleted()),
+                        "completed false->true, but no index entry append");
+            }
+        }
+        updateSegmentCursor(realIdx, segIdx);
         partId++;
+        Preconditions.checkState(realIdxCursor == segmentIndexMatrix.size());
+        requestBuilder.setEof(true);
+        return true;
     }
 
-    public int indexCount() {
-        AtomicInteger total = new AtomicInteger();
-        segmentIndexMatrix.forEach(segmentDataMap -> segmentDataMap.forEach(segment -> total.addAndGet(segment.entryCount())));
-        return total.get();
+    private void updateSegmentCursor(int i, int j) {
+        realIdxCursor = i;
+        segIdxCursor = j;
     }
-
-    // TODO(hw):  only data size? how about index size?
 
     public SegmentIndexRegion getSegmentIndexRegion(int idx, int segIdx) {
         return segmentIndexMatrix.get(idx).get(segIdx);
     }
 
     public static class SegmentIndexRegion {
-        // TODO(hw): id ?
+        // segment id can be set when building message
         final int tsCnt;
         final Map<Integer, Integer> tsIdxMap;
         public int ONE_IDX = 0;
         public int NO_IDX = 0;
 
         // String key reverse order, so it's !SliceComparator
+        // each key will create a size=tsCnt list for simplify
         Map<String, List<Map<Long, Integer>>> keyEntries = new TreeMap<>((a, b) -> -a.compareTo(b));
+
+        // used to build message
+        private List<String> keyList = null;
+        private int keyIdxCursor = 0, timeEntriesIdxCursor = 0, timeEntryIdxCursor = 0;
 
         public SegmentIndexRegion(int tsCnt, Map<Integer, Integer> tsIdxMap) {
             this.tsCnt = tsCnt;
@@ -135,7 +157,6 @@ public class IndexRegionBuilder {
                 keyEntries.put(key, entryList);
             }
             entryList.get(idxPos).put(time, id);
-//            logger.info("after put keyEntries: {}", keyEntries.toString());
         }
 
         // TODO(hw): return val is only for debug
@@ -170,28 +191,79 @@ public class IndexRegionBuilder {
             return put;
         }
 
-        public int entryCount() {
-            AtomicInteger count = new AtomicInteger();
-            keyEntries.forEach((key, keyEntry) -> count.addAndGet(keyEntry.size()));
-            return count.get();
+        // won't build message which size == 0, only null or at least one index entry
+        public Tablet.Segment buildPartialSegment(int segId, int sizeLimit) {
+            Preconditions.checkArgument(sizeLimit >= 0, "sizeLimit should >=0, 0 will return a null segment");
+            if (keyList == null) {
+                keyList = new ArrayList<>(keyEntries.keySet());
+            }
+            Tablet.Segment.Builder builder = Tablet.Segment.newBuilder();
+            builder.setId(segId);
+            int i = keyIdxCursor, j = timeEntriesIdxCursor, k = timeEntryIdxCursor;
+            logger.debug("start with {}-{}-{}", i, j, k);
+
+            int entryCount = 0;
+            for (; i < keyList.size(); i++) {
+                String key = keyList.get(i);
+                Tablet.Segment.KeyEntries.Builder keyEntriesBuilder = builder.addKeyEntriesBuilder()
+                        .setKey(copyFromUtf8(key));
+                List<Map<Long, Integer>> timeEntriesList = keyEntries.get(key);
+                // TODO(hw): timeEntriesList.size() == tsCnt
+                for (; j < timeEntriesList.size(); j++) {
+                    Map<Long, Integer> timeEntries = timeEntriesList.get(j);
+                    List<Long> timeList = new ArrayList<>(timeEntries.keySet());
+                    if (timeList.isEmpty()) {
+                        // will set KeyEntryId, so empty key entry could be skipped
+                        continue;
+                    }
+
+                    Tablet.Segment.KeyEntries.KeyEntry.Builder keyEntryBuilder = keyEntriesBuilder.addKeyEntryBuilder().setKeyEntryId(j);
+                    for (; k < timeList.size(); k++) {
+                        keyEntryBuilder.addTimeEntryBuilder().setTime(timeList.get(k)).
+                                setBlockId(timeEntries.get(timeList.get(k)));
+                        logger.debug("add one time entry({}-{}-{}), cur size {}, limit {}", i, j, k, builder.build().getSerializedSize(), sizeLimit);
+                        if (builder.build().getSerializedSize() > sizeLimit) {
+                            // TODO(hw): not good enough
+                            // revert this one
+                            Preconditions.checkState(keyEntryBuilder.getTimeEntryCount() > 0, "shouldn't");
+                            logger.debug("revert this time entry");
+                            keyEntryBuilder.removeTimeEntry(keyEntryBuilder.getTimeEntryCount() - 1);
+                            if (keyEntryBuilder.getTimeEntryCount() == 0) {
+                                logger.debug("revert the whole empty key entry");
+                                keyEntriesBuilder.removeKeyEntry(keyEntriesBuilder.getKeyEntryCount() - 1);
+                                if (keyEntriesBuilder.getKeyEntryCount() == 0) {
+                                    logger.debug("revert the whole empty key entries");
+                                    builder.removeKeyEntries(builder.getKeyEntriesCount() - 1);
+                                }
+                            }
+                            logger.debug("cur size {}", builder.build().getSerializedSize());
+                            Preconditions.checkState(builder.build().getSerializedSize() <= sizeLimit,
+                                    "must %d <= %d", builder.build().getSerializedSize(), sizeLimit);
+                            // next partial building starts from k
+                            // If limit is too small, cursors may not incr.
+                            updateIdxCursors(i, j, k);
+                            return entryCount == 0 ? null : builder.build();
+                        }
+                        entryCount++;
+                    }
+                    k = 0;
+                }
+                j = 0;
+            }
+            Preconditions.checkState(i == keyList.size());
+
+            updateIdxCursors(i, j, k);
+            return entryCount == 0 ? null : builder.build();
         }
 
-        // serialize to `message Segment`
-        public Tablet.Segment toProtobuf() {
-            Tablet.Segment.Builder builder = Tablet.Segment.newBuilder();
+        private void updateIdxCursors(int i, int j, int k) {
+            keyIdxCursor = i;
+            timeEntriesIdxCursor = j;
+            timeEntryIdxCursor = k;
+        }
 
-            keyEntries.forEach((key, keyEntry) -> {
-                Tablet.Segment.KeyEntries.Builder keyEntriesBuilder = builder.addKeyEntriesBuilder();
-                keyEntriesBuilder.setKey(copyFromUtf8(key));
-                keyEntry.forEach(timeEntries -> {
-                    Tablet.Segment.KeyEntries.KeyEntry.Builder keyEntryBuilder = keyEntriesBuilder.addKeyEntryBuilder();
-                    timeEntries.forEach((time, blockId) -> {
-                        Tablet.Segment.KeyEntries.KeyEntry.TimeEntry.Builder timeEntryBuilder = keyEntryBuilder.addTimeEntryBuilder();
-                        timeEntryBuilder.setTime(time).setBlockId(blockId);
-                    });
-                });
-            });
-            return builder.build();
+        public boolean buildCompleted() {
+            return keyIdxCursor == keyEntries.size();
         }
     }
 

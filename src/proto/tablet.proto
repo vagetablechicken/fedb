@@ -747,6 +747,7 @@ message Segment {
     message KeyEntries {
         optional bytes key = 1;
         message KeyEntry {
+            optional uint32 key_entry_id = 1;
             message TimeEntry {
                 optional uint64 time = 1;
                 optional uint32 block_id = 2;

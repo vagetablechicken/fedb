@@ -31,7 +31,7 @@ public class MainTest extends TestCase {
     public void testHash() {
         List<String> keys = Arrays.asList("2|1", "1|1", "1|4", "2/6", "4", "6", "1");
         for (String key : keys) {
-            System.out.println(Main.hash(key.getBytes(), key.length(), 0xe17a1465) % 8);
+            System.out.println(MurmurHash.hash32(key.getBytes(), key.length(), 0xe17a1465) % 8);
         }
 //        c++ hash result
 //        I0715 21:37:10.869352 13732 tablet_impl_test.cc:5643] hash(2|1) = 0
