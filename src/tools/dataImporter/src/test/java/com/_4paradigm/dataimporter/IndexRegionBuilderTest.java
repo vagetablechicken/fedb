@@ -23,7 +23,10 @@ import org.junit.Assert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 public class IndexRegionBuilderTest extends TestCase {
     private static final Logger logger = LoggerFactory.getLogger(IndexRegionBuilderTest.class);
@@ -41,6 +44,22 @@ public class IndexRegionBuilderTest extends TestCase {
 
         Tablet.BulkLoadInfoResponse.InnerSegments.Builder inner2 = preInfo.addInnerSegmentsBuilder();
         inner1.addSegmentBuilder().setTsCnt(1).addTsIdxMapBuilder().setKey(2).setValue(0);
+    }
+
+    public void testSegmentKeyComparator() {
+        IndexRegionBuilder.SegmentIndexRegion region = new IndexRegionBuilder.SegmentIndexRegion(1, null);
+        Map<String, List<Map<Long, Integer>>> treeMap = region.keyEntries;
+        // test tree map, should be in reverse order, s11 > s1 > S1
+        List<String> keys = Arrays.asList("s11", "s1", "S1");
+        keys.forEach(key -> treeMap.put(key, null));
+        Assert.assertArrayEquals(keys.toArray(), treeMap.keySet().toArray());
+        treeMap.clear();
+
+        // inner tree map, TimeComparator is in desc order, so the reverse order is ascending order.
+        List<Long> times = Arrays.asList(1111L, 2222L, 3333L);
+        times.forEach(time -> region.Put("s1", Collections.singletonList(Tablet.TSDimension.newBuilder().setTs(time).build()), 0));
+        Object[] timeArray = treeMap.get("s1").get(0).keySet().toArray();
+        Assert.assertArrayEquals(times.toArray(), timeArray);
     }
 
     public void testSegmentMsgBuild() {

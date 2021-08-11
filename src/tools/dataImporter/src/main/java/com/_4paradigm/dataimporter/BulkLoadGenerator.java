@@ -223,6 +223,11 @@ public class BulkLoadGenerator implements Runnable {
             logger.info("Thread {} for MemTable(tid-pid {}-{}), generate cost {} ms, real cost {} ms",
                     Thread.currentThread().getId(), tid, pid, generateTime - startTime, realGenTime);
 
+            if (dataRegionBuilder.getNextPartId() == 0) {
+                logger.info("no data sent, skip index region");
+                return;
+            }
+
             // IndexRegion may be big too. e.g. 40M index message for 1.4M rows
             // the last index rpc will set eof to true.
             indexRegionBuilder.setStartPartId(dataRegionBuilder.getNextPartId());
@@ -233,7 +238,7 @@ public class BulkLoadGenerator implements Runnable {
                 sendRequest(req, null);
             }
             long endTime = System.currentTimeMillis();
-            logger.info("index region rpcs cost {} ms", endTime - generateTime);
+            logger.info("index region cost {} ms", endTime - generateTime);
 
             logger.info("total row count {}", statistics);
         } catch (Exception e) {
@@ -268,7 +273,8 @@ public class BulkLoadGenerator implements Runnable {
         logger.info("sent rpc, message size {}, attachment {}", request.getSerializedSize(),
                 attachmentStream == null ? "empty" : attachmentStream.size());
         if (response.getCode() != 0) {
-            throw new RuntimeException("bulk load data rpc failed, " + response);
+            throw new RuntimeException("bulk load rpc to " + request.getTid() + "-" + request.getPid()
+                    + "(part " + request.getPartId() + ") failed" + ", " + response);
         }
     }
 

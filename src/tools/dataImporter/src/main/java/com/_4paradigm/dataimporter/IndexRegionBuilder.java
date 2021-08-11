@@ -83,7 +83,7 @@ public class IndexRegionBuilder {
             return false;
         }
         requestBuilder.setTid(tid).setPid(pid).setPartId(partId);
-
+        boolean addSegment = false;
         int realIdx = realIdxCursor, segIdx = segIdxCursor;
         // SegmentIndexRegion may be empty.
         for (; realIdx < segmentIndexMatrix.size(); realIdx++) {
@@ -100,12 +100,13 @@ public class IndexRegionBuilder {
                 Tablet.Segment segMsg = seg.buildPartialSegment(segIdx, max(rpcSizeLimit - used - BulkLoadRequestSize.repeatedTolerance, 0));
                 if (segMsg != null) {
                     innerIndexBuilder.addSegment(segMsg);
+                    addSegment = true;
                 }
                 if (!seg.buildCompleted()) {
-                    logger.debug("used {}, limit {}", requestBuilder.build().getSerializedSize(), rpcSizeLimit);
+                    logger.debug("near limit, used {}, limit {}", requestBuilder.build().getSerializedSize(), rpcSizeLimit);
                     updateSegmentCursor(realIdx, segIdx);
                     partId++;
-                    return true;
+                    return addSegment;
                 }
                 Preconditions.checkState(!(segMsg == null && seg.buildCompleted()),
                         "completed false->true, but no index entry append");
@@ -115,7 +116,7 @@ public class IndexRegionBuilder {
         partId++;
         Preconditions.checkState(realIdxCursor == segmentIndexMatrix.size());
         requestBuilder.setEof(true);
-        return true;
+        return addSegment;
     }
 
     private void updateSegmentCursor(int i, int j) {
