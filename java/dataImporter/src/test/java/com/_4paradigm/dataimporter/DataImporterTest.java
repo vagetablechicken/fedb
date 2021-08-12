@@ -44,8 +44,8 @@ public class DataImporterTest extends TestCase {
 //                    "index(key=(vendor_id, passenger_count), ts=pickup_datetime),\n" +
 //                    "index(key=passenger_count, ts=dropoff_datetime))\n" +
                 ");",
-                "--files", "src/test/resources/train.csv.small",
-                "--rpc_size_limit", "2097152", // 2MB
+                "--files", "src/test/resources/train.csv.small, /home/huangwei/NYCTaxiDataset/train.csv",
+                "--rpc_size_limit", "20971520", // 20MB
                 "-f",
                 "--importer_mode", "bulkload"
         });

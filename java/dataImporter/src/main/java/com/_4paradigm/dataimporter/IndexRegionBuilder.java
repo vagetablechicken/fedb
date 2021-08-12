@@ -79,6 +79,7 @@ public class IndexRegionBuilder {
     }
 
     private boolean setRequest(Tablet.BulkLoadRequest.Builder requestBuilder) {
+        long start = System.currentTimeMillis();
         if (realIdxCursor == segmentIndexMatrix.size()) {
             return false;
         }
@@ -106,6 +107,7 @@ public class IndexRegionBuilder {
                     logger.debug("near limit, used {}, limit {}", requestBuilder.build().getSerializedSize(), rpcSizeLimit);
                     updateSegmentCursor(realIdx, segIdx);
                     partId++;
+                    logger.info("build index rpc cost {} ms", System.currentTimeMillis() - start);
                     return addSegment;
                 }
                 Preconditions.checkState(!(segMsg == null && seg.buildCompleted()),
@@ -116,6 +118,7 @@ public class IndexRegionBuilder {
         partId++;
         Preconditions.checkState(realIdxCursor == segmentIndexMatrix.size());
         requestBuilder.setEof(true);
+        logger.info("build index rpc cost {} ms", System.currentTimeMillis() - start);
         return addSegment;
     }
 

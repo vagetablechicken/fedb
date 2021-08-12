@@ -71,6 +71,7 @@ public class DataImporter {
     // read dir or *.xx?
     // how about SQL "LOAD DATA INFILE"? May need hdfs sasl config
     public boolean setUpSrcReader() {
+        logger.info("files: {}", files);
         if (files.isEmpty()) {
             logger.info("config 'files' is empty");
             return false;
@@ -129,7 +130,7 @@ public class DataImporter {
             return;
         }
 
-        logger.info(tableMetaData.toString());
+        logger.debug(tableMetaData.toString());
         // TODO(hw): multi-threading insert into one MemTable? or threads num is less than MemTable size?
         logger.info("create generators for each table partition(MemTable)");
         Map<Integer, BulkLoadGenerator> generators = new HashMap<>();
@@ -182,7 +183,6 @@ public class DataImporter {
         try {
             CSVRecord record;
             while ((record = reader.next()) != null) {
-                logger.info("peek {}", record);
                 Map<Integer, List<Pair<String, Integer>>> dims = buildDimensions(record, keyIndexMap, tableMetaData.getPartitionNum());
                 if (logger.isDebugEnabled()) {
                     logger.debug(record.toString());
@@ -303,6 +303,7 @@ public class DataImporter {
     }
 
     // TODO(hw): insert import mode refactor. limited retry, report the real-time status of progress.
+    // can't find a good import tool framework, may ref mysqlimport
     private static void insertImportByRange(int X, List<CSVRecord> rows, SqlExecutor router, String dbName, String tableName) {
         int quotient = rows.size() / X;
         int remainder = rows.size() % X;

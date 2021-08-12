@@ -27,7 +27,9 @@ public class LocalFilesReader {
     private boolean updateParser() throws IOException {
         while (nextFileIdx < files.size()) {
             // TODO(hw): what about no header?
-            Reader in = new FileReader(files.get(nextFileIdx));
+            String filePath = files.get(nextFileIdx).trim();
+            logger.info("read next file {}", filePath);
+            Reader in = new FileReader(filePath);
             CSVFormat format = CSVFormat.Builder.create().setHeader().build();
             iter = format.parse(in).iterator();
             nextFileIdx++;
