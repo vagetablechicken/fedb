@@ -201,17 +201,18 @@ void SQLSDKTest::CreateProcedure(hybridse::sqlcase::SqlCase& sql_case,  // NOLIN
         std::string placeholder = "{" + std::to_string(i) + "}";
         boost::replace_all(sql, placeholder, sql_case.inputs()[i].name_);
     }
-    boost::replace_all(sql, "{auto}", hybridse::sqlcase::SqlCase::GenRand("auto_t") +
-            std::to_string((int64_t)time(NULL)));
+    boost::replace_all(sql, "{auto}",
+                       hybridse::sqlcase::SqlCase::GenRand("auto_t") + std::to_string((int64_t)time(NULL)));
     boost::trim(sql);
     LOG(INFO) << sql;
     sql_case.sp_name_ = hybridse::sqlcase::SqlCase::GenRand("auto_sp") + std::to_string((int64_t)time(NULL));
     std::string create_sp;
     if (is_batch) {
         hybridse::type::TableDef batch_request_schema;
-        ASSERT_TRUE(sql_case.ExtractTableDef(sql_case.batch_request().columns_, sql_case.batch_request().indexs_, batch_request_schema));
-        ASSERT_TRUE(
-            sql_case.BuildCreateSpSqlFromSchema(batch_request_schema, sql, sql_case.batch_request().common_column_indices_, &create_sp));
+        ASSERT_TRUE(sql_case.ExtractTableDef(sql_case.batch_request().columns_, sql_case.batch_request().indexs_,
+                                             batch_request_schema));
+        ASSERT_TRUE(sql_case.BuildCreateSpSqlFromSchema(batch_request_schema, sql,
+                                                        sql_case.batch_request().common_column_indices_, &create_sp));
     } else {
         std::set<size_t> common_idx;
         ASSERT_TRUE(sql_case.BuildCreateSpSqlFromInput(0, sql, common_idx, &create_sp));
@@ -228,7 +229,7 @@ void SQLSDKTest::CreateProcedure(hybridse::sqlcase::SqlCase& sql_case,  // NOLIN
     }
     DLOG(INFO) << "Create Procedure DONE";
     if (!sql_case.expect().success_) {
-        ASSERT_NE(0 , status.code) << status.msg;
+        ASSERT_NE(0, status.code) << status.msg;
         return;
     }
     ASSERT_NO_FATAL_FAILURE(ASSERT_TRUE(0 == status.code)) << status.msg;
@@ -379,10 +380,10 @@ void SQLSDKTest::BatchExecuteSQL(hybridse::sqlcase::SqlCase& sql_case,  // NOLIN
         boost::replace_all(sql, placeholder, sql_case.inputs()[i].name_);
     }
     DLOG(INFO) << "format sql 1";
-    boost::replace_all(sql, "{auto}", hybridse::sqlcase::SqlCase::GenRand("auto_t") +
-            std::to_string((int64_t)time(NULL)));
-    for(size_t endpoint_id = 0;  endpoint_id < tbEndpoints.size(); endpoint_id++) {
-        boost::replace_all(sql, "{tb_endpoint_"+std::to_string(endpoint_id)+"}", tbEndpoints.at(endpoint_id));
+    boost::replace_all(sql, "{auto}",
+                       hybridse::sqlcase::SqlCase::GenRand("auto_t") + std::to_string((int64_t)time(NULL)));
+    for (size_t endpoint_id = 0; endpoint_id < tbEndpoints.size(); endpoint_id++) {
+        boost::replace_all(sql, "{tb_endpoint_" + std::to_string(endpoint_id) + "}", tbEndpoints.at(endpoint_id));
     }
     DLOG(INFO) << "format sql done";
     LOG(INFO) << sql;
@@ -447,8 +448,8 @@ void SQLSDKQueryTest::RequestExecuteSQL(hybridse::sqlcase::SqlCase& sql_case,  /
         std::string placeholder = "{" + std::to_string(i) + "}";
         boost::replace_all(sql, placeholder, sql_case.inputs()[i].name_);
     }
-    boost::replace_all(sql, "{auto}", hybridse::sqlcase::SqlCase::GenRand("auto_t") +
-            std::to_string((int64_t)time(NULL)));
+    boost::replace_all(sql, "{auto}",
+                       hybridse::sqlcase::SqlCase::GenRand("auto_t") + std::to_string((int64_t)time(NULL)));
     LOG(INFO) << sql;
     std::string lower_sql = sql;
     boost::to_lower(lower_sql);
@@ -597,8 +598,8 @@ void SQLSDKQueryTest::BatchRequestExecuteSQLWithCommonColumnIndices(hybridse::sq
         std::string placeholder = "{" + std::to_string(i) + "}";
         boost::replace_all(sql, placeholder, sql_case.inputs()[i].name_);
     }
-    boost::replace_all(sql, "{auto}", hybridse::sqlcase::SqlCase::GenRand("auto_t") +
-            std::to_string((int64_t)time(NULL)));
+    boost::replace_all(sql, "{auto}",
+                       hybridse::sqlcase::SqlCase::GenRand("auto_t") + std::to_string((int64_t)time(NULL)));
     LOG(INFO) << sql;
     std::string lower_sql = sql;
     boost::to_lower(lower_sql);
@@ -807,11 +808,9 @@ INSTANTIATE_TEST_SUITE_P(SQLSDKTestConstsSelect, SQLSDKQueryTest,
 INSTANTIATE_TEST_SUITE_P(SQLSDKLastJoinWindowQuery, SQLSDKQueryTest,
                          testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/query/last_join_window_query.yaml")));
 
-
 // Test Cluster
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKClusterCaseWindowRow, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/cluster/test_window_row.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKClusterCaseWindowRow, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/cluster/test_window_row.yaml")));
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKClusterCaseWindowRowRange, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/cluster/test_window_row_range.yaml")));
@@ -823,29 +822,23 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestArithmetic, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_arithmetic.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestCompare, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_compare.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestCompare, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_compare.yaml")));
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestCondition, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_condition.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestLogic, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_logic.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestType, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_type.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestLogic, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_logic.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestType, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/expression/test_type.yaml")));
 
 // Test Function
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestCalulateFunction, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/function/test_calculate.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestDateFunction, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/function/test_date.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestStringFunction, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/function/test_string.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestCalulateFunction, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/function/test_calculate.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestDateFunction, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/function/test_date.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestStringFunction, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/function/test_string.yaml")));
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestUDAFFunction, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/function/test_udaf_function.yaml")));
@@ -873,38 +866,29 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestSelectSample, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/select/test_select_sample.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestSubSelect, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/select/test_sub_select.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestSubSelect, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/select/test_sub_select.yaml")));
 INSTANTIATE_TEST_SUITE_P(SQLSDKTestWhere, SQLSDKQueryTest,
                          testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/select/test_where.yaml")));
 
-
 // Test Window
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestErrorWindow, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/error_window.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestWindowMaxSize, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_maxsize.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestWindow, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_window.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestErrorWindow, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/error_window.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestWindowMaxSize, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_maxsize.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestWindow, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_window.yaml")));
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestWindowExcludeCurrentTime, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_window_exclude_current_time.yaml")));
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestWindowRow, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_window_row.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestWindowRow, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_window_row.yaml")));
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestWindowRowRange, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_window_row_range.yaml")));
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestWindowUnion, SQLSDKQueryTest,
     testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/window/test_window_union.yaml")));
-
-
-
 
 INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestFZFunction, SQLSDKQueryTest,
@@ -914,9 +898,8 @@ INSTANTIATE_TEST_SUITE_P(
     SQLSDKTestBatchRequest, SQLSDKBatchRequestQueryTest,
     testing::ValuesIn(SQLSDKBatchRequestQueryTest::InitCases("/cases/function/test_batch_request.yaml")));
 
-INSTANTIATE_TEST_SUITE_P(
-    SQLSDKTestIndexOptimized, SQLSDKQueryTest,
-    testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/test_index_optimized.yaml")));
+INSTANTIATE_TEST_SUITE_P(SQLSDKTestIndexOptimized, SQLSDKQueryTest,
+                         testing::ValuesIn(SQLSDKQueryTest::InitCases("/cases/function/test_index_optimized.yaml")));
 
 }  // namespace sdk
 }  // namespace openmldb
