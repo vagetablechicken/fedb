@@ -36,11 +36,15 @@ echo "Install thirdparty ... for $(uname -a)"
 
 ./steps/setup_thirdparty.sh "$THIRDPARTY_PATH"
 
-echo -e "${GREEN}downloading thirdsrc.tar.gz${NC}"
-mkdir -p "$THIRDSRC_PATH"
-curl -SLo thirdsrc.tar.gz https://github.com/jingchen2222/hybridsql-asserts/releases/download/v0.4.0/thirdsrc-2021-08-03.tar.gz
-tar xzf thirdsrc.tar.gz -C "$THIRDSRC_PATH" --strip-components 1
-echo -e "${GREEN}set up thirdsrc done${NC}"
+if [ -d "$THIRDSRC_PATH" ]; then
+    echo -e "${GREEN}thirdsrc existed, skip set up${NC}"
+else
+    echo -e "${GREEN}downloading thirdsrc.tar.gz${NC}"
+    mkdir -p "$THIRDSRC_PATH"
+    curl -SLo thirdsrc.tar.gz https://github.com/jingchen2222/hybridsql-asserts/releases/download/v0.4.0/thirdsrc-2021-08-03.tar.gz
+    tar xzf thirdsrc.tar.gz -C "$THIRDSRC_PATH" --strip-components 1
+    echo -e "${GREEN}set up thirdsrc done${NC}"
+fi
 
 if [ -d "$THIRDPARTY_PATH/hybridse" ]; then
     echo "${GREEN}thirdparty/hybridse path: $THIRDPARTY_PATH/hybridse already exist, skip download/install deps${NC}"
