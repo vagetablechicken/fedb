@@ -48,7 +48,7 @@ TEST_F(DDLParserTest, physicalPlan) {
     ::hybridse::type::Database db;
     std::shared_ptr<hybridse::vm::CompileInfo> compile_info;
     // failed if sql is empty
-    ASSERT_FALSE(DDLParser::GetPlan(sp, db, compile_info));
+    //    ASSERT_FALSE(DDLParser::GetPlan(sp, db, compile_info));
 
     sp = "SELECT  behaviourTable.itemId as itemId,  behaviourTable.ip as ip,  behaviourTable.query as query,  "
          "behaviourTable.mcuid as mcuid,  adinfo.brandName as name,  adinfo.brandId as brandId,  "
@@ -68,24 +68,30 @@ TEST_F(DDLParserTest, physicalPlan) {
                              {"itemId", "string", "reqId", "string", "instanceKey", "string", "eventTime", "timestamp",
                               "ingestionTime", "timestamp", "actionValue", "int"}));
 
+    //    ASSERT_TRUE(DDLParser::GetPlan(sp, db, compile_info));
+    //    std::cout << "physical plan: " << std::endl;
+    //    compile_info->DumpPhysicalPlan(std::cout, "\t");
+    //    std::cout << std::endl;
+
+
+    sp = "SELECT * FROM behaviourTable as t1 left join feedbackTable as t2 on t1.itemId = t2.itemId;";
     ASSERT_TRUE(DDLParser::GetPlan(sp, db, compile_info));
-    std::cout << "physical plan: " << std::endl;
-    compile_info->DumpPhysicalPlan(std::cout, "\t");
-    std::cout << std::endl;
-    sp = "        create procedure sp1(const c1 string, const c3 int, c4 bigint, c5 float, c6 double, c7 timestamp, c8 "
-         "date)\n"
-         "        begin\n"
-         "            SELECT id, name, sum(brandId) OVER w1 as w1_c4_sum\n"
-         "                FROM adinfo\n"
-         "                WINDOW w1 AS (PARTITION BY adinfo.id ORDER BY adinfo.ingestionTime ROWS BETWEEN 2 PRECEDING "
-         "AND CURRENT "
+    //    std::cout << "physical plan: " << std::endl;
+    //    compile_info->DumpPhysicalPlan(std::cout, "\t");
+    //    std::cout << std::endl;
+    //    DDLParser::Explain(sp, db);
+    LOG(INFO) << "add some indexes..";
+    // TODO(hw): add index(key=itemId)?
+
+    // how about window?
+    sp = "create procedure sp1(const c1 string, const c3 int, c4 bigint, c5 float, c6 double, c7 timestamp, c8 date)\n"
+         " begin\n"
+         "  SELECT id, name, sum(brandId) OVER w1 as w1_c4_sum\n"
+         "  FROM adinfo\n"
+         "  WINDOW w1 AS (PARTITION BY adinfo.id ORDER BY adinfo.ingestionTime ROWS BETWEEN 2 PRECEDING AND CURRENT "
          "ROW);\n"
-         "        end;";
-    ASSERT_TRUE(DDLParser::GetPlan(sp, db, compile_info));
-    std::cout << "physical plan: " << std::endl;
-    compile_info->DumpPhysicalPlan(std::cout, "\t");
-    std::cout << std::endl;
-    DDLParser::Explain(sp, db);
+         " end;  ";
+    // TODO(hw):
 }
 }  // namespace openmldb::base
 

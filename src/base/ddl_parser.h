@@ -16,15 +16,15 @@
 #ifndef SRC_BASE_PARSER_H_
 #define SRC_BASE_PARSER_H_
 
-#include <sdk/base_impl.h>
-#include <vm/engine.h>
-
+// TODO(hw):
 #include "../../hybridse/src/vm/simple_catalog.h"
 #include "codec/schema_codec.h"
 #include "common/timer.h"
 #include "proto/common.pb.h"
 #include "proto/fe_type.pb.h"
+#include "sdk/base_impl.h"
 #include "sdk/sql_insert_row.h"
+#include "vm/engine.h"
 
 namespace openmldb::base {
 
@@ -59,7 +59,7 @@ class DDLParser {
     }
 
     static void ParseLastJoinOp(PhysicalOpNode* node,
-                                std::map<std::string, std::vector<::openmldb::common::ColumnKey>> indexes_map) {}
+                                std::map<std::string, std::vector<::openmldb::common::ColumnKey>>& indexes_map) {}
     static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ParseIndexes(
         const std::vector<hybridse::vm::PhysicalOpNode*>& nodes) {
         std::map<std::string, std::vector<::openmldb::common::ColumnKey>> indexes_map;
@@ -105,7 +105,7 @@ class DDLParser {
     }
 
     static void ParseWindowOp(PhysicalOpNode* node,
-                              std::map<std::string, std::vector<::openmldb::common::ColumnKey>> indexes_map) {
+                              std::map<std::string, std::vector<::openmldb::common::ColumnKey>>& indexes_map) {
         auto cast_node = PhysicalRequestUnionNode::CastFrom(node);
 
         auto frame_range = cast_node->window().range().frame()->frame_range();
@@ -139,7 +139,8 @@ class DDLParser {
                         std::shared_ptr<::hybridse::vm::CompileInfo>& compile_info) {
         // TODO(hw): engine is input, do not create in here
         ::hybridse::vm::Engine::InitializeGlobalLLVM();
-        auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>();
+        // To show index-based-optimization -> IndexSupport() == true -> whether to do LeftJoinOptimized
+        auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>(true);
         catalog->AddDatabase(database);
         ::hybridse::vm::EngineOptions options;
         options.set_keep_ir(true);
@@ -151,7 +152,7 @@ class DDLParser {
         ::hybridse::base::Status status;
         auto ok = engine->Get(sql, database.name(), session, status);
         if (!(ok && status.isOK())) {
-            LOG(WARNING) << "hybrid engine compile sql failed, " << status.msg;
+            LOG(WARNING) << "hybrid engine compile sql failed, " << status.msg << ", " << status.trace;
             return false;
         }
         compile_info = session.GetCompileInfo();

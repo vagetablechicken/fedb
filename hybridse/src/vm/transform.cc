@@ -1176,6 +1176,7 @@ void BatchModeTransformer::ApplyPasses(PhysicalOpNode* node,
             }
         }
         if (transformed && new_op != nullptr) {
+            // TODO(hw): add log to show if optimization succeed
             cur_op = new_op;
         }
     }
