@@ -27,6 +27,7 @@
 #include "sdk/base_impl.h"
 #include "sdk/sql_insert_row.h"
 #include "vm/engine.h"
+#include "vm/physical_op.h"
 #include "vm/physical_plan_context.h"
 #include "vm/simple_catalog.h"
 #include "vm/sql_compiler.h"
@@ -36,7 +37,7 @@ namespace openmldb::base {
 using namespace hybridse::vm;
 
 using IndexMap = std::map<std::string, std::vector<::openmldb::common::ColumnKey>>;
-
+#if 0
 class GroupAndSortOptimizedParser : public hybridse::passes::GroupAndSortOptimized {
  public:
     explicit GroupAndSortOptimizedParser(PhysicalPlanContext* plan_ctx)
@@ -54,271 +55,252 @@ class GroupAndSortOptimizedParser : public hybridse::passes::GroupAndSortOptimiz
  private:
     IndexMap index_map_;
 };
-/*
-// class GroupAndSortOptimizedParser {
-//  public:
-//     // 递归jiexi
-//     bool KeysOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* left_key, Key*
-//     index_key,
-//                             Key* right_key, Sort* sort, PhysicalOpNode** new_in) {
-//         if (nullptr == left_key || nullptr == index_key || !left_key->ValidKey()) {
-//             return false;
-//         }
-//
-//         if (right_key != nullptr && !right_key->ValidKey()) {
-//             return false;
-//         }
-//
-//         if (PhysicalOpType::kPhysicalOpDataProvider == in->GetOpType()) {
-//             auto scan_op = dynamic_cast<PhysicalDataProviderNode*>(in);
-//             // Do not optimized with Request DataProvider (no index has been provided)
-//             if (DataProviderType::kProviderTypeRequest == scan_op->provider_type_) {
-//                 return false;
-//             }
-//
-//             if (DataProviderType::kProviderTypeTable == scan_op->provider_type_ ||
-//                 DataProviderType::kProviderTypePartition == scan_op->provider_type_) {
-//                 const hybridse::node::ExprListNode* right_partition = right_key == nullptr ? left_key->keys() :
-//                 right_key->keys();
-//
-//                 size_t key_num = right_partition->GetChildNum();
-//                 std::vector<bool> bitmap(key_num, false);
-//                 hybridse::node::ExprListNode order_values;
-//
-//                 PhysicalPartitionProviderNode* partition_op = nullptr;
-//                 std::string index_name;
-//                 if (DataProviderType::kProviderTypeTable == scan_op->provider_type_) {
-//                     // Apply key columns and order column optimization with all indexes binding to
-//                     // scan_op->table_handler_ Return false if fail to find an appropriate index
-//                     if (!TransformKeysAndOrderExpr(root_schemas_ctx, right_partition,
-//                                                    nullptr == sort ? nullptr : sort->orders_,
-//                                                    scan_op->table_handler_, &index_name, &bitmap)) {
-//                         return false;
-//                     }
-//                     Status status =
-//                         plan_ctx_->CreateOp<PhysicalPartitionProviderNode>(&partition_op, scan_op, index_name);
-//                     if (!status.isOK()) {
-//                         LOG(WARNING) << "Fail to create partition op: " << status;
-//                         return false;
-//                     }
-//                 } else {
-//                     partition_op = dynamic_cast<PhysicalPartitionProviderNode*>(scan_op);
-//                     index_name = partition_op->index_name_;
-//                     // Apply key columns and order column optimization with given index name
-//                     // Return false if given index do not match the keys and order column
-//                     if (!TransformKeysAndOrderExpr(root_schemas_ctx, right_partition,
-//                                                    nullptr == sort ? nullptr : sort->orders_,
-//                                                    scan_op->table_handler_, &index_name, &bitmap)) {
-//                         return false;
-//                     }
-//                 }
-//
-//                 auto new_left_keys = node_manager_->MakeExprList();
-//                 auto new_right_keys = node_manager_->MakeExprList();
-//                 auto new_index_keys = node_manager_->MakeExprList();
-//                 for (size_t i = 0; i < bitmap.size(); ++i) {
-//                     auto left = left_key->keys()->GetChild(i);
-//                     if (bitmap[i]) {
-//                         new_index_keys->AddChild(left);
-//                     } else {
-//                         new_left_keys->AddChild(left);
-//                         if (right_key != nullptr) {
-//                             new_right_keys->AddChild(right_key->keys()->GetChild(i));
-//                         }
-//                     }
-//                 }
-//                 if (right_key != nullptr) {
-//                     right_key->set_keys(new_right_keys);
-//                 }
-//                 index_key->set_keys(new_index_keys);
-//                 left_key->set_keys(new_left_keys);
-//                 // Clear order expr list if we optimized orders
-//                 if (nullptr != sort && nullptr != sort->orders_ && nullptr != sort->orders_->GetOrderExpression(0)) {
-//                     auto first_order_expression = sort->orders_->GetOrderExpression(0);
-//                     sort->set_orders(
-//                         dynamic_cast<node::OrderByNode*>(node_manager_->MakeOrderByNode(node_manager_->MakeExprList(
-//                             node_manager_->MakeOrderExpression(nullptr, first_order_expression->is_asc())))));
-//                 }
-//                 *new_in = partition_op;
-//                 return true;
-//             }
-//         } else if (PhysicalOpType::kPhysicalOpSimpleProject == in->GetOpType()) {
-//             auto simple_project = dynamic_cast<PhysicalSimpleProjectNode*>(in);
-//             PhysicalOpNode* new_depend;
-//             if (!KeysOptimized(root_schemas_ctx, simple_project->producers()[0], left_key, index_key, right_key,
-//             sort,
-//                                &new_depend)) {
-//                 return false;
-//             }
-//             PhysicalSimpleProjectNode* new_simple_op = nullptr;
-//             Status status =
-//                 plan_ctx_->CreateOp<PhysicalSimpleProjectNode>(&new_simple_op, new_depend,
-//                 simple_project->project());
-//             if (!status.isOK()) {
-//                 LOG(WARNING) << "Fail to create simple project op: " << status;
-//                 return false;
-//             }
-//             *new_in = new_simple_op;
-//             return true;
-//         } else if (PhysicalOpType::kPhysicalOpRename == in->GetOpType()) {
-//             PhysicalOpNode* new_depend;
-//             if (!KeysOptimized(root_schemas_ctx, in->producers()[0], left_key, index_key, right_key, sort,
-//                                &new_depend)) {
-//                 return false;
-//             }
-//             PhysicalRenameNode* new_op = nullptr;
-//             Status status = plan_ctx_->CreateOp<PhysicalRenameNode>(&new_op, new_depend,
-//                                                                     dynamic_cast<PhysicalRenameNode*>(in)->name_);
-//             if (!status.isOK()) {
-//                 LOG(WARNING) << "Fail to create rename op: " << status;
-//                 return false;
-//             }
-//             *new_in = new_op;
-//             return true;
-//         }
-//         return false;
-//     }
-//     bool KeysAndOrderFilterOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* group,
-//                                           Key* hash, Sort* sort, PhysicalOpNode** new_in) {
-//         return KeysOptimizedParse(root_schemas_ctx, in, group, hash, nullptr, sort, new_in);
-//     }
-//     void TransformParse(PhysicalOpNode* in) {
-//         switch (in->GetOpType()) {
-//             case PhysicalOpType::kPhysicalOpGroupBy: {
-//                 auto group_op = dynamic_cast<PhysicalGroupNode*>(in);
-//                 PhysicalOpNode* new_producer;
-//                 // group -> index key?
-//                 if (!GroupOptimized(group_op->schemas_ctx(), group_op->GetProducer(0), &group_op->group_,
-//                                     &new_producer)) {
-//                 }
-//                 break;
-//             }
-//             case PhysicalOpType::kPhysicalOpProject: {
-//                 auto project_op = dynamic_cast<PhysicalProjectNode*>(in);
-//                 if (ProjectType::kWindowAggregation == project_op->project_type_) {
-//                     auto window_agg_op = dynamic_cast<PhysicalWindowAggrerationNode*>(project_op);
-//                     PhysicalOpNode* input = window_agg_op->GetProducer(0);
-//
-//                     PhysicalOpNode* new_producer;
-//                     if (!window_agg_op->instance_not_in_window()) {
-//                         if (KeyAndOrderOptimized(input->schemas_ctx(), input, &window_agg_op->window_.partition_,
-//                                                  &window_agg_op->window_.sort_, &new_producer)) {
-//                             input = new_producer;
-//                         }
-//                     }
-//                     // must prepare for window join column infer
-//                     auto& window_joins = window_agg_op->window_joins();
-//                     auto& window_unions = window_agg_op->window_unions();
-//                     window_agg_op->InitJoinList(plan_ctx_);
-//                     auto& joined_op_list_ = window_agg_op->joined_op_list_;
-//                     if (!window_joins.Empty()) {
-//                         size_t join_idx = 0;
-//                         for (auto& window_join : window_joins.window_joins()) {
-//                             PhysicalOpNode* cur_joined = joined_op_list_[join_idx];
-//
-//                             PhysicalOpNode* new_join_right;
-//                             if (JoinKeysOptimized(cur_joined->schemas_ctx(), window_join.first, &window_join.second,
-//                                                   &new_join_right)) {
-//                                 window_join.first = new_join_right;
-//                             }
-//                             join_idx += 1;
-//                         }
-//                     }
-//                     if (!window_unions.Empty()) {
-//                         for (auto& window_union : window_unions.window_unions_) {
-//                             PhysicalOpNode* new_producer;
-//                             if (KeyAndOrderOptimized(window_union.first->schemas_ctx(), window_union.first,
-//                                                      &window_union.second.partition_, &window_union.second.sort_,
-//                                                      &new_producer)) {
-//                                 window_union.first = new_producer;
-//                             }
-//                         }
-//                     }
-//                 }
-//                 break;
-//             }
-//             case PhysicalOpType::kPhysicalOpRequestUnion: {
-//                 auto union_op = dynamic_cast<PhysicalRequestUnionNode*>(in);
-//                 PhysicalOpNode* new_producer;
-//
-//                 if (!union_op->instance_not_in_window()) {
-//                     KeysAndOrderFilterOptimizedParse(union_op->schemas_ctx(), union_op->GetProducer(1),
-//                                                     &union_op->window_.partition_, &union_op->window_.index_key_,
-//                                                     &union_op->window_.sort_, &new_producer));
-//                 }
-//
-//                 if (!union_op->window_unions().Empty()) {
-//                     for (auto& window_union : union_op->window_unions_.window_unions_) {
-//                         PhysicalOpNode* new_producer;
-//                         auto& window = window_union.second;
-//                         if (KeysAndOrderFilterOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
-//                                                              &window.partition_, &window.index_key_, &window.sort_,
-//                                                              &new_producer)) {
-//                             window_union.first = new_producer;
-//                         }
-//                     }
-//                 }
-//                 break;
-//             }
-//             case PhysicalOpType::kPhysicalOpRequestJoin: {
-//                 PhysicalRequestJoinNode* join_op = dynamic_cast<PhysicalRequestJoinNode*>(in);
-//                 PhysicalOpNode* new_producer;
-//                 // Optimized Right Table Partition
-//                 if (!JoinKeysOptimized(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
-//                                        &new_producer)) {
-//                     return false;
-//                 }
-//                 if (!ResetProducer(plan_ctx_, join_op, 1, new_producer)) {
-//                     return false;
-//                 }
-//
-//                 return true;
-//             }
-//             case PhysicalOpType::kPhysicalOpJoin: {
-//                 PhysicalJoinNode* join_op = dynamic_cast<PhysicalJoinNode*>(in);
-//                 PhysicalOpNode* new_producer;
-//                 // Optimized Right Table Partition
-//                 if (!JoinKeysOptimized(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
-//                                        &new_producer)) {
-//                     return false;
-//                 }
-//                 if (!ResetProducer(plan_ctx_, join_op, 1, new_producer)) {
-//                     return false;
-//                 }
-//                 return true;
-//             }
-//             case PhysicalOpType::kPhysicalOpFilter: {
-//                 PhysicalFilterNode* filter_op = dynamic_cast<PhysicalFilterNode*>(in);
-//                 PhysicalOpNode* new_producer;
-//                 if (FilterOptimized(filter_op->schemas_ctx(), filter_op->GetProducer(0), &filter_op->filter_,
-//                                     &new_producer)) {
-//                     if (!ResetProducer(plan_ctx_, filter_op, 0, new_producer)) {
-//                         return false;
-//                     }
-//                 }
-//             }
-//             default: {
-//                 return false;
-//             }
-//         }
-//     }
-//
-//     // LRD
-//     void Parse(PhysicalOpNode* cur_op) {
-//         // just parse, won't modify, but need to cast, so we use non-const producers.
-//         auto& producers = cur_op->producers();
-//         for (auto& producer : producers) {
-//             Parse(producer);
-//         }
-//
-//         TransformParse(cur_op);
-//     }
-//     void GetIndexes() {}
-//
-//  private:
-//     IndexMap index_map_;
-// };
- */
+#endif
+
+// no plan_ctx_, node_manager_: we assume that creating new op won't affect the upper level structure.
+class GroupAndSortOptimizedParser {
+ public:
+    // recursive parse, return true iff kProviderTypeTable optimized
+    // new_in is useless, but we keep it, GroupAndSortOptimizedParser will be more similar to GroupAndSortOptimized.
+    bool KeysOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* left_key, Key* index_key,
+                            Key* right_key, Sort* sort, PhysicalOpNode** new_in) {
+        if (nullptr == left_key || nullptr == index_key || !left_key->ValidKey()) {
+            return false;
+        }
+
+        if (right_key != nullptr && !right_key->ValidKey()) {
+            return false;
+        }
+
+        if (PhysicalOpType::kPhysicalOpDataProvider == in->GetOpType()) {
+            auto scan_op = dynamic_cast<PhysicalDataProviderNode*>(in);
+            // Do not optimize with Request DataProvider (no index has been provided)
+            if (DataProviderType::kProviderTypeRequest == scan_op->provider_type_) {
+                return false;
+            }
+
+            if (DataProviderType::kProviderTypeTable == scan_op->provider_type_ ||
+                DataProviderType::kProviderTypePartition == scan_op->provider_type_) {
+                const hybridse::node::ExprListNode* right_partition =
+                    right_key == nullptr ? left_key->keys() : right_key->keys();
+
+                size_t key_num = right_partition->GetChildNum();
+                std::vector<bool> bitmap(key_num, false);
+                hybridse::node::ExprListNode order_values;
+
+                if (DataProviderType::kProviderTypeTable == scan_op->provider_type_) {
+                    // Apply key columns and order column optimization with all indexes binding to
+                    // scan_op->table_handler_ Return false if fail to find an appropriate index
+                    auto groups = right_partition;
+                    auto order = (nullptr == sort ? nullptr : sort->orders_);
+                    LOG(INFO) << "keys and order optimized: keys=" << hybridse::node::ExprString(groups)
+                              << ", order=" << (order == nullptr ? "null" : hybridse::node::ExprString(order))
+                              << " for table " << scan_op->table_handler_->GetName();
+                    // parser won't create partition_op
+                    return true;
+                } else {
+                    // TODO(hw): needless?
+                    PhysicalPartitionProviderNode* partition_op = nullptr;
+                    partition_op = dynamic_cast<PhysicalPartitionProviderNode*>(scan_op);
+                    auto index_name = partition_op->index_name_;
+                    // Apply key columns and order column optimization with given index name
+                    // Return false if given index do not match the keys and order column
+                    // -- return false won't change index_name
+                    LOG(WARNING) << "What if the index is not best index? Do we need to adjust index?";
+                    return false;
+                }
+            }
+        } else if (PhysicalOpType::kPhysicalOpSimpleProject == in->GetOpType()) {
+            auto simple_project = dynamic_cast<PhysicalSimpleProjectNode*>(in);
+            PhysicalOpNode* new_depend;
+            return KeysOptimizedParse(root_schemas_ctx, simple_project->producers()[0], left_key, index_key, right_key,
+                                      sort, &new_depend);
+
+        } else if (PhysicalOpType::kPhysicalOpRename == in->GetOpType()) {
+            PhysicalOpNode* new_depend;
+            return KeysOptimizedParse(root_schemas_ctx, in->producers()[0], left_key, index_key, right_key, sort,
+                                      &new_depend);
+        }
+        return false;
+    }
+
+    bool KeysAndOrderFilterOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* group,
+                                          Key* hash, Sort* sort, PhysicalOpNode** new_in) {
+        return KeysOptimizedParse(root_schemas_ctx, in, group, hash, nullptr, sort, new_in);
+    }
+
+    bool JoinKeysOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Join* join,
+                                PhysicalOpNode** new_in) {
+        if (nullptr == join) {
+            return false;
+        }
+        return FilterAndOrderOptimizedParse(root_schemas_ctx, in, join, &join->right_sort_, new_in);
+    }
+    bool FilterAndOrderOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Filter* filter,
+                                      Sort* sort, PhysicalOpNode** new_in) {
+        return KeysOptimizedParse(root_schemas_ctx, in, &filter->left_key_, &filter->index_key_, &filter->right_key_,
+                                  sort, new_in);
+    }
+    bool FilterOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Filter* filter,
+                              PhysicalOpNode** new_in) {
+        return FilterAndOrderOptimizedParse(root_schemas_ctx, in, filter, nullptr, new_in);
+    }
+    bool KeyAndOrderOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* group, Sort* sort,
+                                   PhysicalOpNode** new_in) {
+        Key mock_key;
+        return KeysAndOrderFilterOptimizedParse(root_schemas_ctx, in, group, &mock_key, sort, new_in);
+    }
+    bool GroupOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* group,
+                             PhysicalOpNode** new_in) {
+        return KeyAndOrderOptimizedParse(root_schemas_ctx, in, group, nullptr, new_in);
+    }
+
+    static std::vector<PhysicalOpNode*> InitJoinList(PhysicalWindowAggrerationNode* op) {
+        std::vector<PhysicalOpNode*> joined_op_list;
+        auto& window_joins = op->window_joins_.window_joins();
+        PhysicalOpNode* cur = op->GetProducer(0);
+        for (auto& pair : window_joins) {
+            auto joined = new PhysicalJoinNode(cur, pair.first, pair.second);
+            joined_op_list.push_back(joined);
+            cur = joined;
+        }
+        return joined_op_list;
+    }
+
+    void TransformParse(PhysicalOpNode* in) {
+        switch (in->GetOpType()) {
+            case PhysicalOpType::kPhysicalOpGroupBy: {
+                auto group_op = dynamic_cast<PhysicalGroupNode*>(in);
+                PhysicalOpNode* new_producer;
+                if (GroupOptimizedParse(group_op->schemas_ctx(), group_op->GetProducer(0), &group_op->group_,
+                                        &new_producer)) {
+                    // TODO(hw): get key and ts, how about ttl?
+                    LOG(INFO) << "got index hints below";
+                }
+                break;
+            }
+            case PhysicalOpType::kPhysicalOpProject: {
+                auto project_op = dynamic_cast<PhysicalProjectNode*>(in);
+                if (ProjectType::kWindowAggregation == project_op->project_type_) {
+                    auto window_agg_op = dynamic_cast<PhysicalWindowAggrerationNode*>(project_op);
+                    PhysicalOpNode* input = window_agg_op->GetProducer(0);
+
+                    PhysicalOpNode* new_producer;
+                    if (!window_agg_op->instance_not_in_window()) {
+                        if (KeyAndOrderOptimizedParse(input->schemas_ctx(), input, &window_agg_op->window_.partition_,
+                                                      &window_agg_op->window_.sort_, &new_producer)) {
+                            LOG(INFO) << "got index hints below";
+                        }
+                    }
+                    // must prepare for window join column infer
+                    auto& window_joins = window_agg_op->window_joins();
+                    auto& window_unions = window_agg_op->window_unions();
+                    auto joined_op_list_ = InitJoinList(window_agg_op);
+                    if (!window_joins.Empty()) {
+                        size_t join_idx = 0;
+                        for (auto& window_join : window_joins.window_joins()) {
+                            PhysicalOpNode* cur_joined = joined_op_list_[join_idx];
+
+                            PhysicalOpNode* new_join_right;
+                            if (JoinKeysOptimizedParse(cur_joined->schemas_ctx(), window_join.first,
+                                                       &window_join.second, &new_join_right)) {
+                                LOG(INFO) << "got index hints below";
+                            }
+                            join_idx += 1;
+                        }
+                    }
+                    // TODO(hw): joined_op_list_ delete or use shared ptr?
+                    if (!window_unions.Empty()) {
+                        for (auto& window_union : window_unions.window_unions_) {
+                            PhysicalOpNode* new_producer;
+                            if (KeyAndOrderOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
+                                                          &window_union.second.partition_, &window_union.second.sort_,
+                                                          &new_producer)) {
+                                LOG(INFO) << "got index hints below";
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            case PhysicalOpType::kPhysicalOpRequestUnion: {
+                auto union_op = dynamic_cast<PhysicalRequestUnionNode*>(in);
+                PhysicalOpNode* new_producer;
+
+                if (!union_op->instance_not_in_window()) {
+                    KeysAndOrderFilterOptimizedParse(union_op->schemas_ctx(), union_op->GetProducer(1),
+                                                     &union_op->window_.partition_, &union_op->window_.index_key_,
+                                                     &union_op->window_.sort_, &new_producer);
+                    LOG(INFO) << "got index hints below";
+                }
+
+                if (!union_op->window_unions().Empty()) {
+                    for (auto& window_union : union_op->window_unions_.window_unions_) {
+                        PhysicalOpNode* new_producer1;
+                        auto& window = window_union.second;
+                        if (KeysAndOrderFilterOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
+                                                             &window.partition_, &window.index_key_, &window.sort_,
+                                                             &new_producer1)) {
+                            LOG(INFO) << "got index hints below";
+                        }
+                    }
+                }
+                break;
+            }
+            case PhysicalOpType::kPhysicalOpRequestJoin: {
+                auto* join_op = dynamic_cast<PhysicalRequestJoinNode*>(in);
+                PhysicalOpNode* new_producer;
+                // Optimized Right Table Partition
+                if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
+                                           &new_producer)) {
+                    LOG(INFO) << "got index hints below";
+                }
+
+                break;
+            }
+            case PhysicalOpType::kPhysicalOpJoin: {
+                auto* join_op = dynamic_cast<PhysicalRequestJoinNode*>(in);
+                PhysicalOpNode* new_producer;
+                // Optimized Right Table Partition
+                if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
+                                           &new_producer)) {
+                    LOG(INFO) << "got index hints below";
+                }
+
+                break;
+            }
+            case PhysicalOpType::kPhysicalOpFilter: {
+                auto* filter_op = dynamic_cast<PhysicalFilterNode*>(in);
+                PhysicalOpNode* new_producer;
+                if (FilterOptimizedParse(filter_op->schemas_ctx(), filter_op->GetProducer(0), &filter_op->filter_,
+                                         &new_producer)) {
+                    LOG(INFO) << "got index hints below";
+                }
+            }
+            default: {
+                break;
+            }
+        }
+    }
+
+    // LRD
+    void Parse(PhysicalOpNode* cur_op) {
+        // just parse, won't modify, but need to cast, so we use non-const producers.
+        auto& producers = cur_op->producers();
+        for (auto& producer : producers) {
+            Parse(producer);
+        }
+
+        LOG(INFO) << "parse " << hybridse::vm::PhysicalOpTypeName(cur_op->GetOpType());
+        TransformParse(cur_op);
+    }
+
+    IndexMap GetIndexes() { return {}; }
+
+ private:
+    IndexMap index_map_;
+};
+
 class DDLParser {
  public:
     static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ExtractIndexes(
@@ -331,6 +313,8 @@ class DDLParser {
         std::shared_ptr<hybridse::vm::CompileInfo> compile_info;
         if (!GetPlan(sql, catalog, db.name(), compile_info)) {
             // TODO(hw):
+            LOG(ERROR) << "sql get plan failed";
+            return {};
         }
         auto plan = compile_info->GetPhysicalPlan();
 
@@ -339,50 +323,38 @@ class DDLParser {
         //        DagToList(const_cast<hybridse::vm::PhysicalOpNode*>(plan), nodes);
         //        ParseIndexes(nodes);
 
-        auto ctx = std::dynamic_pointer_cast<SqlCompileInfo>(compile_info)->get_sql_context();
+        auto& ctx = std::dynamic_pointer_cast<SqlCompileInfo>(compile_info)->get_sql_context();
         ParseIndexes(catalog, const_cast<hybridse::vm::PhysicalOpNode*>(plan), ctx);
         return {};
     }
     static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ExtractIndexes(
         const std::string& sql,
-        const std::map<std::string, ::google::protobuf::RepeatedPtrField<::openmldb::common::ColumnDesc>>& schema) {
+        const std::map<std::string, ::google::protobuf::RepeatedPtrField<::openmldb::common::ColumnDesc>>& schemas) {
         ::hybridse::type::Database db;
         std::string tmp_db = "temp_" + std::to_string(::baidu::common::timer::get_micros() / 1000);
         db.set_name(tmp_db);
-        auto defs = GetTableDefs(schema);
-        // TODO(hw): redundant copy
-        for (auto& def : defs) {
-            auto add = db.add_tables();
-            add->CopyFrom(def);
-        }
+        AddTables(schemas, db);
         return ExtractIndexes(sql, db);
     }
 
     // DLR
-    static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ParseIndexes(
-        const std::shared_ptr<Catalog>& catalog, hybridse::vm::PhysicalOpNode* node, hybridse::vm::SqlContext& ctx) {
+    static IndexMap ParseIndexes(const std::shared_ptr<Catalog>& catalog, hybridse::vm::PhysicalOpNode* node,
+                                 hybridse::vm::SqlContext& ctx) {
         // This physical plan is optimized, but no real optimization about index(cuz no index in fake catalog).
         // So we can apply optimization parser(very like transformer's pass-ApplyPasses)
 
         // Transform needs too many configs. Just imitate GroupAndSortOptimized
         //  GroupAndSortOptimized pass(&plan_ctx_); -> plan_ctx_
         //  transformed = pass.Apply(cur_op, &new_op);
-        PhysicalOpNode* new_op = nullptr;
 
-        // Request mode RequestModeTransformer
-        // TODO(hw): should use a new ctx, nm will add the same nodes...
-        PhysicalPlanContext plan_ctx(&ctx.nm, ctx.udf_library, ctx.db, catalog, &ctx.parameter_types,
-                                     ctx.enable_expr_optimize);
-        GroupAndSortOptimizedParser parser(&plan_ctx);
+        // Request mode RequestModeTransformer way, it should modify hybridse:
+        // should use a new ctx?
+        //        PhysicalPlanContext plan_ctx(&ctx.nm, ctx.udf_library, ctx.db, catalog, &ctx.parameter_types,
+        //                                     ctx.enable_expr_optimize);
+
+        GroupAndSortOptimizedParser parser;
         parser.Parse(node);
-        parser.GetIndexes();
-
-        // can parse index
-
-        // window union
-
-        // children(producers) should apply this index
-        return {};
+        return parser.GetIndexes();
     }
 
     static void ParseLastJoinOp(PhysicalOpNode* node,
@@ -523,21 +495,21 @@ class DDLParser {
         return true;
     }
 
-    static std::vector<::hybridse::type::TableDef> GetTableDefs(
-        const std::map<std::string, ::google::protobuf::RepeatedPtrField<::openmldb::common::ColumnDesc>>& schema) {
+    static void AddTables(
+        const std::map<std::string, ::google::protobuf::RepeatedPtrField<::openmldb::common::ColumnDesc>>& schema,
+        hybridse::type::Database& db) {
         std::vector<::hybridse::type::TableDef> defs;
         for (auto& table : schema) {
-            ::hybridse::type::TableDef def;
-            def.set_name(table.first);
-            auto& cols = table.second;
+            auto def = db.add_tables();
+            def->set_name(table.first);
 
+            auto& cols = table.second;
             for (auto& col : table.second) {
-                auto add = def.add_columns();
+                auto add = def->add_columns();
                 add->set_name(col.name());
                 add->set_type(codec::SchemaCodec::ConvertType(col.data_type()));
             }
         }
-        return defs;
     }
 
     static void DagToList(hybridse::vm::PhysicalOpNode* node, std::vector<hybridse::vm::PhysicalOpNode*>& vec) {

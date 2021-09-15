@@ -236,15 +236,39 @@ TEST_F(DDLParserTest, leftJoin) {
 }
 
 TEST_F(DDLParserTest, extractIndexes) {
-    auto sql =
-        "SELECT t1.col1, t1.col2, t2.col1, t2.col2 FROM t1 left join t2 on "
-        "t1.col1 = t2.col2;";
     ASSERT_TRUE(AddTableToDB(db, "t1",
                              {"col0", "string", "col1", "int32", "col2", "int16", "col3", "float", "col4", "double",
                               "col5", "int64", "col6", "string"}));
     ASSERT_TRUE(AddTableToDB(db, "t2",
                              {"col0", "string", "col1", "int32", "col2", "int16", "col3", "float", "col4", "double",
                               "col5", "int64", "col6", "string"}));
+    auto sql =
+        "SELECT col1, col5, sum(col2) OVER w1 as w1_col2_sum FROM (select col0, col1,  col2,"
+        "0.0f as col3, 0.0 as col4, col5, col6 from t1) WINDOW w1 AS (UNION (select col0, col1,  col2, "
+        "0.0f as col3, 0.0 as col4, col5, col6 from t2) PARTITION BY col1,col2 ORDER "
+        "BY col5 ROWS_RANGE BETWEEN 3 PRECEDING AND CURRENT ROW) limit 10;";
+    DDLParser::ExtractIndexes(sql, db);
+
+    sql =
+        "SELECT t1.col1, t1.col2, t2.col1, t2.col2 FROM t1 left join t2 on "
+        "t1.col1 = t2.col2;";
+    DDLParser::ExtractIndexes(sql, db);
+
+    // request data provider, won't get indexes.
+    sql =
+        "SELECT sum(col1) as col1sum FROM (select col1, col2, "
+        "col3 from t1) where col1 = 10 and col2 = 20 group by col2, col1;";
+    DDLParser::ExtractIndexes(sql, db);
+
+    // no WindowAggregation, cuz SimpleProjectOptimized?
+    sql =
+        "SELECT "
+        "col1, "
+        "sum(col3) OVER w1 as w1_col3_sum, "
+        "sum(col2) OVER w1 as w1_col2_sum "
+        "FROM t1 WINDOW w1 AS (PARTITION BY col1 ORDER BY col5 "
+        "ROWS_RANGE BETWEEN 3 "
+        "PRECEDING AND CURRENT ROW) limit 10;";
     DDLParser::ExtractIndexes(sql, db);
 }
 }  // namespace openmldb::base
