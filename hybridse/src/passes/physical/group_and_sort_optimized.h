@@ -39,7 +39,7 @@ class GroupAndSortOptimized : public TransformUpPysicalPass {
 
     ~GroupAndSortOptimized() {}
 
- private:
+ protected:
     bool Transform(PhysicalOpNode* in, PhysicalOpNode** output);
 
     bool KeysOptimized(const SchemasContext* root_schemas_ctx,

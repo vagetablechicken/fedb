@@ -175,7 +175,9 @@ configure_file(
     "${PROJECT_SOURCE_DIR}/src/config.h")
 
 include_directories(${CMAKE_PREFIX_PATH}/include
-        ${CMAKE_PREFIX_PATH}/hybridse/include)
+        ${CMAKE_PREFIX_PATH}/hybridse/include
+        ${PROJECT_SOURCE_DIR}/hybridse/src # TODO(hw): tmp include
+        )
 
 link_directories(${CMAKE_PREFIX_PATH}/lib
     ${CMAKE_PREFIX_PATH}/lib64

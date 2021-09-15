@@ -231,8 +231,21 @@ TEST_F(DDLParserTest, leftJoin) {
     auto add_index = table_def->add_indexes();
     add_index->set_name("index1_t2");
     add_index->add_first_keys("col2");
-    add_index->set_second_key("col5"); // any int64 col
+    add_index->set_second_key("col5");  // any int64 col
     DDLParser::Explain(sql, db);
+}
+
+TEST_F(DDLParserTest, extractIndexes) {
+    auto sql =
+        "SELECT t1.col1, t1.col2, t2.col1, t2.col2 FROM t1 left join t2 on "
+        "t1.col1 = t2.col2;";
+    ASSERT_TRUE(AddTableToDB(db, "t1",
+                             {"col0", "string", "col1", "int32", "col2", "int16", "col3", "float", "col4", "double",
+                              "col5", "int64", "col6", "string"}));
+    ASSERT_TRUE(AddTableToDB(db, "t2",
+                             {"col0", "string", "col1", "int32", "col2", "int16", "col3", "float", "col4", "double",
+                              "col5", "int64", "col6", "string"}));
+    DDLParser::ExtractIndexes(sql, db);
 }
 }  // namespace openmldb::base
 
