@@ -54,8 +54,19 @@ class DDLParser {
         // TODO(hw): cast from needs to remove 'const'
         DagToList(const_cast<hybridse::vm::PhysicalOpNode*>(plan), nodes);
 
-        ParseIndexes(nodes);
+//        ParseIndexes(nodes);
+        ParseIndexes(plan);
         return {};
+    }
+
+    // DLR
+    static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ParseIndexes(
+        const hybridse::vm::PhysicalOpNode* node) {
+        // can parse index
+
+        // window union
+
+        // children(producers) should apply this index
     }
 
     static void ParseLastJoinOp(PhysicalOpNode* node,
@@ -104,6 +115,9 @@ class DDLParser {
         return nullptr;
     }
 
+    // no-index plan: REQUEST_UNION(partition_keys=(xx), orders=(xx ASC), rows=(xx, -3, 0), index_keys=)
+    //  ->no index_keys
+    // We should create index on partition_keys
     static void ParseWindowOp(PhysicalOpNode* node,
                               std::map<std::string, std::vector<::openmldb::common::ColumnKey>>& indexes_map) {
         auto cast_node = PhysicalRequestUnionNode::CastFrom(node);
@@ -121,9 +135,14 @@ class DDLParser {
         }
         // TODO(hw): not good
         std::vector<const PhysicalOpNode*> nodes;
+        // left, right: both PhysicalDataProviderNode, table or request or partition
+        // 1. table provider -- add index --> partition provider
+        // TODO(hw): index keys and orders, how to parse ttl type or what, frame_range/rows?
         for (decltype(cast_node->GetProducerCnt()) i = 0; i < cast_node->GetProducerCnt(); ++i) {
             nodes.push_back(cast_node->GetProducer(i));
         }
+
+        // TODO(hw): how about window_unions_, it may have data provider too, only parse table provider?
         auto union_list = cast_node->window_unions();
         for (decltype(union_list.GetSize()) i = 0; i < union_list.GetSize(); ++i) {
             nodes.push_back(union_list.GetKey(i));
@@ -140,7 +159,7 @@ class DDLParser {
         // TODO(hw): engine is input, do not create in here
         ::hybridse::vm::Engine::InitializeGlobalLLVM();
         // To show index-based-optimization -> IndexSupport() == true -> whether to do LeftJoinOptimized
-        auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>(true);
+        auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>(true);  // tablet catalog supports index
         catalog->AddDatabase(database);
         ::hybridse::vm::EngineOptions options;
         options.set_keep_ir(true);
@@ -161,8 +180,10 @@ class DDLParser {
 
     static bool Explain(const std::string& sql, const ::hybridse::type::Database& database) {
         ::hybridse::vm::Engine::InitializeGlobalLLVM();
-        auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>();
+        // To show index-based-optimization -> IndexSupport() == true -> whether to do LeftJoinOptimized
+        auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>(true);  // tablet catalog supports index
         catalog->AddDatabase(database);
+
         ::hybridse::vm::EngineOptions options;
         options.set_keep_ir(true);
         options.set_compile_only(true);
