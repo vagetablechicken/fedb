@@ -57,6 +57,164 @@ class GroupAndSortOptimizedParser : public hybridse::passes::GroupAndSortOptimiz
 };
 #endif
 
+// TODO(hw): needless?
+class LeftJoinOptimizedParser {
+ public:
+    void TransformParse(PhysicalOpNode* in) {
+        if (nullptr == in) {
+            LOG(WARNING) << "LeftJoin optimized skip: node is null";
+            return;
+        }
+        if (in->producers().empty() || nullptr == in->producers()[0] ||
+            hybridse::vm::kPhysicalOpJoin != in->producers()[0]->GetOpType()) {
+            return;
+        }
+        auto* join_op = dynamic_cast<hybridse::vm::PhysicalJoinNode*>(in->producers()[0]);
+
+        auto join_type = join_op->join().join_type();
+        if (hybridse::node::kJoinTypeLeft != join_type && hybridse::node::kJoinTypeLast != join_type) {
+            // skip optimized for other join type
+            return;
+        }
+        switch (in->GetOpType()) {
+            case hybridse::vm::kPhysicalOpGroupBy: {
+                auto group_op = dynamic_cast<hybridse::vm::PhysicalGroupNode*>(in);
+                if (hybridse::node::ExprListNullOrEmpty(group_op->group_.keys_)) {
+                    LOG(WARNING) << "Join optimized skip: groups is null or empty";
+                    return;
+                }
+
+                if (!CheckExprListFromSchema(group_op->group_.keys_, join_op->GetProducers()[0]->GetOutputSchema())) {
+                    return;
+                }
+                auto group_expr = group_op->group_.keys_;
+                // 符合优化条件
+                std::ostringstream oss;
+                group_expr->Print(oss, "");
+                LOG(INFO) << "should group by " << oss.str();
+
+                // then create new join op, left producer is new group op.
+
+                return;
+            }
+            case hybridse::vm::kPhysicalOpSortBy: {
+                auto sort_op = dynamic_cast<hybridse::vm::PhysicalSortNode*>(in);
+                if (nullptr == sort_op->sort_.orders_ ||
+                    hybridse::node::ExprListNullOrEmpty(sort_op->sort_.orders_->order_expressions_)) {
+                    LOG(WARNING) << "Join optimized skip: order is null or empty";
+                    return;
+                }
+                if (!CheckExprListFromSchema(sort_op->sort_.orders_->order_expressions_,
+                                             join_op->GetProducers()[0]->GetOutputSchema())) {
+                    return;
+                }
+                // 符合优化条件
+                LOG(INFO) << "should sort by " << sort_op->sort_.ToString();
+
+                // then create new join op, left producer is new sort op.
+                return;
+            }
+            case hybridse::vm::kPhysicalOpProject: {
+                auto project_op = dynamic_cast<hybridse::vm::PhysicalProjectNode*>(in);
+                if (hybridse::vm::kWindowAggregation != project_op->project_type_) {
+                    return;
+                }
+
+                if (hybridse::node::kJoinTypeLast != join_type) {
+                    LOG(WARNING) << "Window Join optimized skip: join type should "
+                                    "be LAST JOIN, but "
+                                 << hybridse::node::JoinTypeName(join_type);
+                    return;
+                }
+                auto window_agg_op = dynamic_cast<hybridse::vm::PhysicalWindowAggrerationNode*>(in);
+                if (hybridse::node::ExprListNullOrEmpty(window_agg_op->window_.partition_.keys_) &&
+                    (nullptr == window_agg_op->window_.sort_.orders_ ||
+                     hybridse::node::ExprListNullOrEmpty(window_agg_op->window_.sort_.orders_->order_expressions_))) {
+                    LOG(WARNING) << "Window Join optimized skip: both partition and"
+                                    "order are empty ";
+                    return;
+                }
+                auto left_schemas_ctx = join_op->GetProducer(0)->schemas_ctx();
+                if (!CheckExprDependOnChildOnly(window_agg_op->window_.partition_.keys_, left_schemas_ctx).isOK()) {
+                    LOG(WARNING) << "Window Join optimized skip: partition keys "
+                                    "are resolved from secondary table";
+                    return;
+                }
+                if (!CheckExprDependOnChildOnly(window_agg_op->window_.sort_.orders_->order_expressions_,
+                                                left_schemas_ctx)
+                         .isOK()) {
+                    LOG(WARNING) << "Window Join optimized skip: order keys are "
+                                    "resolved from secondary table";
+                    return;
+                }
+
+                auto left = join_op->producers()[0];
+                auto right = join_op->producers()[1];
+                window_agg_op->AddWindowJoin(right, join_op->join());
+                // TODO(hw): should be recursive
+                //                if (!ResetProducer(plan_ctx_, window_agg_op, 0, left)) {
+                //                    return false;
+                //                }
+                //                Transform(window_agg_op);
+                //                *output = window_agg_op;
+                return;
+            }
+            default: {
+                return;
+            }
+        }
+    }
+
+    static bool CheckExprListFromSchema(const hybridse::node::ExprListNode* expr_list, const Schema* schema) {
+        if (hybridse::node::ExprListNullOrEmpty(expr_list)) {
+            DLOG_ASSERT(false) << "null or empty expr_list should quit before";
+            return true;
+        }
+
+        for (auto expr : expr_list->children_) {
+            switch (expr->expr_type_) {
+                case hybridse::node::kExprColumnRef: {
+                    auto column = dynamic_cast<hybridse::node::ColumnRefNode*>(expr);
+                    if (!ColumnExist(*schema, column->GetColumnName())) {
+                        return false;
+                    }
+                    break;
+                }
+                default: {
+                    // can't optimize when group by other expression
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    static bool ColumnExist(const Schema& schema, const std::string& column_name) {
+        for (int32_t i = 0; i < schema.size(); i++) {
+            const hybridse::type::ColumnDef& column = schema.Get(i);
+            if (column_name == column.name()) {
+                return true;
+            }
+        }
+        return false;
+    }
+    hybridse::base::Status CheckExprDependOnChildOnly(const hybridse::node::ExprNode* expr,
+                                                      const hybridse::vm::SchemasContext* child_schemas_ctx) {
+        std::set<size_t> column_ids;
+        return child_schemas_ctx->ResolveExprDependentColumns(expr, &column_ids);
+    }
+
+    void Parse(PhysicalOpNode* cur_op) {
+        // just parse, won't modify, but need to cast, so we use non-const producers.
+        auto& producers = cur_op->producers();
+        for (auto& producer : producers) {
+            Parse(producer);
+        }
+
+        LOG(INFO) << "parse " << hybridse::vm::PhysicalOpTypeName(cur_op->GetOpType());
+        TransformParse(cur_op);
+    }
+};
+
 // no plan_ctx_, node_manager_: we assume that creating new op won't affect the upper level structure.
 class GroupAndSortOptimizedParser {
  public:
@@ -212,10 +370,10 @@ class GroupAndSortOptimizedParser {
                     // TODO(hw): joined_op_list_ delete or use shared ptr?
                     if (!window_unions.Empty()) {
                         for (auto& window_union : window_unions.window_unions_) {
-                            PhysicalOpNode* new_producer;
+                            PhysicalOpNode* new_producer1;
                             if (KeyAndOrderOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
                                                           &window_union.second.partition_, &window_union.second.sort_,
-                                                          &new_producer)) {
+                                                          &new_producer1)) {
                                 LOG(INFO) << "got index hints below";
                             }
                         }
@@ -226,6 +384,7 @@ class GroupAndSortOptimizedParser {
             case PhysicalOpType::kPhysicalOpRequestUnion: {
                 auto union_op = dynamic_cast<PhysicalRequestUnionNode*>(in);
                 PhysicalOpNode* new_producer;
+                // TODO(hw): get union_op->window_.range() here, parse ttl and type?
 
                 if (!union_op->instance_not_in_window()) {
                     KeysAndOrderFilterOptimizedParse(union_op->schemas_ctx(), union_op->GetProducer(1),
@@ -285,6 +444,7 @@ class GroupAndSortOptimizedParser {
 
     // LRD
     void Parse(PhysicalOpNode* cur_op) {
+        LOG_ASSERT(cur_op != nullptr);
         // just parse, won't modify, but need to cast, so we use non-const producers.
         auto& producers = cur_op->producers();
         for (auto& producer : producers) {
