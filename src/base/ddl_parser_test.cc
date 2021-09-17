@@ -260,7 +260,7 @@ TEST_F(DDLParserTest, extractIndexes) {
         "col3 from t1) where col1 = 10 and col2 = 20 group by col2, col1;";
     DDLParser::ExtractIndexes(sql, db);
 
-    // no WindowAggregation, cuz SimpleProjectOptimized?
+    // no WindowAggregation, request mode is not ok? use batch mode?
     sql =
         "SELECT "
         "col1, "

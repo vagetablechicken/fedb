@@ -64,6 +64,7 @@ bool LeftJoinOptimized::Transform(PhysicalOpNode* in, PhysicalOpNode** output) {
             if (!status.isOK()) {
                 return false;
             }
+            LOG(INFO) << "left join optimized";
             *output = new_join_op;
             return true;
         }
@@ -93,6 +94,7 @@ bool LeftJoinOptimized::Transform(PhysicalOpNode* in, PhysicalOpNode** output) {
                 return false;
             }
             *output = new_join_op;
+            LOG(INFO) << "left join optimized";
             return true;
         }
         case vm::kPhysicalOpProject: {
@@ -142,6 +144,7 @@ bool LeftJoinOptimized::Transform(PhysicalOpNode* in, PhysicalOpNode** output) {
             if (!ResetProducer(plan_ctx_, window_agg_op, 0, left)) {
                 return false;
             }
+            LOG(INFO) << "left join optimized, and recursive";
             Transform(window_agg_op, output);
             *output = window_agg_op;
             return true;
