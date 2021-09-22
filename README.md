@@ -1,10 +1,18 @@
 
-<div align=center><img src="./images/openmldb_logo.png"/></div>
+<div align=center><img src="./images/openmldb_logo.png" width="400" /></div>
 
 [![build status](https://github.com/4paradigm/openmldb/actions/workflows/cicd.yaml/badge.svg?branch=openmldb)](https://github.com/4paradigm/openmldb/actions/workflows/cicd.yaml)
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/openmldb.svg)](https://hub.docker.com/r/4pdosc/openmldb)
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/hybridsql-ws/shared_invite/zt-ozu3llie-K~hn9Ss1GZcFW2~K_L5sMg)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/OpenMLDB/discussions)
+[![codecov](https://codecov.io/gh/4paradigm/OpenMLDB/branch/main/graph/badge.svg?token=OMPII8NGN2)](https://codecov.io/gh/4paradigm/OpenMLDB)
+[![release](https://img.shields.io/github/v/release/4paradigm/OpenMLDB?color=lime)](https://github.com/4paradigm/OpenMLDB/releases)
+[![license](https://img.shields.io/github/license/4paradigm/OpenMLDB?color=orange)](https://github.com/4paradigm/OpenMLDB/blob/main/LICENSE)
+[![gitee](https://img.shields.io/badge/Gitee-mirror-lightyellow)](https://gitee.com/paradigm4/OpenMLDB)
+[![maven central](https://img.shields.io/maven-central/v/com.4paradigm.openmldb/openmldb-batch)](https://mvnrepository.com/artifact/com.4paradigm.openmldb/openmldb-batch)
+[![maven central](https://img.shields.io/maven-central/v/com.4paradigm.openmldb/openmldb-jdbc)](https://mvnrepository.com/artifact/com.4paradigm.openmldb/openmldb-jdbc)
+[![pypi](https://img.shields.io/pypi/v/openmldb)](https://pypi.org/project/openmldb/)
+
 
 English version|[中文版](README_cn.md)
 
@@ -48,13 +56,13 @@ Comparing with the mainstream databases, OpenMLDB achieves better performance fo
 
 ![Online Benchmark](./images/online_benchmark.png)
 
-Comparing with the popular Spark computation framework, using OpenMLDB for batch data process can achieve better performance and lower TCO especially with optimization for skew window data.
+Comparing with the popular MPP system, using OpenMLDB for batch data process can achieve better performance and lower TCO especially with optimization for skew window data.
 
 ![Offline Benchmark](./images/offline_benchmark.png)
 
 ## QuickStart
 
-Take Predict Taxi Tour Duration as example, we can use OpenMLDB to develop and deploy ML applications easily.
+Take Predict Taxi Tour Duration as example, we can use OpenMLDB to develop and deploy ML applications easily. The demo code is [here](https://github.com/4paradigm/OpenMLDB/tree/main/demo/predict-taxi-trip-duration-nb/demo).
 
 ```bash 
 # Start docker image (support linux/amd64 & linux/arm64 image)
@@ -79,6 +87,10 @@ sh start_predict_server.sh ./fe.sql 8887 /tmp/model.txt
 # Run inference with HTTP request
 python3 predict.py
 ```
+
+## Build
+
+See [here](docs/en/compile.md)
 
 ## Architecture 
 
@@ -125,6 +137,17 @@ python3 predict.py
 ## Publication
 
 * Cheng Chen, Jun Yang, Mian Lu, Taize Wang, Zhao Zheng, Yuqiang Chen, Wenyuan Dai, Bingsheng He, Weng-Fai Wong, Guoan Wu, Yuping Zhao, and Andy Rudoff. *[Optimizing in-memory database engine for AI-powered on-line decision augmentation using persistent memory](http://vldb.org/pvldb/vol14/p799-chen.pdf)*. International Conference on Very Large Data Bases (VLDB) 2021.
+
+## Some Readings
+
+[In-Depth Interpretation of the Latest VLDB 2021 Paper: Artificial Intelligence Driven Real-Time Decision System Database and Optimization Based on Persistent Memory](https://medium.com/@fengxindai0/in-depth-interpretation-of-the-latest-vldb-2021-paper-artificial-intelligence-driven-real-time-f2a818bcf2b2)
+
+[Predictive maintenance — 5minutes demo of an end to end machine learning project](https://towardsdatascience.com/predictive-maintenance-5minutes-demo-of-an-end-to-end-machine-learning-project-60941f1c9793)
+
+[Compared to Native Spark 3.0, We Have Achieved Significant Optimization Effects in the AI Application Field](https://towardsdatascience.com/we-have-achieved-significant-optimization-effects-in-the-ai-application-field-compared-to-native-2a055e47250f)
+
+[MLOp Practice: Using OpenMLDB in the Real-Time Anti-Fraud Model for the Bank’s Online Transaction](https://towardsdatascience.com/practice-of-openmldbs-transaction-real-time-anti-fraud-model-in-the-bank-s-online-event-40ab41fec6d4)
+
 
 ## License
 

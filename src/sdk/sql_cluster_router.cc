@@ -204,7 +204,9 @@ std::shared_ptr<SQLRequestRow> SQLClusterRouter::GetRequestRow(const std::string
     }
     ::hybridse::vm::ExplainOutput explain;
     ::hybridse::base::Status vm_status;
-    bool ok = cluster_sdk_->GetEngine()->Explain(sql, db, ::hybridse::vm::kRequestMode, &explain, &vm_status);
+
+    bool ok = cluster_sdk_->GetEngine()->Explain(sql, db, ::hybridse::vm::kRequestMode,
+                                                 &explain, &vm_status);
     if (!ok) {
         status->code = -1;
         status->msg = vm_status.msg;
@@ -259,7 +261,100 @@ std::shared_ptr<SQLInsertRow> SQLClusterRouter::GetInsertRow(const std::string& 
     SetCache(db, sql, cache);
     return std::make_shared<SQLInsertRow>(table_info, cache->column_schema, default_map, str_length);
 }
-
+bool SQLClusterRouter::GetMultiRowInsertInfo(const std::string& db, const std::string& sql,
+                                             ::hybridse::sdk::Status* status,
+                                             std::shared_ptr<::openmldb::nameserver::TableInfo>* table_info,
+                                             std::vector<DefaultValueMap>* default_maps,
+                                             std::vector<uint32_t>* str_lengths) {
+    if (status == NULL || table_info == NULL || default_maps == NULL || str_lengths == NULL) {
+        status->msg = "insert info is null";
+        LOG(WARNING) << status->msg;
+        return false;
+    }
+    ::hybridse::node::NodeManager nm;
+    ::hybridse::plan::PlanNodeList plans;
+    bool ok = GetSQLPlan(sql, &nm, &plans);
+    if (!ok || plans.size() == 0) {
+        LOG(WARNING) << "fail to get sql plan with sql " << sql;
+        status->msg = "fail to get sql plan with";
+        return false;
+    }
+    ::hybridse::node::PlanNode* plan = plans[0];
+    if (plan->GetType() != hybridse::node::kPlanTypeInsert) {
+        status->msg = "invalid sql node expect insert";
+        LOG(WARNING) << "invalid sql node expect insert";
+        return false;
+    }
+    ::hybridse::node::InsertPlanNode* iplan = dynamic_cast<::hybridse::node::InsertPlanNode*>(plan);
+    const ::hybridse::node::InsertStmt* insert_stmt = iplan->GetInsertNode();
+    if (insert_stmt == NULL) {
+        LOG(WARNING) << "insert stmt is null";
+        status->msg = "insert stmt is null";
+        return false;
+    }
+    *table_info = cluster_sdk_->GetTableInfo(db, insert_stmt->table_name_);
+    if (!(*table_info)) {
+        status->msg = "table with name " + insert_stmt->table_name_ + " in db " + db + " does not exist";
+        LOG(WARNING) << status->msg;
+        return false;
+    }
+    std::map<uint32_t, uint32_t> column_map;
+    for (size_t j = 0; j < insert_stmt->columns_.size(); ++j) {
+        const std::string& col_name = insert_stmt->columns_[j];
+        bool find_flag = false;
+        for (int i = 0; i < (*table_info)->column_desc_size(); ++i) {
+            if (col_name == (*table_info)->column_desc(i).name()) {
+                if (column_map.count(i) > 0) {
+                    status->msg = "duplicate column of " + col_name;
+                    LOG(WARNING) << status->msg;
+                    return false;
+                }
+                column_map.insert(std::make_pair(i, j));
+                find_flag = true;
+                break;
+            }
+        }
+        if (!find_flag) {
+            status->msg = "can't find column " + col_name + " in table " + (*table_info)->name();
+            LOG(WARNING) << status->msg;
+            return false;
+        }
+    }
+    size_t total_rows_size = insert_stmt->values_.size();
+    for (int i = 0; i < total_rows_size; i++) {
+        hybridse::node::ExprNode* value = insert_stmt->values_[i];
+        if (value->GetExprType() != ::hybridse::node::kExprList) {
+            status->msg = "fail to parse row [" + std::to_string(i) +
+                          "]"
+                          ": invalid row expression, expect kExprList but " +
+                          hybridse::node::ExprTypeName(value->GetExprType());
+            LOG(WARNING) << status->msg;
+            return false;
+        }
+        uint32_t str_length = 0;
+        default_maps->push_back(
+            GetDefaultMap(*table_info, column_map, dynamic_cast<::hybridse::node::ExprListNode*>(value), &str_length));
+        if (!default_maps->back()) {
+            status->msg = "fail to parse row[" + std::to_string(i) + "]: " + value->GetExprString();
+            LOG(WARNING) << status->msg;
+            return false;
+        }
+        str_lengths->push_back(str_length);
+    }
+    if (default_maps->empty() || str_lengths->empty()) {
+        status->msg = "default_maps or str_lengths are empty";
+        status->code = 1;
+        LOG(WARNING) << status->msg;
+        return false;
+    }
+    if (default_maps->size() != str_lengths->size()) {
+        status->msg = "default maps isn't match with str_lengths";
+        status->code = 1;
+        LOG(WARNING) << status->msg;
+        return false;
+    }
+    return true;
+}
 bool SQLClusterRouter::GetInsertInfo(const std::string& db, const std::string& sql, ::hybridse::sdk::Status* status,
                                      std::shared_ptr<::openmldb::nameserver::TableInfo>* table_info,
                                      DefaultValueMap* default_map, uint32_t* str_length) {
@@ -443,13 +538,15 @@ DefaultValueMap SQLClusterRouter::GetDefaultMap(std::shared_ptr<::openmldb::name
         if (!column_map.empty()) {
             i = column_map.at(idx);
         }
-        if (hybridse::node::kExprPrimary != row->children_.at(i)->GetExprType()) {
-            LOG(WARNING) << "insert value isn't const value";
+        if (hybridse::node::kExprPrimary != row->children_.at(i)->GetExprType()
+            && hybridse::node::kExprParameter != row->children_.at(i)->GetExprType()) {
+            LOG(WARNING) << "insert value isn't const value or placeholder";
             return DefaultValueMap();
         }
-        ::hybridse::node::ConstNode* primary =
-            dynamic_cast<::hybridse::node::ConstNode*>(row->children_.at(i));
-        if (!primary->IsPlaceholder()) {
+
+        if (hybridse::node::kExprPrimary == row->children_.at(i)->GetExprType()) {
+            ::hybridse::node::ConstNode* primary =
+                dynamic_cast<::hybridse::node::ConstNode*>(row->children_.at(i));
             std::shared_ptr<::hybridse::node::ConstNode> val;
             if (primary->IsNull()) {
                 if (column.not_null()) {
@@ -626,28 +723,51 @@ bool SQLClusterRouter::DropDB(const std::string& db, hybridse::sdk::Status* stat
     }
     return true;
 }
-
 std::shared_ptr<::openmldb::client::TabletClient> SQLClusterRouter::GetTabletClient(
     const std::string& db, const std::string& sql, const std::shared_ptr<SQLRequestRow>& row) {
+    return GetTabletClient(db, sql, row, std::shared_ptr<openmldb::sdk::SQLRequestRow>());
+}
+std::shared_ptr<::openmldb::client::TabletClient> SQLClusterRouter::GetTabletClient(
+    const std::string& db, const std::string& sql, const std::shared_ptr<SQLRequestRow>& row,
+    const std::shared_ptr<openmldb::sdk::SQLRequestRow>& parameter) {
+    ::hybridse::codec::Schema parameter_schema_raw;
+    if (parameter) {
+        for (int i = 0; i < parameter->GetSchema()->GetColumnCnt(); i++) {
+            auto column = parameter_schema_raw.Add();
+            hybridse::type::Type hybridse_type;
+            if (!openmldb::catalog::SchemaAdapter::ConvertType(parameter->GetSchema()->GetColumnType(i),
+                                                               &hybridse_type)) {
+                LOG(WARNING) << "Invalid parameter type ";
+                return std::shared_ptr<::openmldb::client::TabletClient>();
+            }
+            column->set_type(hybridse_type);
+        }
+    }
     std::shared_ptr<::openmldb::catalog::TabletAccessor> tablet;
     auto cache = GetCache(db, sql);
+    auto parameter_schema = std::make_shared<::hybridse::sdk::SchemaImpl>(parameter_schema_raw);
+    if (cache && cache->IsCompatibleCache(parameter_schema)) {
+        cache = std::shared_ptr<SQLCache>();
+    }
     if (!cache) {
         ::hybridse::vm::ExplainOutput explain;
         ::hybridse::base::Status vm_status;
-        if (cluster_sdk_->GetEngine()->Explain(sql, db, ::hybridse::vm::kBatchMode, &explain, &vm_status)) {
+        if (cluster_sdk_->GetEngine()->Explain(sql, db, ::hybridse::vm::kBatchMode, parameter_schema_raw, &explain,
+                                               &vm_status)) {
             std::shared_ptr<::hybridse::sdk::SchemaImpl> schema;
             if (explain.input_schema.size() > 0) {
                 schema = std::make_shared<::hybridse::sdk::SchemaImpl>(explain.input_schema);
             } else {
                 auto table_info = cluster_sdk_->GetTableInfo(db, explain.router.GetMainTable());
-                ::hybridse::vm::Schema raw_schema;
+                ::hybridse::codec::Schema raw_schema;
                 if (table_info &&
                     ::openmldb::catalog::SchemaAdapter::ConvertSchema(table_info->column_desc(), &raw_schema)) {
                     schema = std::make_shared<::hybridse::sdk::SchemaImpl>(raw_schema);
                 }
             }
             if (schema) {
-                cache = std::make_shared<SQLCache>(schema, explain.router);
+                cache = std::make_shared<SQLCache>(
+                    schema, parameter_schema, explain.router);
                 SetCache(db, sql, cache);
             }
         }
@@ -734,10 +854,10 @@ void SQLClusterRouter::GetTables(::hybridse::vm::PhysicalOpNode* node, std::set<
         GetTables(node->GetProducer(i), tables);
     }
 }
-
-std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQL(const std::string& db, const std::string& sql,
-                                                                       std::shared_ptr<SQLRequestRow> row,
-                                                                       hybridse::sdk::Status* status) {
+std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLRequest(const std::string& db,
+                                                                              const std::string& sql,
+                                                                              std::shared_ptr<SQLRequestRow> row,
+                                                                              hybridse::sdk::Status* status) {
     if (!row || !status) {
         LOG(WARNING) << "input is invalid";
         return std::shared_ptr<::hybridse::sdk::ResultSet>();
@@ -767,19 +887,33 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQL(const std
     auto rs = ResultSetSQL::MakeResultSet(response, cntl, status);
     return rs;
 }
-
 std::shared_ptr<::hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQL(const std::string& db, const std::string& sql,
                                                                          ::hybridse::sdk::Status* status) {
+    return ExecuteSQLParameterized(db, sql, std::shared_ptr<openmldb::sdk::SQLRequestRow>(), status);
+}
+std::shared_ptr<::hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLParameterized(
+    const std::string& db, const std::string& sql, std::shared_ptr<openmldb::sdk::SQLRequestRow> parameter,
+    ::hybridse::sdk::Status* status) {
     auto cntl = std::make_shared<::brpc::Controller>();
     cntl->set_timeout_ms(options_.request_timeout);
     auto response = std::make_shared<::openmldb::api::QueryResponse>();
-    auto client = GetTabletClient(db, sql, std::shared_ptr<SQLRequestRow>());
+    std::vector<openmldb::type::DataType> parameter_types;
+    if (parameter && !ExtractDBTypes(parameter->GetSchema(), parameter_types)) {
+        status->msg = "convert parameter types error";
+        status->code = -1;
+        return std::shared_ptr<::hybridse::sdk::ResultSet>();
+    }
+
+    auto client = GetTabletClient(db, sql, std::shared_ptr<SQLRequestRow>(), parameter);
     if (!client) {
         DLOG(INFO) << "no tablet avilable for sql " << sql;
         return std::shared_ptr<::hybridse::sdk::ResultSet>();
     }
     DLOG(INFO) << " send query to tablet " << client->GetEndpoint();
-    if (!client->Query(db, sql, cntl.get(), response.get(), options_.enable_debug)) {
+    if (!client->Query(db, sql, parameter_types, parameter ? parameter->GetRow() : "", cntl.get(), response.get(),
+                       options_.enable_debug)) {
+        status->msg = response->msg();
+        status->code = -1;
         return std::shared_ptr<::hybridse::sdk::ResultSet>();
     }
     auto rs = ResultSetSQL::MakeResultSet(response, cntl, status);
@@ -796,7 +930,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLBatchReque
     auto cntl = std::make_shared<::brpc::Controller>();
     cntl->set_timeout_ms(options_.request_timeout);
     auto response = std::make_shared<::openmldb::api::SQLBatchRequestQueryResponse>();
-    auto client = GetTabletClient(db, sql, std::shared_ptr<SQLRequestRow>());
+    auto client = GetTabletClient(db, sql, std::shared_ptr<SQLRequestRow>(), std::shared_ptr<SQLRequestRow>());
     if (!client) {
         status->code = -1;
         status->msg = "no tablet found";
@@ -824,38 +958,50 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLBatchReque
 bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& sql, ::hybridse::sdk::Status* status) {
     if (status == NULL) return false;
     std::shared_ptr<::openmldb::nameserver::TableInfo> table_info;
-    DefaultValueMap default_map;
-    uint32_t str_length = 0;
-    if (!GetInsertInfo(db, sql, status, &table_info, &default_map, &str_length)) {
+    std::vector<DefaultValueMap> default_maps;
+    std::vector<uint32_t> str_lengths;
+    if (!GetMultiRowInsertInfo(db, sql, status, &table_info, &default_maps, &str_lengths)) {
         status->code = 1;
-        LOG(WARNING) << "get insert information failed";
+        LOG(WARNING) << "Fail to execute insert statement: " << status->msg;
         return false;
     }
-    std::shared_ptr<SQLInsertRow> row = std::make_shared<SQLInsertRow>(
-        table_info, ::openmldb::sdk::ConvertToSchema(table_info), default_map, str_length);
-    if (!row) {
-        status->msg = "fail to parse row from sql " + sql;
-        LOG(WARNING) << status->msg;
-        return false;
-    }
-    if (!row->Init(0)) {
-        status->msg = "fail to encode row for table " + table_info->name();
-        LOG(WARNING) << status->msg;
-        return false;
-    }
-    if (!row->IsComplete()) {
-        status->msg = "insert value isn't complete";
-        LOG(WARNING) << status->msg;
-        return false;
-    }
+
+    std::shared_ptr<::hybridse::sdk::Schema> schema = ::openmldb::sdk::ConvertToSchema(table_info);
     std::vector<std::shared_ptr<::openmldb::catalog::TabletAccessor>> tablets;
     bool ret = cluster_sdk_->GetTablet(db, table_info->name(), &tablets);
     if (!ret || tablets.empty()) {
-        status->msg = "fail to get table " + table_info->name() + " tablet";
+        status->msg = "Fail to execute insert statement: fail to get " + table_info->name() + " tablet";
         LOG(WARNING) << status->msg;
         return false;
     }
-    return PutRow(table_info->tid(), row, tablets, status);
+    int cnt = 0;
+    for (int i = 0; i < default_maps.size(); i++) {
+        std::shared_ptr<SQLInsertRow> row = std::make_shared<SQLInsertRow>(table_info, schema, default_maps[i], str_lengths[i]);
+        if (!row) {
+            LOG(WARNING) << "fail to parse row[" << i << "]";
+            continue;
+        }
+        if (!row->Init(0)) {
+            LOG(WARNING) << "fail to encode row[" << i << " for table " << table_info->name();
+            continue;
+        }
+        if (!row->IsComplete()) {
+            LOG(WARNING) << "fail to build row[" << i << "]";
+            continue;
+        }
+        if (!PutRow(table_info->tid(), row, tablets, status)) {
+            LOG(WARNING) << "fail to put row[" << i << "] due to: " << status->msg;
+            continue;
+        }
+        cnt ++;
+    }
+    if (cnt < default_maps.size()) {
+        status->msg = "Error occur when execute insert, success/total: " + std::to_string(cnt) + "/" +
+                      std::to_string(default_maps.size());
+        status->code = 1;
+        return false;
+    }
+    return true;
 }
 
 bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>& row,
@@ -976,7 +1122,9 @@ std::shared_ptr<ExplainInfo> SQLClusterRouter::Explain(const std::string& db, co
                                                        ::hybridse::sdk::Status* status) {
     ::hybridse::vm::ExplainOutput explain_output;
     ::hybridse::base::Status vm_status;
-    bool ok = cluster_sdk_->GetEngine()->Explain(sql, db, ::hybridse::vm::kRequestMode, &explain_output, &vm_status);
+    ::hybridse::codec::Schema parameter_schema;
+    bool ok = cluster_sdk_->GetEngine()->Explain(sql, db, ::hybridse::vm::kRequestMode, parameter_schema,
+                                                 &explain_output, &vm_status);
     if (!ok) {
         status->code = -1;
         status->msg = vm_status.msg;
@@ -1134,10 +1282,11 @@ bool SQLClusterRouter::HandleSQLCreateProcedure(hybridse::node::CreateProcedureP
     bool ok;
     hybridse::vm::ExplainOutput explain_output;
     if (input_common_column_indices.empty()) {
-        ok = cluster_sdk_->GetEngine()->Explain(sql, db, hybridse::vm::kRequestMode, &explain_output, &sql_status);
+        ok = cluster_sdk_->GetEngine()->Explain(sql, db, hybridse::vm::kRequestMode, &explain_output,
+                                                &sql_status);
     } else {
-        ok = cluster_sdk_->GetEngine()->Explain(sql, db, hybridse::vm::kBatchRequestMode, input_common_column_indices,
-                                                &explain_output, &sql_status);
+        ok = cluster_sdk_->GetEngine()->Explain(sql, db, hybridse::vm::kBatchRequestMode,
+                                                input_common_column_indices, &explain_output, &sql_status);
     }
     if (!ok) {
         *msg = "fail to explain sql" + sql_status.msg;
@@ -1211,7 +1360,20 @@ bool SQLClusterRouter::CheckSQLSyntax(const std::string& sql) {
     }
     return true;
 }
-
+bool SQLClusterRouter::ExtractDBTypes(const std::shared_ptr<hybridse::sdk::Schema> schema,
+                           std::vector<openmldb::type::DataType>& db_types) {  // NOLINT
+    if (schema) {
+        for (int i = 0; i < schema->GetColumnCnt(); i++) {
+            openmldb::type::DataType casted_type;
+            if (!openmldb::catalog::SchemaAdapter::ConvertType(schema->GetColumnType(i), &casted_type)) {
+                LOG(WARNING) << "Invalid parameter type " << schema->GetColumnType(i);
+                return false;
+            }
+            db_types.push_back(casted_type);
+        }
+    }
+    return true;
+}
 std::vector<std::shared_ptr<hybridse::sdk::ProcedureInfo>> SQLClusterRouter::ShowProcedure(std::string* msg) {
     std::vector<std::shared_ptr<hybridse::sdk::ProcedureInfo>> vec;
     if (msg == nullptr) {

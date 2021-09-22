@@ -26,9 +26,6 @@ class OpenmldbBatchConfig extends Serializable {
   @ConfigOption(name="openmldb.groupby.partitions", doc="Default partition number used in group by")
   var groupbyPartitions: Int = -1
 
-  @ConfigOption(name="openmldb.dbName", doc="Database name")
-  var configDBName = "spark_db"
-
   @ConfigOption(name="spark.sql.session.timeZone")
   var timeZone = "Asia/Shanghai"
 
@@ -49,16 +46,16 @@ class OpenmldbBatchConfig extends Serializable {
   @ConfigOption(name="openmldb.window.skew.opt", doc="Enable window skew optimization or not")
   var enableWindowSkewOpt: Boolean = false
 
+  // Window skew optimization
+  @ConfigOption(name="openmldb.window.skew.expanded.all.opt",
+    doc="Enable window skew optimization expanded all data")
+  var enableWindowSkewExpandedAllOpt: Boolean = true
+
   @ConfigOption(name="openmldb.window.skew.opt.postfix", doc="The postfix for internal tables and columns")
   var windowSkewOptPostfix = ""
 
-  @ConfigOption(name="openmldb.skew.watershed", doc="针对key的分水岭，默认是100*100条，才做数据倾斜优化")
-  var skewCnt: Int = 2
-
-  @ConfigOption(name="openmldb.skew.level", doc="""
-      | 数据倾斜优化级别，默认是1，数据拆分两份分别计算，优化1倍。
-      | 因为数据按照2的n次方拆分。所以不建议level改太大""")
-  var skewLevel: Int = 1
+  @ConfigOption(name="openmldb.skew.partition.num", doc="The num of partition for repartition")
+  var skewedPartitionNum: Int = 2
 
   @ConfigOption(name="openmldb.window.skew.opt.cache", doc="Window skew optimization will cache reused tables")
   var windowSkewOptCache: Boolean = true
@@ -119,15 +116,11 @@ class OpenmldbBatchConfig extends Serializable {
   var disableOpenmldb = false
 
   // HybridSE dynamic library path
-  // TODO: Support this when upgrading hybridse-sdk to 0.1.4
-  //@ConfigOption(name="openmldb.hybridse.jsdk.path", doc="The path of HybridSE jsdk core file path")
+  @ConfigOption(name="openmldb.hybridse.jsdk.path", doc="The path of HybridSE jsdk core file path")
   var hybridseJsdkLibraryPath = ""
 
   @ConfigOption("openmldb.enable.hive.metastore", "Need to set hive.metastore.uris")
   var enableHiveMetaStore = false
-
-  @ConfigOption("openmldb.hive.default.database", "The default database from hive metastore")
-  var defaultHiveDatabase = "default"
 
   @ConfigOption(name="openmldb.hadoop.warehouse.path", doc="The path of Hadoop warehouse")
   var hadoopWarehousePath = ""

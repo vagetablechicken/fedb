@@ -11,6 +11,7 @@ on:
 
 env:
   GIT_SUBMODULE_STRATEGY: recursive
+  HYBRIDSE_SOURCE: 
 
 jobs:
   build_and_cpp_ut:
@@ -20,10 +21,10 @@ jobs:
     env:
       OS: linux
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - name: build
         run: |
-          bash steps/init_env.sh
+          bash steps/init_env.sh ${{ env.HYBRIDSE_SOURCE }}
           mkdir -p build
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=ON .. && make -j$(nproc) && cd ../
           rm -rf thirdparty
@@ -62,10 +63,10 @@ jobs:
     container:
       image: ghcr.io/4paradigm/hybridsql:0.4.0
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - name: build
         run: |
-          bash steps/init_env.sh
+          bash steps/init_env.sh ${{ env.HYBRIDSE_SOURCE }}
           mkdir -p build
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=ON .. && make -j$(nproc) sql_sdk_test && cd ../
       - name: run sql_sdk_test
@@ -84,10 +85,10 @@ jobs:
     container:
       image: ghcr.io/4paradigm/hybridsql:0.4.0
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - name: build
         run: |
-          bash steps/init_env.sh
+          bash steps/init_env.sh ${{ env.HYBRIDSE_SOURCE }}
           mkdir -p build
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=ON .. && make -j$(nproc) sql_cluster_test && cd ../
       - name: run sql_sdk_test
@@ -110,7 +111,7 @@ jobs:
 
       - name: build jsdk and package
         run: |
-          bash steps/init_env.sh
+          bash steps/init_env.sh ${{ env.HYBRIDSE_SOURCE }}
           mkdir -p build
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=ON -DTESTING_ENABLE=OFF .. && make -j$(nproc) sql_javasdk_package openmldb && cd ../
 
@@ -137,10 +138,10 @@ jobs:
     container:
       image: ghcr.io/4paradigm/hybridsql:0.4.0
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - name: build pysdk and sqlalchemy
         run: |
-          bash steps/init_env.sh
+          bash steps/init_env.sh ${{ env.HYBRIDSE_SOURCE }}
           mkdir -p build
           source /root/.bashrc && cd build && cmake -DSQL_PYSDK_ENABLE=ON -DSQL_JAVASDK_ENABLE=OFF -DTESTING_ENABLE=OFF .. && make -j$(nproc) sqlalchemy_openmldb openmldb && cd ../
       - name: test sqlalchemy
@@ -208,8 +209,12 @@ jobs:
     needs: [ "build_and_cpp_ut", "sql_sdk_test", "sql_cluster_test", "java-sdk", "python-sdk" ]
     container:
       image: ghcr.io/4paradigm/hybridsql:0.4.0
+    # java deploy is triggered with a push to main or a tag push
+    # a 'vX.Y.Z' tag push will deploy a release version to maven central,
+    # any other push will deploy a SNAPSHOT version.
+    # see more in 'steps/package_openmldb_javasdk.sh'
     if: >
-      success() && startsWith(github.ref, 'refs/tags/v')
+      success() && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v2
 
@@ -230,10 +235,10 @@ jobs:
 
       - name: upload to maven
         run: |
-          bash steps/init_env.sh
+          bash steps/init_env.sh ${{ env.HYBRIDSE_SOURCE }}
           VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
-          VERSION=$(echo $VERSION | sed -e 's/^v//')
-          sh steps/package_openmldb_javasdk.sh $VERSION
+          VERSION=$(echo "$VERSION" | sed -e 's/^v//')
+          ./steps/package_openmldb_javasdk.sh "$VERSION"
         env:
           MAVEN_OPTS: -Duser.home=/github/home
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}

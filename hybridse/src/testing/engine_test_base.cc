@@ -379,7 +379,14 @@ Status EngineTestRunner::Compile() {
     if (hybridse::sqlcase::SqlCase::IsDebug() || sql_case_.debug()) {
         session_->EnableDebug();
     }
-    session_->SetParameterSchema(parameter_schema_);
+    if (session_->engine_mode() == kBatchMode) {
+        auto batch_session =
+            std::dynamic_pointer_cast<BatchRunSession>(session_);
+        batch_session->SetParameterSchema(parameter_schema_);
+    } else {
+        CHECK_TRUE(parameter_schema_.empty(), common::kUnSupport,
+                   "Request or BatchRequest mode do not support parameterized query currently")
+    }
     struct timeval st;
     struct timeval et;
     gettimeofday(&st, nullptr);
@@ -408,8 +415,10 @@ Status EngineTestRunner::Compile() {
 }
 
 void EngineTestRunner::RunCheck() {
-    if (!InitEngineCatalog()) {
-        LOG(ERROR) << "Engine Test Init Catalog Error";
+    bool ok = InitEngineCatalog();
+    if (!ok) {
+        return_code_ = ENGINE_TEST_INIT_CATALOG_ERROR;
+        FAIL() << "Engine Test Init Catalog Error";
         return;
     }
     auto engine_mode = session_->engine_mode();
@@ -534,7 +543,8 @@ INSTANTIATE_TEST_SUITE_P(EngineWindowWithUnionQuery, EngineTest,
 
 INSTANTIATE_TEST_SUITE_P(EngineBatchGroupQuery, EngineTest,
                         testing::ValuesIn(sqlcase::InitCases("/cases/query/group_query.yaml")));
-
+INSTANTIATE_TEST_SUITE_P(EngineBatchWhereGroupQuery, EngineTest,
+                         testing::ValuesIn(sqlcase::InitCases("/cases/query/where_group_query.yaml")));
 INSTANTIATE_TEST_SUITE_P(EngineTestWindowRowQuery, EngineTest,
                         testing::ValuesIn(sqlcase::InitCases("/cases/function/window/test_window_row.yaml")));
 
@@ -553,8 +563,8 @@ INSTANTIATE_TEST_SUITE_P(EngineTestLastJoinComplex, EngineTest,
                         testing::ValuesIn(sqlcase::InitCases("/cases/function/join/test_lastjoin_complex.yaml")));
 INSTANTIATE_TEST_SUITE_P(EngineTestArithmetic, EngineTest,
                         testing::ValuesIn(sqlcase::InitCases("/cases/function/expression/test_arithmetic.yaml")));
-INSTANTIATE_TEST_SUITE_P(EngineTestCompare, EngineTest,
-                        testing::ValuesIn(sqlcase::InitCases("/cases/function/expression/test_compare.yaml")));
+INSTANTIATE_TEST_SUITE_P(EngineTestPredicate, EngineTest,
+                        testing::ValuesIn(sqlcase::InitCases("/cases/function/expression/test_predicate.yaml")));
 INSTANTIATE_TEST_SUITE_P(EngineTestCondition, EngineTest,
                         testing::ValuesIn(sqlcase::InitCases("/cases/function/expression/test_condition.yaml")));
 INSTANTIATE_TEST_SUITE_P(EngineTestLogic, EngineTest,

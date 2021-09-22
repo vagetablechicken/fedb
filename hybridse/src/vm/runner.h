@@ -260,9 +260,9 @@ class FilterGenerator : public PredicateFun {
     const bool Valid() const {
         return index_seek_gen_.Valid() || condition_gen_.Valid();
     }
-    std::shared_ptr<TableHandler> Filter(std::shared_ptr<TableHandler> table,
+    std::shared_ptr<DataHandler> Filter(std::shared_ptr<TableHandler> table,
                                          const Row& parameter);
-    std::shared_ptr<TableHandler> Filter(
+    std::shared_ptr<DataHandler> Filter(
         std::shared_ptr<PartitionHandler> table, const Row& parameter);
     bool operator()(const Row& row, const Row& parameter) const override {
         if (!Valid()) {
@@ -1440,26 +1440,24 @@ class RunnerContext {
           batch_cache_() {}
     explicit RunnerContext(hybridse::vm::ClusterJob* cluster_job,
                            const hybridse::codec::Row& request,
-                           const hybridse::codec::Row& parameter,
                            const std::string& sp_name = "",
                            const bool is_debug = false)
         : cluster_job_(cluster_job),
           sp_name_(sp_name),
           request_(request),
           requests_(),
-          parameter_(parameter),
+          parameter_(),
           is_debug_(is_debug),
           batch_cache_() {}
     explicit RunnerContext(hybridse::vm::ClusterJob* cluster_job,
                            const std::vector<Row>& request_batch,
-                           const hybridse::codec::Row& parameter,
                            const std::string& sp_name = "",
                            const bool is_debug = false)
         : cluster_job_(cluster_job),
           sp_name_(sp_name),
           request_(),
           requests_(request_batch),
-          parameter_(parameter),
+          parameter_(),
           is_debug_(is_debug),
           batch_cache_() {}
 

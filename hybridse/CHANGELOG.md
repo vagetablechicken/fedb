@@ -1,18 +1,27 @@
 # Changelog
 
 ## [Unreleased]
-
-### SQL Syntax
-- Support parameterized query [#170](https://github.com/4paradigm/HybridSE/issues/170)
-- `nvl` & `nvl2`: [#190](https://github.com/4paradigm/HybridSE/pull/190)
-- bitwise operators: [#244](https://github.com/4paradigm/OpenMLDB/pull/244)
-
-## [0.2.1] - 2021-08-08
 ### Feature
-+ Add `VARCHAR` Type [#196](https://github.com/4paradigm/HybridSE/issues/196)
+- Support aggregation function, e.g. `COUNT`, `SUM`, `MIN`, `MAX`, `AVG`, over the whole table [#219](https://github.com/4paradigm/OpenMLDB/issues/219)
+- Enhance plan optimization on `GROUP` and `FILTER` op [#350](https://github.com/4paradigm/OpenMLDB/pull/350)
+
+## [0.2.3] - 2021-08-31
+### Feature
+- Support parameterized query under BatchMode [#262](https://github.com/4paradigm/OpenMLDB/issues/262)
+### SQL Syntax
+- `nvl` & `nvl2`:  [#238](https://github.com/4paradigm/OpenMLDB/issues/238)
+- bitwise operators: `&`, `|`, `^`, `~` [#244](https://github.com/4paradigm/OpenMLDB/pull/244)
+- between predicate: [#277](https://github.com/4paradigm/OpenMLDB/pull/277)
+
+## [0.2.1] - 2021-08-06
+### Feature
++ Add `VARCHAR` Type [#237](https://github.com/4paradigm/OpenMLDB/issues/237)
 
 ### Bug Fix
-- Fix invalid back qoute identifier name [#192](https://github.com/4paradigm/HybridSE/issues/192). Note: option key can't write as multiple path style (e.g a.b) now
+- Fix invalid back qoute identifier name [#263](https://github.com/4paradigm/OpenMLDB/issues/263). 
+  
+### Note: 
+`OPTIONS` can't write as multiple path style (e.g a.b) now
 
 ## [0.2.0] - 2021-07-16
 ### SQL Syntax
@@ -40,7 +49,8 @@ Removed
 - `||` and `&&` as logical operator: [#99](https://github.com/4paradigm/HybridSE/issues/99)
 - `at` function: [#136](https://github.com/4paradigm/HybridSE/pull/136)
 
-[Unreleased]: https://github.com/4paradigm/HybridSE/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/4paradigm/OpenMLDB/compare/hybridse-v0.2.3...HEAD
+[0.2.3]: https://github.com/4paradigm/OpenMLDB/releases/tag/hybridse-v0.2.3
 [0.2.1]: https://github.com/4paradigm/HybridSE/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/4paradigm/HybridSE/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/4paradigm/HybridSE/compare/v0.1.4...v0.1.5

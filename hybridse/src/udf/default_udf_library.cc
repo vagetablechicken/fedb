@@ -1319,7 +1319,7 @@ void DefaultUdfLibrary::InitUtilityUdf() {
         @param expr2   Return value if expr1 is not null
         @param expr3   Return value if expr1 is null
 
-        @since 0.3.0
+        @since 0.2.3
     )");
 }
 
@@ -1457,6 +1457,11 @@ void DefaultUdfLibrary::InitTypeUdf() {
         .returns<Nullable<Timestamp>>()
         .doc(R"(
             @brief Cast int64, date or string expression to timestamp
+
+            Supported string style:
+              - yyyy-mm-dd
+              - yyyymmdd
+              - yyyy-mm-dd hh:mm:ss
 
             Example:
 
