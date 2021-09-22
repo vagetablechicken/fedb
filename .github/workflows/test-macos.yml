@@ -16,4 +16,11 @@ jobs:
       - name: show xcode
         run: |
           ls /Applications/Xcode_12.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
-          
+      - name: Xcode Select
+        # You may pin to the exact commit or the version.
+        # uses: devbotsxyz/xcode-select@05f94658217eb8575f0aabd3b95e702a47995d21
+        uses: devbotsxyz/xcode-select@v1.1.0
+        with:
+          # Version to use (like '11.7', '12' or simply 'latest') macOS10.15 must lower than 12.1.1
+          version: 12.1.1
+          # Whether to select a beta release or not. Beta releases may not always be available.
