@@ -40,6 +40,7 @@ using IndexMap = std::map<std::string, std::vector<::openmldb::common::ColumnKey
 class IndexMapBuilder {
  public:
     // create the index with unset TTLSt
+    // map<table_keys_and_order_str, ttl_st>
     // TODO(hw): return false if the index(same table, same keys, same ts) existed?
     bool CreateIndex(const std::string& table, const hybridse::node::ExprListNode* keys,
                      const hybridse::node::OrderByNode* ts) {
@@ -55,7 +56,7 @@ class IndexMapBuilder {
     }
 
     static std::vector<std::string> NormalizeColumns(const std::string& table,
-                                                     std::vector<hybridse::node::ExprNode*> nodes) {
+                                                     const std::vector<hybridse::node::ExprNode*>& nodes) {
         if (table.empty() || nodes.empty()) {
             return {};
         }

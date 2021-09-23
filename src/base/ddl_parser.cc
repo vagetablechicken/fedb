@@ -62,8 +62,6 @@ bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range &range) {
         // frame_range is valid
         LOG_ASSERT(type != hybridse::node::kFrameRowsMergeRowsRange) << "merge type, how to parse?";
         LOG_ASSERT(frame->frame_rows() == nullptr && frame->GetHistoryRangeStart() < 0);
-        LOG(INFO) << "parse frame range, range start " << frame->GetHistoryRangeStart() << ", end "
-                  << frame->GetHistoryRangeEnd();
         // GetHistoryRangeStart is negative, ttl needs uint64
         ttl_st.set_abs_ttl(std::max(MIN_TIME, -1 * frame->GetHistoryRangeStart()));
         ttl_st.set_ttl_type(type::TTLType::kAbsoluteTime);
@@ -123,8 +121,6 @@ bool GroupAndSortOptimizedParser::KeysOptimizedParse(const SchemasContext *root_
                            << ", order=" << (order == nullptr ? "null" : hybridse::node::ExprString(order))
                            << " for table " << scan_op->table_handler_->GetName();
 
-                // map<table_name, map<keys_and_order_str, ttl_st>>
-                // TODO(hw): ttl default is ok?
                 index_map_builder_.CreateIndex(scan_op->table_handler_->GetName(), groups, order);
                 // parser won't create partition_op
                 return true;
