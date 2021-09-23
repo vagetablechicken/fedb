@@ -37,181 +37,144 @@ namespace openmldb::base {
 using namespace hybridse::vm;
 
 using IndexMap = std::map<std::string, std::vector<::openmldb::common::ColumnKey>>;
-#if 0
-class GroupAndSortOptimizedParser : public hybridse::passes::GroupAndSortOptimized {
+class IndexMapBuilder {
  public:
-    explicit GroupAndSortOptimizedParser(PhysicalPlanContext* plan_ctx)
-        : hybridse::passes::GroupAndSortOptimized(plan_ctx) {}
-
-    void Parse(PhysicalOpNode* in) {
-        LOG(INFO) << "parse ";
-
-        PhysicalOpNode* output = nullptr;
-        hybridse::passes::GroupAndSortOptimized::Transform(in, &output);
-    }
-
-    void GetIndexes() {}
-
- private:
-    IndexMap index_map_;
-};
-#endif
-
-// TODO(hw): needless?
-class LeftJoinOptimizedParser {
- public:
-    void TransformParse(PhysicalOpNode* in) {
-        if (nullptr == in) {
-            LOG(WARNING) << "LeftJoin optimized skip: node is null";
-            return;
-        }
-        if (in->producers().empty() || nullptr == in->producers()[0] ||
-            hybridse::vm::kPhysicalOpJoin != in->producers()[0]->GetOpType()) {
-            return;
-        }
-        auto* join_op = dynamic_cast<hybridse::vm::PhysicalJoinNode*>(in->producers()[0]);
-
-        auto join_type = join_op->join().join_type();
-        if (hybridse::node::kJoinTypeLeft != join_type && hybridse::node::kJoinTypeLast != join_type) {
-            // skip optimized for other join type
-            return;
-        }
-        switch (in->GetOpType()) {
-            case hybridse::vm::kPhysicalOpGroupBy: {
-                auto group_op = dynamic_cast<hybridse::vm::PhysicalGroupNode*>(in);
-                if (hybridse::node::ExprListNullOrEmpty(group_op->group_.keys_)) {
-                    LOG(WARNING) << "Join optimized skip: groups is null or empty";
-                    return;
-                }
-
-                if (!CheckExprListFromSchema(group_op->group_.keys_, join_op->GetProducers()[0]->GetOutputSchema())) {
-                    return;
-                }
-                auto group_expr = group_op->group_.keys_;
-                // 符合优化条件
-                std::ostringstream oss;
-                group_expr->Print(oss, "");
-                LOG(INFO) << "should group by " << oss.str();
-
-                // then create new join op, left producer is new group op.
-
-                return;
-            }
-            case hybridse::vm::kPhysicalOpSortBy: {
-                auto sort_op = dynamic_cast<hybridse::vm::PhysicalSortNode*>(in);
-                if (nullptr == sort_op->sort_.orders_ ||
-                    hybridse::node::ExprListNullOrEmpty(sort_op->sort_.orders_->order_expressions_)) {
-                    LOG(WARNING) << "Join optimized skip: order is null or empty";
-                    return;
-                }
-                if (!CheckExprListFromSchema(sort_op->sort_.orders_->order_expressions_,
-                                             join_op->GetProducers()[0]->GetOutputSchema())) {
-                    return;
-                }
-                // 符合优化条件
-                LOG(INFO) << "should sort by " << sort_op->sort_.ToString();
-
-                // then create new join op, left producer is new sort op.
-                return;
-            }
-            case hybridse::vm::kPhysicalOpProject: {
-                auto project_op = dynamic_cast<hybridse::vm::PhysicalProjectNode*>(in);
-                if (hybridse::vm::kWindowAggregation != project_op->project_type_) {
-                    return;
-                }
-
-                if (hybridse::node::kJoinTypeLast != join_type) {
-                    LOG(WARNING) << "Window Join optimized skip: join type should "
-                                    "be LAST JOIN, but "
-                                 << hybridse::node::JoinTypeName(join_type);
-                    return;
-                }
-                auto window_agg_op = dynamic_cast<hybridse::vm::PhysicalWindowAggrerationNode*>(in);
-                if (hybridse::node::ExprListNullOrEmpty(window_agg_op->window_.partition_.keys_) &&
-                    (nullptr == window_agg_op->window_.sort_.orders_ ||
-                     hybridse::node::ExprListNullOrEmpty(window_agg_op->window_.sort_.orders_->order_expressions_))) {
-                    LOG(WARNING) << "Window Join optimized skip: both partition and"
-                                    "order are empty ";
-                    return;
-                }
-                auto left_schemas_ctx = join_op->GetProducer(0)->schemas_ctx();
-                if (!CheckExprDependOnChildOnly(window_agg_op->window_.partition_.keys_, left_schemas_ctx).isOK()) {
-                    LOG(WARNING) << "Window Join optimized skip: partition keys "
-                                    "are resolved from secondary table";
-                    return;
-                }
-                if (!CheckExprDependOnChildOnly(window_agg_op->window_.sort_.orders_->order_expressions_,
-                                                left_schemas_ctx)
-                         .isOK()) {
-                    LOG(WARNING) << "Window Join optimized skip: order keys are "
-                                    "resolved from secondary table";
-                    return;
-                }
-
-                auto left = join_op->producers()[0];
-                auto right = join_op->producers()[1];
-                window_agg_op->AddWindowJoin(right, join_op->join());
-                // TODO(hw): should be recursive
-                //                if (!ResetProducer(plan_ctx_, window_agg_op, 0, left)) {
-                //                    return false;
-                //                }
-                //                Transform(window_agg_op);
-                //                *output = window_agg_op;
-                return;
-            }
-            default: {
-                return;
-            }
-        }
-    }
-
-    static bool CheckExprListFromSchema(const hybridse::node::ExprListNode* expr_list, const Schema* schema) {
-        if (hybridse::node::ExprListNullOrEmpty(expr_list)) {
-            DLOG_ASSERT(false) << "null or empty expr_list should quit before";
-            return true;
-        }
-
-        for (auto expr : expr_list->children_) {
-            switch (expr->expr_type_) {
-                case hybridse::node::kExprColumnRef: {
-                    auto column = dynamic_cast<hybridse::node::ColumnRefNode*>(expr);
-                    if (!ColumnExist(*schema, column->GetColumnName())) {
-                        return false;
-                    }
-                    break;
-                }
-                default: {
-                    // can't optimize when group by other expression
-                    return false;
-                }
-            }
-        }
+    // create the index with unset TTLSt
+    // TODO(hw): return false if the index(same table, same keys, same ts) existed?
+    bool CreateIndex(const std::string& table, const hybridse::node::ExprListNode* keys,
+                     const hybridse::node::OrderByNode* ts) {
+        // we encode table, keys and ts to one string
+        auto index = Encode(table, keys, ts);
+        LOG(INFO) << "create index with unset ttl: " << index;
+        latest_record_ = index;
         return true;
     }
-    static bool ColumnExist(const Schema& schema, const std::string& column_name) {
-        for (int32_t i = 0; i < schema.size(); i++) {
-            const hybridse::type::ColumnDef& column = schema.Get(i);
-            if (column_name == column.name()) {
-                return true;
+
+    // update latest created index by window info
+    bool UpdateIndex(int64_t start, int64_t end, int64_t cnt_start, int64_t cnt_end) {
+        if (latest_record_.empty()) {
+            LOG(ERROR) << "want to update ttl status, but index is not created before";
+            return false;
+        }
+        common::TTLSt ttl_st;
+        // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
+        ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
+        if (start != 0) {
+            // ms
+            ttl_st.set_abs_ttl(std::max(MIN_TIME, start));
+        }
+        if (cnt_start != 0) {
+            ttl_st.set_lat_ttl(cnt_start);
+        }
+        // only has latest
+        if (ttl_st.lat_ttl() > 0 && ttl_st.abs_ttl() == 0) {
+            ttl_st.set_ttl_type(type::TTLType::kLatestTime);
+        }
+        // only has abs
+        if (ttl_st.lat_ttl() == 0 && ttl_st.abs_ttl() > 0) {
+            ttl_st.set_ttl_type(type::TTLType::kAbsoluteTime);
+        }
+        index_map_[latest_record_] = ttl_st;
+        LOG(INFO) << latest_record_ << " update ttl " << index_map_[latest_record_].DebugString();
+
+        // to avoid double update
+        latest_record_.clear();
+        return true;
+    }
+
+    // table, keys and ts -> table:key1,key2,...;ts
+    static std::string Encode(const std::string& table, const hybridse::node::ExprListNode* keys,
+                              const hybridse::node::OrderByNode* ts) {
+        std::stringstream ss;
+        ss << table << ":";
+        // TODO(hw): keys need to sort?
+        auto iter = keys->children_.cbegin();
+        ss << (*iter)->GetExprString();
+        iter++;
+        for (; iter != keys->children_.cend(); iter++) {
+            // ColumnRefNode
+            ss << "," << (*iter)->GetExprString();
+        }
+        ss << ";";
+        // if ts is nullptr, we will get "...;", empty after ';'
+        if (ts != nullptr && ts->order_expressions_ != nullptr) {
+            for (auto order : ts->order_expressions_->children_) {
+                auto cast = dynamic_cast<hybridse::node::OrderExpression*>(order);
+                if (cast->expr() != nullptr) {
+                    ss << cast->expr()->GetExprString();
+                }
             }
         }
-        return false;
-    }
-    hybridse::base::Status CheckExprDependOnChildOnly(const hybridse::node::ExprNode* expr,
-                                                      const hybridse::vm::SchemasContext* child_schemas_ctx) {
-        std::set<size_t> column_ids;
-        return child_schemas_ctx->ResolveExprDependentColumns(expr, &column_ids);
+        return ss.str();
     }
 
-    void Parse(PhysicalOpNode* cur_op) {
-        // just parse, won't modify, but need to cast, so we use non-const producers.
-        auto& producers = cur_op->producers();
-        for (auto& producer : producers) {
-            Parse(producer);
+    static common::ColumnKey Decode(const std::string& index) { return {}; }
+
+    const int64_t MIN_TIME = 60 * 1000;
+    std::string latest_record_;
+    std::map<std::string, common::TTLSt> index_map_;
+    std::string GetTsCol(std::string index_str) { return ""; }
+    bool UpdateIndex(const Range& range) {
+        if (latest_record_.empty()) {
+            LOG(ERROR) << "want to update ttl status, but index is not created before";
+            return false;
         }
 
-        LOG(INFO) << "parse " << hybridse::vm::PhysicalOpTypeName(cur_op->GetOpType());
-        TransformParse(cur_op);
+        auto ts_col = GetTsCol(latest_record_);
+        if (range.range_key()->GetExprString() != ts_col) {
+            LOG(ERROR) << "want ts col " << ts_col << ", but get " << range.range_key()->GetExprString();
+            return false;
+        }
+
+        int64_t start = range.frame()->GetHistoryRangeStart(), end = 0,
+                rows_start = range.frame()->GetHistoryRowsStart(), rows_end = 0;
+        //        if (frame_range != nullptr) {
+        //            start = frame_range->start()->GetSignedOffset();
+        //            end = frame_range->end()->GetSignedOffset();
+        //        }
+        //        if (frame_rows != nullptr) {
+        //            rows_start = frame_rows->start()->GetSignedOffset();
+        //            rows_end = frame_rows->end()->GetSignedOffset();
+        //        }
+        LOG_ASSERT(start <= 0 && rows_start <= 0);
+
+        // TODO(hw): ROWS_RANGE 3 or 3d, which is absolute time, which is count? add a test
+        std::stringstream ss;
+        range.frame()->Print(ss, "");
+        LOG(INFO) << "frame info: " << ss.str() << ", get bounds: " << start << ", " << rows_start;
+
+        common::TTLSt ttl_st;
+
+        // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
+        ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
+        if(start<0){
+            ttl_st.set_abs_ttl(std::max(MIN_TIME, start));
+        }
+        auto frame = range.frame();
+        auto type = frame->frame_type();
+        if (type == hybridse::node::kFrameRows) {
+            // frame_rows is valid
+            LOG_ASSERT(frame->frame_range() == nullptr && frame->GetHistoryRowsStartPreceding() > 0);
+            ttl_st.set_abs_ttl(frame->GetHistoryRowsStartPreceding());
+            ttl_st.set_ttl_type(type::TTLType::kAbsoluteTime);
+        } else {
+            // frame_range is valid
+            // TODO(hw): maybe merge type, how to parse?
+            LOG_ASSERT(type != hybridse::node::kFrameRowsMergeRowsRange) << " can't parse now";
+            LOG_ASSERT(frame->frame_rows() == nullptr && frame->GetHistoryRangeStart() < 0);
+            LOG(INFO) << "parse frame range, range start " << frame->GetHistoryRangeStart() << ", end "
+                      << frame->GetHistoryRangeEnd();
+            // GetHistoryRangeStart is negative, ttl needs uint64
+            ttl_st.set_lat_ttl(-1 * frame->GetHistoryRangeStart());
+            ttl_st.set_ttl_type(type::TTLType::kLatestTime);
+        }
+
+        index_map_[latest_record_] = ttl_st;
+        LOG(INFO) << latest_record_ << " update ttl " << index_map_[latest_record_].DebugString();
+
+        // to avoid double update
+        latest_record_.clear();
+        return true;
     }
 };
 
@@ -251,15 +214,18 @@ class GroupAndSortOptimizedParser {
                     // scan_op->table_handler_ Return false if fail to find an appropriate index
                     auto groups = right_partition;
                     auto order = (nullptr == sort ? nullptr : sort->orders_);
-                    LOG(INFO) << "keys and order optimized: keys=" << hybridse::node::ExprString(groups)
-                              << ", order=" << (order == nullptr ? "null" : hybridse::node::ExprString(order))
-                              << " for table " << scan_op->table_handler_->GetName();
+                    DLOG(INFO) << "keys and order optimized: keys=" << hybridse::node::ExprString(groups)
+                               << ", order=" << (order == nullptr ? "null" : hybridse::node::ExprString(order))
+                               << " for table " << scan_op->table_handler_->GetName();
+
+                    // map<table_name, map<keys_and_order_str, ttl_st>>
+                    // TODO(hw): ttl default is ok?
+                    index_map_builder_.CreateIndex(scan_op->table_handler_->GetName(), groups, order);
                     // parser won't create partition_op
                     return true;
                 } else {
-                    // TODO(hw): needless?
-                    PhysicalPartitionProviderNode* partition_op = nullptr;
-                    partition_op = dynamic_cast<PhysicalPartitionProviderNode*>(scan_op);
+                    auto partition_op = dynamic_cast<PhysicalPartitionProviderNode*>(scan_op);
+                    LOG_ASSERT(partition_op != nullptr);
                     auto index_name = partition_op->index_name_;
                     // Apply key columns and order column optimization with given index name
                     // Return false if given index do not match the keys and order column
@@ -333,7 +299,7 @@ class GroupAndSortOptimizedParser {
                 if (GroupOptimizedParse(group_op->schemas_ctx(), group_op->GetProducer(0), &group_op->group_,
                                         &new_producer)) {
                     // TODO(hw): get key and ts, how about ttl?
-                    LOG(INFO) << "got index hints below";
+                    LOG(INFO) << "got index hints";
                 }
                 break;
             }
@@ -347,7 +313,7 @@ class GroupAndSortOptimizedParser {
                     if (!window_agg_op->instance_not_in_window()) {
                         if (KeyAndOrderOptimizedParse(input->schemas_ctx(), input, &window_agg_op->window_.partition_,
                                                       &window_agg_op->window_.sort_, &new_producer)) {
-                            LOG(INFO) << "got index hints below";
+                            LOG(INFO) << "got index hints";
                         }
                     }
                     // must prepare for window join column infer
@@ -362,7 +328,7 @@ class GroupAndSortOptimizedParser {
                             PhysicalOpNode* new_join_right;
                             if (JoinKeysOptimizedParse(cur_joined->schemas_ctx(), window_join.first,
                                                        &window_join.second, &new_join_right)) {
-                                LOG(INFO) << "got index hints below";
+                                LOG(INFO) << "got index hints";
                             }
                             join_idx += 1;
                         }
@@ -374,7 +340,7 @@ class GroupAndSortOptimizedParser {
                             if (KeyAndOrderOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
                                                           &window_union.second.partition_, &window_union.second.sort_,
                                                           &new_producer1)) {
-                                LOG(INFO) << "got index hints below";
+                                LOG(INFO) << "got index hints";
                             }
                         }
                     }
@@ -383,14 +349,15 @@ class GroupAndSortOptimizedParser {
             }
             case PhysicalOpType::kPhysicalOpRequestUnion: {
                 auto union_op = dynamic_cast<PhysicalRequestUnionNode*>(in);
-                PhysicalOpNode* new_producer;
-                // TODO(hw): get union_op->window_.range() here, parse ttl and type?
 
+                PhysicalOpNode* new_producer;
                 if (!union_op->instance_not_in_window()) {
-                    KeysAndOrderFilterOptimizedParse(union_op->schemas_ctx(), union_op->GetProducer(1),
-                                                     &union_op->window_.partition_, &union_op->window_.index_key_,
-                                                     &union_op->window_.sort_, &new_producer);
-                    LOG(INFO) << "got index hints below";
+                    if (KeysAndOrderFilterOptimizedParse(union_op->schemas_ctx(), union_op->GetProducer(1),
+                                                         &union_op->window_.partition_, &union_op->window_.index_key_,
+                                                         &union_op->window_.sort_, &new_producer)) {
+                        LOG(INFO) << "got index hints, add ttl info";
+                        index_map_builder_.UpdateIndex(union_op->window().range());
+                    }
                 }
 
                 if (!union_op->window_unions().Empty()) {
@@ -400,7 +367,7 @@ class GroupAndSortOptimizedParser {
                         if (KeysAndOrderFilterOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
                                                              &window.partition_, &window.index_key_, &window.sort_,
                                                              &new_producer1)) {
-                            LOG(INFO) << "got index hints below";
+                            LOG(INFO) << "got index hints";
                         }
                     }
                 }
@@ -412,7 +379,7 @@ class GroupAndSortOptimizedParser {
                 // Optimized Right Table Partition
                 if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
                                            &new_producer)) {
-                    LOG(INFO) << "got index hints below";
+                    LOG(INFO) << "got index hints";
                 }
 
                 break;
@@ -423,7 +390,7 @@ class GroupAndSortOptimizedParser {
                 // Optimized Right Table Partition
                 if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
                                            &new_producer)) {
-                    LOG(INFO) << "got index hints below";
+                    LOG(INFO) << "got index hints";
                 }
 
                 break;
@@ -433,7 +400,7 @@ class GroupAndSortOptimizedParser {
                 PhysicalOpNode* new_producer;
                 if (FilterOptimizedParse(filter_op->schemas_ctx(), filter_op->GetProducer(0), &filter_op->filter_,
                                          &new_producer)) {
-                    LOG(INFO) << "got index hints below";
+                    LOG(INFO) << "got index hints";
                 }
             }
             default: {
@@ -445,20 +412,20 @@ class GroupAndSortOptimizedParser {
     // LRD
     void Parse(PhysicalOpNode* cur_op) {
         LOG_ASSERT(cur_op != nullptr);
-        // just parse, won't modify, but need to cast, so we use non-const producers.
+        // just parse, won't modify, but need to cast ptr, so we use non-const producers.
         auto& producers = cur_op->producers();
         for (auto& producer : producers) {
             Parse(producer);
         }
 
-        LOG(INFO) << "parse " << hybridse::vm::PhysicalOpTypeName(cur_op->GetOpType());
+        DLOG(INFO) << "parse " << hybridse::vm::PhysicalOpTypeName(cur_op->GetOpType());
         TransformParse(cur_op);
     }
 
     IndexMap GetIndexes() { return {}; }
 
  private:
-    IndexMap index_map_;
+    IndexMapBuilder index_map_builder_;
 };
 
 class DDLParser {
@@ -472,7 +439,6 @@ class DDLParser {
 
         std::shared_ptr<hybridse::vm::CompileInfo> compile_info;
         if (!GetPlan(sql, catalog, db.name(), compile_info)) {
-            // TODO(hw):
             LOG(ERROR) << "sql get plan failed";
             return {};
         }
@@ -501,17 +467,7 @@ class DDLParser {
     static IndexMap ParseIndexes(const std::shared_ptr<Catalog>& catalog, hybridse::vm::PhysicalOpNode* node,
                                  hybridse::vm::SqlContext& ctx) {
         // This physical plan is optimized, but no real optimization about index(cuz no index in fake catalog).
-        // So we can apply optimization parser(very like transformer's pass-ApplyPasses)
-
-        // Transform needs too many configs. Just imitate GroupAndSortOptimized
-        //  GroupAndSortOptimized pass(&plan_ctx_); -> plan_ctx_
-        //  transformed = pass.Apply(cur_op, &new_op);
-
-        // Request mode RequestModeTransformer way, it should modify hybridse:
-        // should use a new ctx?
-        //        PhysicalPlanContext plan_ctx(&ctx.nm, ctx.udf_library, ctx.db, catalog, &ctx.parameter_types,
-        //                                     ctx.enable_expr_optimize);
-
+        // So we can run GroupAndSortOptimizedParser on the plan(very like transformer's pass-ApplyPasses)
         GroupAndSortOptimizedParser parser;
         parser.Parse(node);
         return parser.GetIndexes();

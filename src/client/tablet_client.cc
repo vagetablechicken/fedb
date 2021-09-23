@@ -70,8 +70,7 @@ bool TabletClient::Query(const std::string& db, const std::string& sql, const st
 }
 
 bool TabletClient::Query(const std::string& db, const std::string& sql,
-                         const std::vector<openmldb::type::DataType>& parameter_types,
-                         const std::string& parameter_row,
+                         const std::vector<openmldb::type::DataType>& parameter_types, const std::string& parameter_row,
                          brpc::Controller* cntl, ::openmldb::api::QueryResponse* response, const bool is_debug) {
     if (cntl == NULL || response == NULL) return false;
     ::openmldb::api::QueryRequest request;
