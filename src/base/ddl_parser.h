@@ -19,6 +19,8 @@
 // TODO(hw):
 #include <llvm/ADT/STLExtras.h>
 
+#include <utility>
+
 #include "codec/schema_codec.h"
 #include "common/timer.h"
 #include "passes/physical/group_and_sort_optimized.h"
@@ -37,8 +39,10 @@ namespace openmldb::base {
 using namespace hybridse::vm;
 
 using IndexMap = std::map<std::string, std::vector<::openmldb::common::ColumnKey>>;
+std::ostream& operator<<(std::ostream& os, IndexMap& index_map);
 class IndexMapBuilder {
  public:
+    explicit IndexMapBuilder(std::shared_ptr<Catalog> cl) : cl_(std::move(cl)) {}
     // create the index with unset TTLSt
     // map<table_keys_and_order_str, ttl_st>
     // TODO(hw): return false if the index(same table, same keys, same ts) existed?
@@ -47,10 +51,20 @@ class IndexMapBuilder {
         // we encode table, keys and ts to one string
         auto index = Encode(table, keys, ts);
         if (index.empty()) {
-            LOG(WARNING) << "index encode failed";
+            LOG(WARNING) << "index encode failed for table " << table;
+            return false;
+        }
+
+        if (index_map_.find(index) != index_map_.end()) {
+            LOG(DFATAL) << "already set, needs merge?";
             return false;
         }
         LOG(INFO) << "create index with unset ttl: " << index;
+        common::TTLSt ttl_st;
+        // TODO(hw): how about ttl vals?
+        // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
+        ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
+        index_map_[index] = ttl_st;
         latest_record_ = index;
         return true;
     }
@@ -74,44 +88,15 @@ class IndexMapBuilder {
         return result;
     }
     // table, keys and ts -> table:key1,key2,...;ts
-    static std::string Encode(const std::string& table, const hybridse::node::ExprListNode* keys,
-                              const hybridse::node::OrderByNode* ts) {
-        // children are ColumnRefNode
-        auto cols = NormalizeColumns(table, keys->children_);
-        if (cols.empty()) {
-            return {};
-        }
-
-        std::stringstream ss;
-        ss << table << ":";
-        auto iter = cols.begin();
-        ss << (*iter);
-        iter++;
-        for (; iter != cols.end(); iter++) {
-            ss << "," << (*iter);
-        }
-        ss << ";";
-
-        if (ts != nullptr && ts->order_expressions_ != nullptr) {
-            for (auto order : ts->order_expressions_->children_) {
-                auto cast = dynamic_cast<hybridse::node::OrderExpression*>(order);
-                if (cast->expr() != nullptr) {
-                    ss << cast->expr()->GetExprString();
-                }
-            }
-        } else {
-            // If no ts, we should find one column which type is int64/timestamp?
-            // TODO(hw): need schema?
-            LOG(INFO) << "todo";
-        }
-        return ss.str();
-    }
+    std::string Encode(const std::string& table, const hybridse::node::ExprListNode* keys,
+                       const hybridse::node::OrderByNode* ts);
 
     static std::pair<std::string, common::ColumnKey> Decode(const std::string& index_str) {
         if (index_str.empty()) {
             return {};
         }
 
+        // TODO(hw): use functions
         auto key_sep = index_str.find(KEY_MARK);
         auto table_name = index_str.substr(0, key_sep);
 
@@ -145,13 +130,23 @@ class IndexMapBuilder {
         return index_str.substr(ts_begin);
     }
 
+    static std::string GetTable(const std::string& index_str) {
+        if (index_str.empty()) {
+            return {};
+        }
+        auto key_sep = index_str.find(KEY_MARK);
+        return index_str.substr(0, key_sep);
+    }
     bool UpdateIndex(const hybridse::vm::Range& range);
     IndexMap ToMap();
+
+    std::shared_ptr<Catalog> cl_;
 };
 
 // no plan_ctx_, node_manager_: we assume that creating new op won't affect the upper level structure.
 class GroupAndSortOptimizedParser {
  public:
+    explicit GroupAndSortOptimizedParser(const std::shared_ptr<Catalog>& cl) : index_map_builder_(cl) {}
     // recursive parse, return true iff kProviderTypeTable optimized
     // new_in is useless, but we keep it, GroupAndSortOptimizedParser will be more similar to GroupAndSortOptimized.
     bool KeysOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* left_key, Key* index_key,
@@ -207,8 +202,8 @@ class GroupAndSortOptimizedParser {
                 PhysicalOpNode* new_producer;
                 if (GroupOptimizedParse(group_op->schemas_ctx(), group_op->GetProducer(0), &group_op->group_,
                                         &new_producer)) {
-                    // TODO(hw): get key and ts, how about ttl?
-                    LOG(INFO) << "got index hints";
+                    // no orders->no sort->no ttl info
+                    DLOG(INFO) << "ttl won't update";
                 }
                 break;
             }
@@ -222,7 +217,7 @@ class GroupAndSortOptimizedParser {
                     if (!window_agg_op->instance_not_in_window()) {
                         if (KeyAndOrderOptimizedParse(input->schemas_ctx(), input, &window_agg_op->window_.partition_,
                                                       &window_agg_op->window_.sort_, &new_producer)) {
-                            LOG(INFO) << "got index hints";
+                            index_map_builder_.UpdateIndex(window_agg_op->window_.range());
                         }
                     }
                     // must prepare for window join column infer
@@ -237,7 +232,8 @@ class GroupAndSortOptimizedParser {
                             PhysicalOpNode* new_join_right;
                             if (JoinKeysOptimizedParse(cur_joined->schemas_ctx(), window_join.first,
                                                        &window_join.second, &new_join_right)) {
-                                LOG(INFO) << "got index hints";
+                                // no range info
+                                DLOG(INFO) << "ttl won't update";
                             }
                             join_idx += 1;
                         }
@@ -249,7 +245,7 @@ class GroupAndSortOptimizedParser {
                             if (KeyAndOrderOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
                                                           &window_union.second.partition_, &window_union.second.sort_,
                                                           &new_producer1)) {
-                                LOG(INFO) << "got index hints";
+                                index_map_builder_.UpdateIndex(window_union.second.range());
                             }
                         }
                     }
@@ -264,8 +260,7 @@ class GroupAndSortOptimizedParser {
                     if (KeysAndOrderFilterOptimizedParse(union_op->schemas_ctx(), union_op->GetProducer(1),
                                                          &union_op->window_.partition_, &union_op->window_.index_key_,
                                                          &union_op->window_.sort_, &new_producer)) {
-                        LOG(INFO) << "got index hints, add ttl info";
-                        LOG_ASSERT(index_map_builder_.UpdateIndex(union_op->window().range())) << "for debug";
+                        index_map_builder_.UpdateIndex(union_op->window().range());
                     }
                 }
 
@@ -276,7 +271,7 @@ class GroupAndSortOptimizedParser {
                         if (KeysAndOrderFilterOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
                                                              &window.partition_, &window.index_key_, &window.sort_,
                                                              &new_producer1)) {
-                            LOG(INFO) << "got index hints";
+                            index_map_builder_.UpdateIndex(window.range());
                         }
                     }
                 }
@@ -288,7 +283,8 @@ class GroupAndSortOptimizedParser {
                 // Optimized Right Table Partition
                 if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
                                            &new_producer)) {
-                    LOG(INFO) << "got index hints";
+                    // no range info
+                    DLOG(INFO) << "ttl won't update";
                 }
 
                 break;
@@ -299,7 +295,8 @@ class GroupAndSortOptimizedParser {
                 // Optimized Right Table Partition
                 if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
                                            &new_producer)) {
-                    LOG(INFO) << "got index hints";
+                    // no range info
+                    DLOG(INFO) << "ttl won't update";
                 }
 
                 break;
@@ -309,7 +306,8 @@ class GroupAndSortOptimizedParser {
                 PhysicalOpNode* new_producer;
                 if (FilterOptimizedParse(filter_op->schemas_ctx(), filter_op->GetProducer(0), &filter_op->filter_,
                                          &new_producer)) {
-                    LOG(INFO) << "got index hints";
+                    // no range info
+                    DLOG(INFO) << "ttl won't update";
                 }
             }
             default: {
@@ -339,15 +337,19 @@ class GroupAndSortOptimizedParser {
 
 class DDLParser {
  public:
-    static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ExtractIndexes(
-        const std::string& sql, const ::hybridse::type::Database& db) {
+    static constexpr const char* DB_NAME = "ddl_parser_db";
+    // tables are in one db, and db name will be rewritten for simplicity
+    static IndexMap ExtractIndexes(const std::string& sql, const ::hybridse::type::Database& db) {
         // To show index-based-optimization -> IndexSupport() == true -> whether to do LeftJoinOptimized
         // tablet catalog supports index, so we should add index support too
         auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>(true);
-        catalog->AddDatabase(db);
+        auto cp = db;
+        LOG(INFO) << "test " << DB_NAME;
+        cp.set_name(DB_NAME);
+        catalog->AddDatabase(cp);
 
         std::shared_ptr<hybridse::vm::CompileInfo> compile_info;
-        if (!GetPlan(sql, catalog, db.name(), compile_info)) {
+        if (!GetRequestPlan(sql, catalog, cp.name(), compile_info)) {
             LOG(ERROR) << "sql get plan failed";
             return {};
         }
@@ -361,7 +363,33 @@ class DDLParser {
         auto& ctx = std::dynamic_pointer_cast<SqlCompileInfo>(compile_info)->get_sql_context();
         return ParseIndexes(catalog, const_cast<hybridse::vm::PhysicalOpNode*>(plan), ctx);
     }
-    static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ExtractIndexes(
+
+    // TODO(hw): refactor
+    static IndexMap ExtractIndexesForBatch(const std::string& sql, const ::hybridse::type::Database& db) {
+        // To show index-based-optimization -> IndexSupport() == true -> whether to do LeftJoinOptimized
+        // tablet catalog supports index, so we should add index support too
+        auto catalog = std::make_shared<hybridse::vm::SimpleCatalog>(true);
+        auto cp = db;
+        cp.set_name(DB_NAME);
+        catalog->AddDatabase(cp);
+
+        std::shared_ptr<hybridse::vm::CompileInfo> compile_info;
+        if (!GetBatchPlan(sql, catalog, cp.name(), compile_info)) {
+            LOG(ERROR) << "sql get plan failed";
+            return {};
+        }
+        auto plan = compile_info->GetPhysicalPlan();
+
+        //        std::vector<hybridse::vm::PhysicalOpNode*> nodes;
+        //        // TODO(hw): cast from needs to remove 'const'
+        //        DagToList(const_cast<hybridse::vm::PhysicalOpNode*>(plan), nodes);
+        //        ParseIndexes(nodes);
+
+        auto& ctx = std::dynamic_pointer_cast<SqlCompileInfo>(compile_info)->get_sql_context();
+        return ParseIndexes(catalog, const_cast<hybridse::vm::PhysicalOpNode*>(plan), ctx);
+    }
+
+    static IndexMap ExtractIndexes(
         const std::string& sql,
         const std::map<std::string, ::google::protobuf::RepeatedPtrField<::openmldb::common::ColumnDesc>>& schemas) {
         ::hybridse::type::Database db;
@@ -376,7 +404,7 @@ class DDLParser {
                                  hybridse::vm::SqlContext& ctx) {
         // This physical plan is optimized, but no real optimization about index(cuz no index in fake catalog).
         // So we can run GroupAndSortOptimizedParser on the plan(very like transformer's pass-ApplyPasses)
-        GroupAndSortOptimizedParser parser;
+        GroupAndSortOptimizedParser parser(catalog);
         parser.Parse(node);
         return parser.GetIndexes();
     }
@@ -466,8 +494,8 @@ class DDLParser {
         }
     }
 
-    static bool GetPlan(const std::string& sql, const std::shared_ptr<Catalog>& catalog, const std::string& db,
-                        std::shared_ptr<::hybridse::vm::CompileInfo>& compile_info) {
+    static bool GetRequestPlan(const std::string& sql, const std::shared_ptr<Catalog>& catalog, const std::string& db,
+                               std::shared_ptr<::hybridse::vm::CompileInfo>& compile_info) {
         // TODO(hw): engine is input, do not create in here
         ::hybridse::vm::Engine::InitializeGlobalLLVM();
 
@@ -478,6 +506,28 @@ class DDLParser {
         auto engine = std::make_shared<hybridse::vm::Engine>(catalog, options);
 
         ::hybridse::vm::RequestRunSession session;
+        ::hybridse::base::Status status;
+        auto ok = engine->Get(sql, db, session, status);
+        if (!(ok && status.isOK())) {
+            LOG(WARNING) << "hybrid engine compile sql failed, " << status.msg << ", " << status.trace;
+            return false;
+        }
+        compile_info = session.GetCompileInfo();
+        return true;
+    }
+
+    static bool GetBatchPlan(const std::string& sql, const std::shared_ptr<Catalog>& catalog, const std::string& db,
+                             std::shared_ptr<::hybridse::vm::CompileInfo>& compile_info) {
+        // TODO(hw): engine is input, do not create in here
+        ::hybridse::vm::Engine::InitializeGlobalLLVM();
+
+        ::hybridse::vm::EngineOptions options;
+        options.set_keep_ir(true);
+        options.set_compile_only(true);
+        options.set_performance_sensitive(false);
+        auto engine = std::make_shared<hybridse::vm::Engine>(catalog, options);
+
+        ::hybridse::vm::BatchRunSession session;
         ::hybridse::base::Status status;
         auto ok = engine->Get(sql, db, session, status);
         if (!(ok && status.isOK())) {

@@ -62,7 +62,7 @@ TEST_F(DDLParserTest, physicalPlan) {
 
     std::shared_ptr<hybridse::vm::CompileInfo> compile_info;
     // failed if sql is empty
-    //    ASSERT_FALSE(DDLParser::GetPlan(sp, db, compile_info));
+    //    ASSERT_FALSE(DDLParser::GetRequestPlan(sp, db, compile_info));
 
     sp = "SELECT  behaviourTable.itemId as itemId,  behaviourTable.ip as ip,  behaviourTable.query as query,  "
          "behaviourTable.mcuid as mcuid,  adinfo.brandName as name,  adinfo.brandId as brandId,  "
@@ -87,13 +87,13 @@ TEST_F(DDLParserTest, physicalPlan) {
                              {"itemId", "string", "reqId", "string", "instanceKey", "string", "eventTime", "timestamp",
                               "ingestionTime", "timestamp", "actionValue", "int"}));
 
-    //    ASSERT_TRUE(DDLParser::GetPlan(sp, db, compile_info));
+    //    ASSERT_TRUE(DDLParser::GetRequestPlan(sp, db, compile_info));
     //    std::cout << "physical plan: " << std::endl;
     //    compile_info->DumpPhysicalPlan(std::cout, "\t");
     //    std::cout << std::endl;
 
     sp = "SELECT * FROM behaviourTable as t1 left join feedbackTable as t2 on t1.itemId = t2.itemId;";
-    //    ASSERT_TRUE(DDLParser::GetPlan(sp, db, compile_info));
+    //    ASSERT_TRUE(DDLParser::GetRequestPlan(sp, db, compile_info));
     //    std::cout << "physical plan: " << std::endl;
     //    compile_info->DumpPhysicalPlan(std::cout, "\t");
     //    std::cout << std::endl;
@@ -305,16 +305,18 @@ TEST_F(DDLParserTest, extractIndexesTime) {
         "FROM t1 WINDOW w1 AS (PARTITION BY col1 ORDER BY col5 "
         "ROWS BETWEEN 3 "
         "PRECEDING AND CURRENT ROW) limit 10;";
-    auto indexes_map = DDLParser::ExtractIndexes(sql, db);
-    std::stringstream ss;
-    for (auto& indexes : indexes_map) {
-        ss << indexes.first << "[";
-        for (auto& ck : indexes.second) {
-            ss << ck.ShortDebugString() << ", ";
-        }
-        ss << "]";
+    auto index_map = DDLParser::ExtractIndexes(sql, db);
+    LOG(INFO) << "result: " << index_map;
+
+    {
+        // parse GROUP_BY, no orders
+        auto sql = "SELECT sum(col1) as col1sum FROM t1 group by col3, col2, col1;";
+        auto index_map = DDLParser::ExtractIndexesForBatch(sql, db);
+        LOG(INFO) << "result: " << index_map;
+
+        index_map = DDLParser::ExtractIndexes(sql, db);
+        LOG(INFO) << "result: " << index_map;
     }
-    LOG(INFO) << ss.str();
 }
 }  // namespace openmldb::base
 

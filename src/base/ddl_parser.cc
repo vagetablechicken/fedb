@@ -21,21 +21,21 @@
 namespace openmldb::base {
 
 bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range &range) {
-    if (latest_record_.empty()) {
-        LOG(ERROR) << "want to update ttl status, but index is not created before";
+    if (latest_record_.empty() || index_map_.find(latest_record_) == index_map_.end()) {
+        LOG(DFATAL) << "want to update ttl status, but index is not created before";
         return false;
     }
-
     auto ts_col = GetTsCol(latest_record_);
+
+    if (!range.Valid()) {
+        LOG(INFO) << "range is invalid, can't update ttl, use the default";
+        return true;
+    }
     if (range.range_key()->GetExprString() != ts_col) {
         LOG(ERROR) << "want ts col " << ts_col << ", but get " << range.range_key()->GetExprString();
         return false;
     }
 
-    if (index_map_.find(latest_record_) != index_map_.end()) {
-        LOG(WARNING) << "already set, needs merge?";
-        return false;
-    }
     auto frame = range.frame();
     auto start = frame->GetHistoryRangeStart();
     auto rows_start = frame->GetHistoryRowsStart();
@@ -47,10 +47,6 @@ bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range &range) {
     LOG(INFO) << "frame info: " << ss.str() << ", get bounds: " << start << ", " << rows_start;
 
     common::TTLSt ttl_st;
-
-    // TODO(hw): ?
-    // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
-    //        ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
 
     auto type = frame->frame_type();
     if (type == hybridse::node::kFrameRows) {
@@ -83,6 +79,52 @@ IndexMap IndexMapBuilder::ToMap() {
     }
 
     return result;
+}
+
+std::string IndexMapBuilder::Encode(const std::string &table, const hybridse::node::ExprListNode *keys,
+                                    const hybridse::node::OrderByNode *ts) {
+    // children are ColumnRefNode
+    auto cols = NormalizeColumns(table, keys->children_);
+    if (cols.empty()) {
+        return {};
+    }
+
+    std::stringstream ss;
+    ss << table << ":";
+    auto iter = cols.begin();
+    ss << (*iter);
+    iter++;
+    for (; iter != cols.end(); iter++) {
+        ss << "," << (*iter);
+    }
+    ss << ";";
+
+    if (ts != nullptr && ts->order_expressions_ != nullptr) {
+        for (auto order : ts->order_expressions_->children_) {
+            auto cast = dynamic_cast<hybridse::node::OrderExpression *>(order);
+            if (cast->expr() != nullptr) {
+                ss << cast->expr()->GetExprString();
+            }
+        }
+    } else {
+        // If no ts, we should find one column which type is int64/timestamp
+        auto schema = cl_->GetTable(DDLParser::DB_NAME, table)->GetSchema();
+        bool find_ts = false;
+        for (auto &col : *schema) {
+            // key cols can be ts too, no need to check
+            // ts col type == ::openmldb::type::kBigInt || type == ::openmldb::type::kTimestamp
+            if (col.type() == hybridse::type::kInt64 || col.type() == hybridse::type::kTimestamp) {
+                ss << col.name();
+                find_ts = true;
+                break;
+            }
+        }
+        if (!find_ts) {
+            LOG(ERROR) << "can't find one col to be ts col";
+            return {};
+        }
+    }
+    return ss.str();
 }
 
 bool GroupAndSortOptimizedParser::KeysOptimizedParse(const SchemasContext *root_schemas_ctx, PhysicalOpNode *in,
@@ -147,5 +189,16 @@ bool GroupAndSortOptimizedParser::KeysOptimizedParse(const SchemasContext *root_
                                   &new_depend);
     }
     return false;
+}
+
+std::ostream &operator<<(std::ostream &os, IndexMap &index_map) {
+    for (auto &indexes : index_map) {
+        os << " {" << indexes.first << "[";
+        for (auto &ck : indexes.second) {
+            os << ck.ShortDebugString() << ", ";
+        }
+        os << "]} ";
+    }
+    return os;
 }
 }  // namespace openmldb::base
