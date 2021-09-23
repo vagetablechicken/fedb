@@ -56,11 +56,15 @@ AddPass(PhysicalPlanPassType::kPassClusterOptimized);
 
 从上面passes的简要分析中，我们可以看出，如果想要解析出indexes，我们就模拟GroupAndSortOptimized的逻辑，当它想要match best index时，我们根据当时的信息生成出index。那么当table存在这样的index时，GroupAndSortOptimized就能利用indexes优化计划。
 
+### GroupAndSortOptimizedParser
+
 我们将GroupAndSortOptimized的index解析逻辑，封装为GroupAndSortOptimizedParser。
 
 GroupAndSortOptimizedParser不可避免地和GroupAndSortOptimized的代码结构很像，但考虑到GroupAndSortOptimized依赖的东西较多，要在DDLParser内部单独运行就需要很多改动，而且让一个TransformUpPysicalPass的派生类做index提取，容易让人困惑。所以我们还是让GroupAndSortOptimizedParser独立，便于迭代。
 
+整个GroupAndSortOptimized优化逻辑可以理解为，对某个node，比如window node，我们选择进行某种具体的optimized策略，会进行find best index，返回bool表示成功与否。
 
+那么，我们可以将GroupAndSortOptimizedParser逻辑设计为，对某个node，我们先提取ttl info，然后进行optimizedparse，其中可以find best index的地方就新建这个index。
 
 
 

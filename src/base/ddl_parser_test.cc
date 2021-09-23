@@ -271,6 +271,51 @@ TEST_F(DDLParserTest, extractIndexes) {
         "PRECEDING AND CURRENT ROW) limit 10;";
     DDLParser::ExtractIndexes(sql, db);
 }
+TEST_F(DDLParserTest, extractIndexesTime) {
+    ASSERT_TRUE(AddTableToDB(db, "t1",
+                             {"col0", "string", "col1", "int32", "col2", "int16", "col3", "float", "col4", "double",
+                              "col5", "int64", "col6", "string"}));
+
+    auto sql =
+        "SELECT "
+        "col1, "
+        "sum(col3) OVER w1 as w1_col3_sum, "
+        "sum(col2) OVER w1 as w1_col2_sum "
+        "FROM t1 WINDOW w1 AS (PARTITION BY col1 ORDER BY col5 "
+        "ROWS_RANGE BETWEEN 3d "
+        "PRECEDING AND CURRENT ROW) limit 10;";
+    DDLParser::ExtractIndexes(sql, db);
+
+    // < 1min preceding -> 1min start
+    sql =
+        "SELECT "
+        "col1, "
+        "sum(col3) OVER w1 as w1_col3_sum, "
+        "sum(col2) OVER w1 as w1_col2_sum "
+        "FROM t1 WINDOW w1 AS (PARTITION BY col1 ORDER BY col5 "
+        "ROWS_RANGE BETWEEN 3s "
+        "PRECEDING AND CURRENT ROW) limit 10;";
+    DDLParser::ExtractIndexes(sql, db);
+
+    sql =
+        "SELECT "
+        "col1, "
+        "sum(col3) OVER w1 as w1_col3_sum, "
+        "sum(col2) OVER w1 as w1_col2_sum "
+        "FROM t1 WINDOW w1 AS (PARTITION BY col1 ORDER BY col5 "
+        "ROWS BETWEEN 3 "
+        "PRECEDING AND CURRENT ROW) limit 10;";
+    auto indexes_map = DDLParser::ExtractIndexes(sql, db);
+    std::stringstream ss;
+    for (auto& indexes : indexes_map) {
+        ss << indexes.first << "[";
+        for (auto& ck : indexes.second) {
+            ss << ck.ShortDebugString() << ", ";
+        }
+        ss << "]";
+    }
+    LOG(INFO) << ss.str();
+}
 }  // namespace openmldb::base
 
 int main(int argc, char** argv) {

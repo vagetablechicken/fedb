@@ -45,58 +45,52 @@ class IndexMapBuilder {
                      const hybridse::node::OrderByNode* ts) {
         // we encode table, keys and ts to one string
         auto index = Encode(table, keys, ts);
+        if (index.empty()) {
+            LOG(WARNING) << "index encode failed";
+            return false;
+        }
         LOG(INFO) << "create index with unset ttl: " << index;
         latest_record_ = index;
         return true;
     }
 
-    // update latest created index by window info
-    bool UpdateIndex(int64_t start, int64_t end, int64_t cnt_start, int64_t cnt_end) {
-        if (latest_record_.empty()) {
-            LOG(ERROR) << "want to update ttl status, but index is not created before";
-            return false;
+    static std::vector<std::string> NormalizeColumns(const std::string& table,
+                                                     std::vector<hybridse::node::ExprNode*> nodes) {
+        if (table.empty() || nodes.empty()) {
+            return {};
         }
-        common::TTLSt ttl_st;
-        // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
-        ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
-        if (start != 0) {
-            // ms
-            ttl_st.set_abs_ttl(std::max(MIN_TIME, start));
+        std::vector<std::string> result;
+        for (auto& node : nodes) {
+            auto cast = hybridse::node::ColumnRefNode::CastFrom(node);
+            if (!cast->GetRelationName().empty() && cast->GetRelationName() != table) {
+                LOG(WARNING) << "col is from table " << cast->GetRelationName() << ", not from " << table;
+                return {};
+            }
+            result.emplace_back(cast->GetColumnName());
         }
-        if (cnt_start != 0) {
-            ttl_st.set_lat_ttl(cnt_start);
-        }
-        // only has latest
-        if (ttl_st.lat_ttl() > 0 && ttl_st.abs_ttl() == 0) {
-            ttl_st.set_ttl_type(type::TTLType::kLatestTime);
-        }
-        // only has abs
-        if (ttl_st.lat_ttl() == 0 && ttl_st.abs_ttl() > 0) {
-            ttl_st.set_ttl_type(type::TTLType::kAbsoluteTime);
-        }
-        index_map_[latest_record_] = ttl_st;
-        LOG(INFO) << latest_record_ << " update ttl " << index_map_[latest_record_].DebugString();
-
-        // to avoid double update
-        latest_record_.clear();
-        return true;
+        // sort to avoid dup index
+        std::sort(result.begin(), result.end());
+        return result;
     }
-
     // table, keys and ts -> table:key1,key2,...;ts
     static std::string Encode(const std::string& table, const hybridse::node::ExprListNode* keys,
                               const hybridse::node::OrderByNode* ts) {
+        // children are ColumnRefNode
+        auto cols = NormalizeColumns(table, keys->children_);
+        if (cols.empty()) {
+            return {};
+        }
+
         std::stringstream ss;
         ss << table << ":";
-        // TODO(hw): keys need to sort?
-        auto iter = keys->children_.cbegin();
-        ss << (*iter)->GetExprString();
+        auto iter = cols.begin();
+        ss << (*iter);
         iter++;
-        for (; iter != keys->children_.cend(); iter++) {
-            // ColumnRefNode
-            ss << "," << (*iter)->GetExprString();
+        for (; iter != cols.end(); iter++) {
+            ss << "," << (*iter);
         }
         ss << ";";
-        // if ts is nullptr, we will get "...;", empty after ';'
+
         if (ts != nullptr && ts->order_expressions_ != nullptr) {
             for (auto order : ts->order_expressions_->children_) {
                 auto cast = dynamic_cast<hybridse::node::OrderExpression*>(order);
@@ -104,78 +98,54 @@ class IndexMapBuilder {
                     ss << cast->expr()->GetExprString();
                 }
             }
+        } else {
+            // If no ts, we should find one column which type is int64/timestamp?
+            // TODO(hw): need schema?
+            LOG(INFO) << "todo";
         }
         return ss.str();
     }
 
-    static common::ColumnKey Decode(const std::string& index) { return {}; }
+    static std::pair<std::string, common::ColumnKey> Decode(const std::string& index_str) {
+        if (index_str.empty()) {
+            return {};
+        }
 
-    const int64_t MIN_TIME = 60 * 1000;
+        auto key_sep = index_str.find(KEY_MARK);
+        auto table_name = index_str.substr(0, key_sep);
+
+        common::ColumnKey column_key;
+        auto ts_sep = index_str.find(TS_MARK);
+        auto keys_str = index_str.substr(key_sep + 1, ts_sep - key_sep - 1);
+        // split keys
+        std::vector<std::string> keys;
+        boost::split(keys, keys_str, boost::is_any_of(std::string(1, KEY_SEP)));
+        for (auto& key : keys) {
+            LOG_ASSERT(!key.empty());
+            column_key.add_col_name(key);
+        }
+        auto ts = index_str.substr(ts_sep + 1);
+        column_key.set_ts_name(ts);
+        return std::make_pair(table_name, column_key);
+    }
+
+    static constexpr int64_t MIN_TIME = 60 * 1000;
+    static constexpr char KEY_MARK = ':';
+    static constexpr char KEY_SEP = ',';
+    static constexpr char TS_MARK = ';';
+
     std::string latest_record_;
     std::map<std::string, common::TTLSt> index_map_;
-    std::string GetTsCol(std::string index_str) { return ""; }
-    bool UpdateIndex(const Range& range) {
-        if (latest_record_.empty()) {
-            LOG(ERROR) << "want to update ttl status, but index is not created before";
-            return false;
+    static std::string GetTsCol(const std::string& index_str) {
+        if (index_str.empty() || index_str.back() == TS_MARK) {
+            return {};
         }
-
-        auto ts_col = GetTsCol(latest_record_);
-        if (range.range_key()->GetExprString() != ts_col) {
-            LOG(ERROR) << "want ts col " << ts_col << ", but get " << range.range_key()->GetExprString();
-            return false;
-        }
-
-        int64_t start = range.frame()->GetHistoryRangeStart(), end = 0,
-                rows_start = range.frame()->GetHistoryRowsStart(), rows_end = 0;
-        //        if (frame_range != nullptr) {
-        //            start = frame_range->start()->GetSignedOffset();
-        //            end = frame_range->end()->GetSignedOffset();
-        //        }
-        //        if (frame_rows != nullptr) {
-        //            rows_start = frame_rows->start()->GetSignedOffset();
-        //            rows_end = frame_rows->end()->GetSignedOffset();
-        //        }
-        LOG_ASSERT(start <= 0 && rows_start <= 0);
-
-        // TODO(hw): ROWS_RANGE 3 or 3d, which is absolute time, which is count? add a test
-        std::stringstream ss;
-        range.frame()->Print(ss, "");
-        LOG(INFO) << "frame info: " << ss.str() << ", get bounds: " << start << ", " << rows_start;
-
-        common::TTLSt ttl_st;
-
-        // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
-        ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
-        if(start<0){
-            ttl_st.set_abs_ttl(std::max(MIN_TIME, start));
-        }
-        auto frame = range.frame();
-        auto type = frame->frame_type();
-        if (type == hybridse::node::kFrameRows) {
-            // frame_rows is valid
-            LOG_ASSERT(frame->frame_range() == nullptr && frame->GetHistoryRowsStartPreceding() > 0);
-            ttl_st.set_abs_ttl(frame->GetHistoryRowsStartPreceding());
-            ttl_st.set_ttl_type(type::TTLType::kAbsoluteTime);
-        } else {
-            // frame_range is valid
-            // TODO(hw): maybe merge type, how to parse?
-            LOG_ASSERT(type != hybridse::node::kFrameRowsMergeRowsRange) << " can't parse now";
-            LOG_ASSERT(frame->frame_rows() == nullptr && frame->GetHistoryRangeStart() < 0);
-            LOG(INFO) << "parse frame range, range start " << frame->GetHistoryRangeStart() << ", end "
-                      << frame->GetHistoryRangeEnd();
-            // GetHistoryRangeStart is negative, ttl needs uint64
-            ttl_st.set_lat_ttl(-1 * frame->GetHistoryRangeStart());
-            ttl_st.set_ttl_type(type::TTLType::kLatestTime);
-        }
-
-        index_map_[latest_record_] = ttl_st;
-        LOG(INFO) << latest_record_ << " update ttl " << index_map_[latest_record_].DebugString();
-
-        // to avoid double update
-        latest_record_.clear();
-        return true;
+        auto ts_begin = index_str.find(TS_MARK) + 1;
+        return index_str.substr(ts_begin);
     }
+
+    bool UpdateIndex(const hybridse::vm::Range& range);
+    IndexMap ToMap();
 };
 
 // no plan_ctx_, node_manager_: we assume that creating new op won't affect the upper level structure.
@@ -184,69 +154,7 @@ class GroupAndSortOptimizedParser {
     // recursive parse, return true iff kProviderTypeTable optimized
     // new_in is useless, but we keep it, GroupAndSortOptimizedParser will be more similar to GroupAndSortOptimized.
     bool KeysOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* left_key, Key* index_key,
-                            Key* right_key, Sort* sort, PhysicalOpNode** new_in) {
-        if (nullptr == left_key || nullptr == index_key || !left_key->ValidKey()) {
-            return false;
-        }
-
-        if (right_key != nullptr && !right_key->ValidKey()) {
-            return false;
-        }
-
-        if (PhysicalOpType::kPhysicalOpDataProvider == in->GetOpType()) {
-            auto scan_op = dynamic_cast<PhysicalDataProviderNode*>(in);
-            // Do not optimize with Request DataProvider (no index has been provided)
-            if (DataProviderType::kProviderTypeRequest == scan_op->provider_type_) {
-                return false;
-            }
-
-            if (DataProviderType::kProviderTypeTable == scan_op->provider_type_ ||
-                DataProviderType::kProviderTypePartition == scan_op->provider_type_) {
-                const hybridse::node::ExprListNode* right_partition =
-                    right_key == nullptr ? left_key->keys() : right_key->keys();
-
-                size_t key_num = right_partition->GetChildNum();
-                std::vector<bool> bitmap(key_num, false);
-                hybridse::node::ExprListNode order_values;
-
-                if (DataProviderType::kProviderTypeTable == scan_op->provider_type_) {
-                    // Apply key columns and order column optimization with all indexes binding to
-                    // scan_op->table_handler_ Return false if fail to find an appropriate index
-                    auto groups = right_partition;
-                    auto order = (nullptr == sort ? nullptr : sort->orders_);
-                    DLOG(INFO) << "keys and order optimized: keys=" << hybridse::node::ExprString(groups)
-                               << ", order=" << (order == nullptr ? "null" : hybridse::node::ExprString(order))
-                               << " for table " << scan_op->table_handler_->GetName();
-
-                    // map<table_name, map<keys_and_order_str, ttl_st>>
-                    // TODO(hw): ttl default is ok?
-                    index_map_builder_.CreateIndex(scan_op->table_handler_->GetName(), groups, order);
-                    // parser won't create partition_op
-                    return true;
-                } else {
-                    auto partition_op = dynamic_cast<PhysicalPartitionProviderNode*>(scan_op);
-                    LOG_ASSERT(partition_op != nullptr);
-                    auto index_name = partition_op->index_name_;
-                    // Apply key columns and order column optimization with given index name
-                    // Return false if given index do not match the keys and order column
-                    // -- return false won't change index_name
-                    LOG(WARNING) << "What if the index is not best index? Do we need to adjust index?";
-                    return false;
-                }
-            }
-        } else if (PhysicalOpType::kPhysicalOpSimpleProject == in->GetOpType()) {
-            auto simple_project = dynamic_cast<PhysicalSimpleProjectNode*>(in);
-            PhysicalOpNode* new_depend;
-            return KeysOptimizedParse(root_schemas_ctx, simple_project->producers()[0], left_key, index_key, right_key,
-                                      sort, &new_depend);
-
-        } else if (PhysicalOpType::kPhysicalOpRename == in->GetOpType()) {
-            PhysicalOpNode* new_depend;
-            return KeysOptimizedParse(root_schemas_ctx, in->producers()[0], left_key, index_key, right_key, sort,
-                                      &new_depend);
-        }
-        return false;
-    }
+                            Key* right_key, Sort* sort, PhysicalOpNode** new_in);
 
     bool KeysAndOrderFilterOptimizedParse(const SchemasContext* root_schemas_ctx, PhysicalOpNode* in, Key* group,
                                           Key* hash, Sort* sort, PhysicalOpNode** new_in) {
@@ -356,7 +264,7 @@ class GroupAndSortOptimizedParser {
                                                          &union_op->window_.partition_, &union_op->window_.index_key_,
                                                          &union_op->window_.sort_, &new_producer)) {
                         LOG(INFO) << "got index hints, add ttl info";
-                        index_map_builder_.UpdateIndex(union_op->window().range());
+                        LOG_ASSERT(index_map_builder_.UpdateIndex(union_op->window().range())) << "for debug";
                     }
                 }
 
@@ -422,7 +330,7 @@ class GroupAndSortOptimizedParser {
         TransformParse(cur_op);
     }
 
-    IndexMap GetIndexes() { return {}; }
+    IndexMap GetIndexes() { return index_map_builder_.ToMap(); }
 
  private:
     IndexMapBuilder index_map_builder_;
@@ -450,8 +358,7 @@ class DDLParser {
         //        ParseIndexes(nodes);
 
         auto& ctx = std::dynamic_pointer_cast<SqlCompileInfo>(compile_info)->get_sql_context();
-        ParseIndexes(catalog, const_cast<hybridse::vm::PhysicalOpNode*>(plan), ctx);
-        return {};
+        return ParseIndexes(catalog, const_cast<hybridse::vm::PhysicalOpNode*>(plan), ctx);
     }
     static std::map<std::string, std::vector<::openmldb::common::ColumnKey>> ExtractIndexes(
         const std::string& sql,
