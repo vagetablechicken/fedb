@@ -16,9 +16,30 @@
 
 #include "base/ddl_parser.h"
 
-#include "ddl_parser.h"
-
 namespace openmldb::base {
+
+bool IndexMapBuilder::CreateIndex(const std::string &table, const hybridse::node::ExprListNode *keys,
+                                  const hybridse::node::OrderByNode *ts) {
+    // we encode table, keys and ts to one string
+    auto index = Encode(table, keys, ts);
+    if (index.empty()) {
+        LOG(WARNING) << "index encode failed for table " << table;
+        return false;
+    }
+
+    if (index_map_.find(index) != index_map_.end()) {
+        LOG(DFATAL) << "already set, needs merge?";
+        return false;
+    }
+    LOG(INFO) << "create index with unset ttl: " << index;
+    common::TTLSt ttl_st;
+    // TODO(hw): how about ttl vals?
+    // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
+    ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
+    index_map_[index] = ttl_st;
+    latest_record_ = index;
+    return true;
+}
 
 bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range &range) {
     if (latest_record_.empty() || index_map_.find(latest_record_) == index_map_.end()) {
@@ -40,7 +61,7 @@ bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range &range) {
     auto start = frame->GetHistoryRangeStart();
     auto rows_start = frame->GetHistoryRowsStart();
 
-    LOG_ASSERT(start <= 0 && rows_start <= 0);
+    DLOG_ASSERT(start <= 0 && rows_start <= 0);
 
     std::stringstream ss;
     range.frame()->Print(ss, "");
@@ -51,13 +72,13 @@ bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range &range) {
     auto type = frame->frame_type();
     if (type == hybridse::node::kFrameRows) {
         // frame_rows is valid
-        LOG_ASSERT(frame->frame_range() == nullptr && frame->GetHistoryRowsStartPreceding() > 0);
+        DLOG_ASSERT(frame->frame_range() == nullptr && frame->GetHistoryRowsStartPreceding() > 0);
         ttl_st.set_lat_ttl(frame->GetHistoryRowsStartPreceding());
         ttl_st.set_ttl_type(type::TTLType::kLatestTime);
     } else {
         // frame_range is valid
-        LOG_ASSERT(type != hybridse::node::kFrameRowsMergeRowsRange) << "merge type, how to parse?";
-        LOG_ASSERT(frame->frame_rows() == nullptr && frame->GetHistoryRangeStart() < 0);
+        DLOG_ASSERT(type != hybridse::node::kFrameRowsMergeRowsRange) << "merge type, how to parse?";
+        DLOG_ASSERT(frame->frame_rows() == nullptr && frame->GetHistoryRangeStart() < 0);
         // GetHistoryRangeStart is negative, ttl needs uint64
         ttl_st.set_abs_ttl(std::max(MIN_TIME, -1 * frame->GetHistoryRangeStart()));
         ttl_st.set_ttl_type(type::TTLType::kAbsoluteTime);
@@ -127,9 +148,52 @@ std::string IndexMapBuilder::Encode(const std::string &table, const hybridse::no
     return ss.str();
 }
 
+std::vector<std::string> IndexMapBuilder::NormalizeColumns(const std::string &table,
+                                                           const std::vector<hybridse::node::ExprNode *> &nodes) {
+    if (table.empty() || nodes.empty()) {
+        return {};
+    }
+    std::vector<std::string> result;
+    for (auto &node : nodes) {
+        auto cast = hybridse::node::ColumnRefNode::CastFrom(node);
+        if (!cast->GetRelationName().empty() && cast->GetRelationName() != table) {
+            LOG(WARNING) << "col is from table " << cast->GetRelationName() << ", not from " << table;
+            return {};
+        }
+        result.emplace_back(cast->GetColumnName());
+    }
+    // sort to avoid dup index
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+std::pair<std::string, common::ColumnKey> IndexMapBuilder::Decode(const std::string &index_str) {
+    if (index_str.empty()) {
+        return {};
+    }
+
+    // TODO(hw): use functions
+    auto key_sep = index_str.find(KEY_MARK);
+    auto table_name = index_str.substr(0, key_sep);
+
+    common::ColumnKey column_key;
+    auto ts_sep = index_str.find(TS_MARK);
+    auto keys_str = index_str.substr(key_sep + 1, ts_sep - key_sep - 1);
+    // split keys
+    std::vector<std::string> keys;
+    boost::split(keys, keys_str, boost::is_any_of(std::string(1, KEY_SEP)));
+    for (auto &key : keys) {
+        DLOG_ASSERT(!key.empty());
+        column_key.add_col_name(key);
+    }
+    auto ts = index_str.substr(ts_sep + 1);
+    column_key.set_ts_name(ts);
+    return std::make_pair(table_name, column_key);
+}
+
 bool GroupAndSortOptimizedParser::KeysOptimizedParse(const SchemasContext *root_schemas_ctx, PhysicalOpNode *in,
                                                      Key *left_key, Key *index_key, Key *right_key, Sort *sort,
-                                                     PhysicalOpNode **new_in) {
+                                                     PhysicalOpNode **) {
     if (nullptr == left_key || nullptr == index_key || !left_key->ValidKey()) {
         return false;
     }
@@ -168,7 +232,7 @@ bool GroupAndSortOptimizedParser::KeysOptimizedParse(const SchemasContext *root_
                 return true;
             } else {
                 auto partition_op = dynamic_cast<PhysicalPartitionProviderNode *>(scan_op);
-                LOG_ASSERT(partition_op != nullptr);
+                DLOG_ASSERT(partition_op != nullptr);
                 auto index_name = partition_op->index_name_;
                 // Apply key columns and order column optimization with given index name
                 // Return false if given index do not match the keys and order column
@@ -189,6 +253,143 @@ bool GroupAndSortOptimizedParser::KeysOptimizedParse(const SchemasContext *root_
                                   &new_depend);
     }
     return false;
+}
+
+std::vector<PhysicalOpNode *> GroupAndSortOptimizedParser::InitJoinList(PhysicalWindowAggrerationNode *op) {
+    std::vector<PhysicalOpNode *> joined_op_list;
+    auto &window_joins = op->window_joins_.window_joins();
+    PhysicalOpNode *cur = op->GetProducer(0);
+    for (auto &pair : window_joins) {
+        auto joined = new PhysicalJoinNode(cur, pair.first, pair.second);
+        joined_op_list.push_back(joined);
+        cur = joined;
+    }
+    return joined_op_list;
+}
+
+void GroupAndSortOptimizedParser::TransformParse(PhysicalOpNode *in) {
+    switch (in->GetOpType()) {
+        case PhysicalOpType::kPhysicalOpGroupBy: {
+            auto group_op = dynamic_cast<PhysicalGroupNode*>(in);
+            PhysicalOpNode* new_producer;
+            if (GroupOptimizedParse(group_op->schemas_ctx(), group_op->GetProducer(0), &group_op->group_,
+                                    &new_producer)) {
+                // no orders->no sort->no ttl info
+                DLOG(INFO) << "ttl won't update by node:\n" << group_op->GetTreeString();
+            }
+            break;
+        }
+        case PhysicalOpType::kPhysicalOpProject: {
+            auto project_op = dynamic_cast<PhysicalProjectNode*>(in);
+            if (ProjectType::kWindowAggregation == project_op->project_type_) {
+                auto window_agg_op = dynamic_cast<PhysicalWindowAggrerationNode*>(project_op);
+                PhysicalOpNode* input = window_agg_op->GetProducer(0);
+
+                PhysicalOpNode* new_producer;
+                if (!window_agg_op->instance_not_in_window()) {
+                    if (KeyAndOrderOptimizedParse(input->schemas_ctx(), input, &window_agg_op->window_.partition_,
+                                                  &window_agg_op->window_.sort_, &new_producer)) {
+                        index_map_builder_.UpdateIndex(window_agg_op->window_.range());
+                    }
+                }
+                // must prepare for window join column infer
+                auto& window_joins = window_agg_op->window_joins();
+                auto& window_unions = window_agg_op->window_unions();
+                auto joined_op_list = InitJoinList(window_agg_op);
+                if (!window_joins.Empty()) {
+                    size_t join_idx = 0;
+                    for (auto& window_join : window_joins.window_joins()) {
+                        PhysicalOpNode* cur_joined = joined_op_list[join_idx];
+
+                        PhysicalOpNode* new_join_right;
+                        if (JoinKeysOptimizedParse(cur_joined->schemas_ctx(), window_join.first,
+                                                   &window_join.second, &new_join_right)) {
+                            // no range info
+                            DLOG(INFO) << "ttl won't update by node:\n" << window_agg_op->GetTreeString();
+                        }
+                        join_idx += 1;
+                    }
+                }
+                // joined_op_list need to be deleted
+                for (auto& op : joined_op_list) {
+                    delete op;
+                }
+
+                if (!window_unions.Empty()) {
+                    for (auto& window_union : window_unions.window_unions_) {
+                        PhysicalOpNode* new_producer1;
+                        if (KeyAndOrderOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
+                                                      &window_union.second.partition_, &window_union.second.sort_,
+                                                      &new_producer1)) {
+                            index_map_builder_.UpdateIndex(window_union.second.range());
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case PhysicalOpType::kPhysicalOpRequestUnion: {
+            auto union_op = dynamic_cast<PhysicalRequestUnionNode*>(in);
+
+            PhysicalOpNode* new_producer;
+            if (!union_op->instance_not_in_window()) {
+                if (KeysAndOrderFilterOptimizedParse(union_op->schemas_ctx(), union_op->GetProducer(1),
+                                                     &union_op->window_.partition_, &union_op->window_.index_key_,
+                                                     &union_op->window_.sort_, &new_producer)) {
+                    index_map_builder_.UpdateIndex(union_op->window().range());
+                }
+            }
+
+            if (!union_op->window_unions().Empty()) {
+                for (auto& window_union : union_op->window_unions_.window_unions_) {
+                    PhysicalOpNode* new_producer1;
+                    auto& window = window_union.second;
+                    if (KeysAndOrderFilterOptimizedParse(window_union.first->schemas_ctx(), window_union.first,
+                                                         &window.partition_, &window.index_key_, &window.sort_,
+                                                         &new_producer1)) {
+                        index_map_builder_.UpdateIndex(window.range());
+                    }
+                }
+            }
+            break;
+        }
+        case PhysicalOpType::kPhysicalOpRequestJoin: {
+            auto* join_op = dynamic_cast<PhysicalRequestJoinNode*>(in);
+            PhysicalOpNode* new_producer;
+            // Optimized Right Table Partition
+            if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
+                                       &new_producer)) {
+                // no range info
+                DLOG(INFO) << "ttl won't update by node:\n" << join_op->GetTreeString();
+            }
+
+            break;
+        }
+        case PhysicalOpType::kPhysicalOpJoin: {
+            auto* join_op = dynamic_cast<PhysicalRequestJoinNode*>(in);
+            PhysicalOpNode* new_producer;
+            // Optimized Right Table Partition
+            if (JoinKeysOptimizedParse(join_op->schemas_ctx(), join_op->GetProducer(1), &join_op->join_,
+                                       &new_producer)) {
+                // no range info
+                DLOG(INFO) << "ttl won't update by node:\n" << join_op->GetTreeString();
+            }
+
+            break;
+        }
+        case PhysicalOpType::kPhysicalOpFilter: {
+            auto* filter_op = dynamic_cast<PhysicalFilterNode*>(in);
+            PhysicalOpNode* new_producer;
+            if (FilterOptimizedParse(filter_op->schemas_ctx(), filter_op->GetProducer(0), &filter_op->filter_,
+                                     &new_producer)) {
+                // no range info
+                DLOG(INFO) << "ttl won't update by node:\n" << filter_op->GetTreeString();
+            }
+        }
+        default: {
+            break;
+        }
+    }
 }
 
 std::ostream &operator<<(std::ostream &os, IndexMap &index_map) {
