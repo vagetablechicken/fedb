@@ -501,6 +501,7 @@ void HandleCreateIndex(const hybridse::node::CreateIndexNode *create_index_node)
     ::openmldb::common::ColumnKey column_key;
     hybridse::base::Status status;
     ::openmldb::client::NsClient::TransformToColumnKey(create_index_node->index_, {}, &column_key, &status);
+    // `create index` must set the index name.
     column_key.set_index_name(create_index_node->index_name_);
 
     std::string error;
