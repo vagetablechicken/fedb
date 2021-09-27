@@ -1083,12 +1083,14 @@ bool NsClient::TransformToTableDef(::hybridse::node::CreatePlanNode* create_node
             case hybridse::node::kColumnIndex: {
                 auto* column_index = dynamic_cast<hybridse::node::ColumnIndexNode*>(column_desc);
                 std::string index_name = column_index->GetName();
-                // no index
-                if(column_index->GetKey().empty()){
+                // index in `create table` won't set name, and must have one or more keys
+                DCHECK(index_name.empty());
+                if (column_index->GetKey().empty()) {
                     status->msg = "CREATE common: INDEX KEY empty";
                     status->code = hybridse::common::kSqlError;
                     return false;
                 }
+
                 if (index_name.empty()) {
                     index_name = PlanAPI::GenerateName("INDEX", table->column_key_size());
                     column_index->SetName(index_name);
@@ -1099,15 +1101,15 @@ bool NsClient::TransformToTableDef(::hybridse::node::CreatePlanNode* create_node
                     status->code = hybridse::common::kSqlError;
                     return false;
                 }
-                if (!index_name.empty()) {
-                    if (column_index->GetKey().empty()) {
+                index_names.insert(index_name);
 
-                    }
-                    index_names.insert(index_name);
-                }
                 ::openmldb::common::ColumnKey* index = table->add_column_key();
-                TransformToColumnKey(column_index, index, status);
-
+                if (!TransformToColumnKey(column_index, column_names, index, status)) {
+                    return false;
+                }
+                if (column_index->GetTs().empty()) {
+                    no_ts_cnt++;
+                }
                 break;
             }
 
@@ -1202,18 +1204,26 @@ bool NsClient::TTLTypeParse(const std::string& type_str, ::openmldb::type::TTLTy
 
     return true;
 }
-void NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_index, common::ColumnKey* index, status) {
-    index->set_index_name(index_name);
 
-    for (const auto& key : column_index->GetKey()) {
-        auto cit = column_names.find(key);
-        if (cit == column_names.end()) {
-            status->msg = "column " + key + " does not exist";
-            status->code = hybridse::common::kSqlError;
-            return false;
+// If column_names is not empty, check the column key names
+bool NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_index,
+                                    const std::map<std::string, ::openmldb::common::ColumnDesc*>& column_names,
+                                    common::ColumnKey* index, hybridse::base::Status* status) {
+    index->set_index_name(column_index->GetName());
+
+    // check if column exist
+    if (!column_names.empty()) {
+        for (const auto& key : column_index->GetKey()) {
+            auto cit = column_names.find(key);
+            if (cit == column_names.end()) {
+                status->msg = "column " + key + " does not exist";
+                status->code = hybridse::common::kSqlError;
+                return false;
+            }
+            index->add_col_name(key);
         }
-        index->add_col_name(key);
     }
+
     ::openmldb::common::TTLSt* ttl_st = index->mutable_ttl();
     if (!column_index->ttl_type().empty()) {
         std::string ttl_type = column_index->ttl_type();
@@ -1274,15 +1284,16 @@ void NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_inde
     }
     if (!column_index->GetTs().empty()) {
         index->set_ts_name(column_index->GetTs());
-        auto it = column_names.find(column_index->GetTs());
-        if (it == column_names.end()) {
-            status->msg = "CREATE common: TS NAME " + column_index->GetTs() + " not exists";
-            status->code = hybridse::common::kSqlError;
-            return false;
+        if(!column_names.empty()) {
+            auto it = column_names.find(column_index->GetTs());
+            if (it == column_names.end()) {
+                status->msg = "CREATE common: TS NAME " + column_index->GetTs() + " not exists";
+                status->code = hybridse::common::kSqlError;
+                return false;
+            }
         }
-    } else {
-        no_ts_cnt++;
     }
+    return true;
 }
 
 }  // namespace client
