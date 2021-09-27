@@ -1211,17 +1211,16 @@ bool NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_inde
                                     common::ColumnKey* index, hybridse::base::Status* status) {
     index->set_index_name(column_index->GetName());
 
-    // check if column exist
-    if (!column_names.empty()) {
-        for (const auto& key : column_index->GetKey()) {
-            auto cit = column_names.find(key);
-            if (cit == column_names.end()) {
+    for (const auto& key : column_index->GetKey()) {
+        // if no column_names, skip check
+        if (!column_names.empty()) {
+            if (column_names.find(key) == column_names.end()) {
                 status->msg = "column " + key + " does not exist";
                 status->code = hybridse::common::kSqlError;
                 return false;
             }
-            index->add_col_name(key);
         }
+        index->add_col_name(key);
     }
 
     ::openmldb::common::TTLSt* ttl_st = index->mutable_ttl();
@@ -1262,7 +1261,7 @@ bool NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_inde
         }
     } else {
         if (column_index->GetAbsTTL() == -1) {
-            status->msg = "CREATE common: abs ttl format error";
+            status->msg = "CREATE common: abs ttl format error for " + type::TTLType_Name(ttl_st->ttl_type());
             status->code = hybridse::common::kSqlError;
             return false;
         }
@@ -1272,7 +1271,7 @@ bool NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_inde
             ttl_st->set_abs_ttl(column_index->GetAbsTTL() / 60000);
         }
         if (column_index->GetLatTTL() == -1) {
-            status->msg = "CREATE common: lat ttl format error";
+            status->msg = "CREATE common: lat ttl format error for " + type::TTLType_Name(ttl_st->ttl_type());
             status->code = hybridse::common::kSqlError;
             return false;
         }
@@ -1283,8 +1282,8 @@ bool NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_inde
         }
     }
     if (!column_index->GetTs().empty()) {
-        index->set_ts_name(column_index->GetTs());
-        if(!column_names.empty()) {
+        // if no column_names, skip check
+        if (!column_names.empty()) {
             auto it = column_names.find(column_index->GetTs());
             if (it == column_names.end()) {
                 status->msg = "CREATE common: TS NAME " + column_index->GetTs() + " not exists";
@@ -1292,6 +1291,7 @@ bool NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_inde
                 return false;
             }
         }
+        index->set_ts_name(column_index->GetTs());
     }
     return true;
 }

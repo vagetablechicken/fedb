@@ -500,9 +500,13 @@ void HandleCmd(const hybridse::node::CmdPlanNode *cmd_node) {
 void HandleCreateIndex(const hybridse::node::CreateIndexNode *create_index_node) {
     ::openmldb::common::ColumnKey column_key;
     hybridse::base::Status status;
-    ::openmldb::client::NsClient::TransformToColumnKey(create_index_node->index_, {}, &column_key, &status);
+    if (!::openmldb::client::NsClient::TransformToColumnKey(create_index_node->index_, {}, &column_key, &status)) {
+        std::cout << "failed to create index. error msg: " << status.msg << std::endl;
+        return;
+    }
     // `create index` must set the index name.
     column_key.set_index_name(create_index_node->index_name_);
+    DLOG(INFO) << column_key.DebugString();
 
     std::string error;
     auto ns = cs->GetNsClient();
