@@ -1081,106 +1081,33 @@ bool NsClient::TransformToTableDef(::hybridse::node::CreatePlanNode* create_node
             }
 
             case hybridse::node::kColumnIndex: {
-                auto* column_index = (hybridse::node::ColumnIndexNode*)column_desc;
+                auto* column_index = dynamic_cast<hybridse::node::ColumnIndexNode*>(column_desc);
                 std::string index_name = column_index->GetName();
-                if (index_name.empty() && !column_index->GetKey().empty()) {
+                // no index
+                if(column_index->GetKey().empty()){
+                    status->msg = "CREATE common: INDEX KEY empty";
+                    status->code = hybridse::common::kSqlError;
+                    return false;
+                }
+                if (index_name.empty()) {
                     index_name = PlanAPI::GenerateName("INDEX", table->column_key_size());
                     column_index->SetName(index_name);
                 }
+
                 if (index_names.find(index_name) != index_names.end()) {
                     status->msg = "CREATE common: INDEX NAME " + index_name + " duplicate";
                     status->code = hybridse::common::kSqlError;
                     return false;
                 }
-                ::openmldb::common::ColumnKey* index = table->add_column_key();
                 if (!index_name.empty()) {
                     if (column_index->GetKey().empty()) {
-                        status->msg = "CREATE common: INDEX KEY empty";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
+
                     }
                     index_names.insert(index_name);
-                    index->set_index_name(index_name);
                 }
+                ::openmldb::common::ColumnKey* index = table->add_column_key();
+                TransformToColumnKey(column_index, index, status);
 
-                for (const auto& key : column_index->GetKey()) {
-                    auto cit = column_names.find(key);
-                    if (cit == column_names.end()) {
-                        status->msg = "column " + key + " does not exist";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
-                    }
-                    index->add_col_name(key);
-                }
-                ::openmldb::common::TTLSt* ttl_st = index->mutable_ttl();
-                if (!column_index->ttl_type().empty()) {
-                    std::string ttl_type = column_index->ttl_type();
-                    std::transform(ttl_type.begin(), ttl_type.end(), ttl_type.begin(), ::tolower);
-                    openmldb::type::TTLType type;
-                    if (!TTLTypeParse(ttl_type, &type)) {
-                        status->msg = "CREATE common: ttl_type " + column_index->ttl_type() + " not support";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
-                    }
-                    ttl_st->set_ttl_type(type);
-                } else {
-                    ttl_st->set_ttl_type(openmldb::type::kAbsoluteTime);
-                }
-                if (ttl_st->ttl_type() == openmldb::type::kAbsoluteTime) {
-                    if (column_index->GetAbsTTL() == -1 || column_index->GetLatTTL() != -2) {
-                        status->msg = "CREATE common: abs ttl format error";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
-                    }
-                    if (column_index->GetAbsTTL() == -2) {
-                        ttl_st->set_abs_ttl(0);
-                    } else {
-                        ttl_st->set_abs_ttl(column_index->GetAbsTTL() / 60000);
-                    }
-                } else if (ttl_st->ttl_type() == openmldb::type::kLatestTime) {
-                    if (column_index->GetLatTTL() == -1 || column_index->GetAbsTTL() != -2) {
-                        status->msg = "CREATE common: lat ttl format error";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
-                    }
-                    if (column_index->GetLatTTL() == -2) {
-                        ttl_st->set_lat_ttl(0);
-                    } else {
-                        ttl_st->set_lat_ttl(column_index->GetLatTTL());
-                    }
-                } else {
-                    if (column_index->GetAbsTTL() == -1) {
-                        status->msg = "CREATE common: abs ttl format error";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
-                    }
-                    if (column_index->GetAbsTTL() == -2) {
-                        ttl_st->set_abs_ttl(0);
-                    } else {
-                        ttl_st->set_abs_ttl(column_index->GetAbsTTL() / 60000);
-                    }
-                    if (column_index->GetLatTTL() == -1) {
-                        status->msg = "CREATE common: lat ttl format error";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
-                    }
-                    if (column_index->GetLatTTL() == -2) {
-                        ttl_st->set_lat_ttl(0);
-                    } else {
-                        ttl_st->set_lat_ttl(column_index->GetLatTTL());
-                    }
-                }
-                if (!column_index->GetTs().empty()) {
-                    index->set_ts_name(column_index->GetTs());
-                    auto it = column_names.find(column_index->GetTs());
-                    if (it == column_names.end()) {
-                        status->msg = "CREATE common: TS NAME " + column_index->GetTs() + " not exists";
-                        status->code = hybridse::common::kSqlError;
-                        return false;
-                    }
-                } else {
-                    no_ts_cnt++;
-                }
                 break;
             }
 
@@ -1274,6 +1201,88 @@ bool NsClient::TTLTypeParse(const std::string& type_str, ::openmldb::type::TTLTy
     }
 
     return true;
+}
+void NsClient::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_index, common::ColumnKey* index, status) {
+    index->set_index_name(index_name);
+
+    for (const auto& key : column_index->GetKey()) {
+        auto cit = column_names.find(key);
+        if (cit == column_names.end()) {
+            status->msg = "column " + key + " does not exist";
+            status->code = hybridse::common::kSqlError;
+            return false;
+        }
+        index->add_col_name(key);
+    }
+    ::openmldb::common::TTLSt* ttl_st = index->mutable_ttl();
+    if (!column_index->ttl_type().empty()) {
+        std::string ttl_type = column_index->ttl_type();
+        std::transform(ttl_type.begin(), ttl_type.end(), ttl_type.begin(), ::tolower);
+        openmldb::type::TTLType type;
+        if (!TTLTypeParse(ttl_type, &type)) {
+            status->msg = "CREATE common: ttl_type " + column_index->ttl_type() + " not support";
+            status->code = hybridse::common::kSqlError;
+            return false;
+        }
+        ttl_st->set_ttl_type(type);
+    } else {
+        ttl_st->set_ttl_type(openmldb::type::kAbsoluteTime);
+    }
+    if (ttl_st->ttl_type() == openmldb::type::kAbsoluteTime) {
+        if (column_index->GetAbsTTL() == -1 || column_index->GetLatTTL() != -2) {
+            status->msg = "CREATE common: abs ttl format error";
+            status->code = hybridse::common::kSqlError;
+            return false;
+        }
+        if (column_index->GetAbsTTL() == -2) {
+            ttl_st->set_abs_ttl(0);
+        } else {
+            ttl_st->set_abs_ttl(column_index->GetAbsTTL() / 60000);
+        }
+    } else if (ttl_st->ttl_type() == openmldb::type::kLatestTime) {
+        if (column_index->GetLatTTL() == -1 || column_index->GetAbsTTL() != -2) {
+            status->msg = "CREATE common: lat ttl format error";
+            status->code = hybridse::common::kSqlError;
+            return false;
+        }
+        if (column_index->GetLatTTL() == -2) {
+            ttl_st->set_lat_ttl(0);
+        } else {
+            ttl_st->set_lat_ttl(column_index->GetLatTTL());
+        }
+    } else {
+        if (column_index->GetAbsTTL() == -1) {
+            status->msg = "CREATE common: abs ttl format error";
+            status->code = hybridse::common::kSqlError;
+            return false;
+        }
+        if (column_index->GetAbsTTL() == -2) {
+            ttl_st->set_abs_ttl(0);
+        } else {
+            ttl_st->set_abs_ttl(column_index->GetAbsTTL() / 60000);
+        }
+        if (column_index->GetLatTTL() == -1) {
+            status->msg = "CREATE common: lat ttl format error";
+            status->code = hybridse::common::kSqlError;
+            return false;
+        }
+        if (column_index->GetLatTTL() == -2) {
+            ttl_st->set_lat_ttl(0);
+        } else {
+            ttl_st->set_lat_ttl(column_index->GetLatTTL());
+        }
+    }
+    if (!column_index->GetTs().empty()) {
+        index->set_ts_name(column_index->GetTs());
+        auto it = column_names.find(column_index->GetTs());
+        if (it == column_names.end()) {
+            status->msg = "CREATE common: TS NAME " + column_index->GetTs() + " not exists";
+            status->code = hybridse::common::kSqlError;
+            return false;
+        }
+    } else {
+        no_ts_cnt++;
+    }
 }
 
 }  // namespace client

@@ -241,6 +241,8 @@ class NsClient : public Client {
  private:
     ::openmldb::RpcClient<::openmldb::nameserver::NameServer_Stub> client_;
     std::string db_;
+    void TransformToColumnKey(hybridse::node::ColumnIndexNode* pNode, common::ColumnKey* pKey,
+                              hybridse::base::Status* pStatus);
 };
 
 }  // namespace client
