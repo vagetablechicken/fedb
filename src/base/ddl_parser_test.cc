@@ -77,8 +77,28 @@ class DDLParserTest : public ::testing::Test {
         return -1;
     }
 
+    void AddIndexToDB(const base::IndexMap& index_map, ::hybridse::type::Database& db) {
+        for (auto& table_indexes : index_map) {
+            auto& table = table_indexes.first;
+            auto idx = GetTableIdxInDB(db, table);
+            ASSERT_TRUE(idx != -1);
+            auto table_def = db.mutable_tables(idx);
+            auto& indexes = table_indexes.second;
+            for (auto& column_key : indexes) {
+                auto index_def = table_def->add_indexes();
+                index_def->set_name("parsed_index_" + std::to_string(index_id++));
+                index_def->mutable_first_keys()->CopyFrom(column_key.col_name());
+                if (column_key.has_ts_name() && !column_key.ts_name().empty()) {
+                    index_def->set_second_key(column_key.ts_name());
+                    index_def->set_ts_offset(0);
+                }
+            }
+        }
+    }
+
  protected:
     ::hybridse::type::Database db;
+    int index_id = 0;
 };
 
 // create procedure: only inner plan will be sql compiled.
@@ -109,15 +129,10 @@ TEST_F(DDLParserTest, joinExtract) {
         LOG(INFO) << index_map;
 
         // so add index on t2 (key=col2, ts=col5)
-        // TODO(hw): create index from index_map
-        auto idx = GetTableIdxInDB(db, "t2");
-        auto table_def = db.mutable_tables(idx);
-        auto add_index = table_def->add_indexes();
-        add_index->set_name("index1_t2");
-        add_index->add_first_keys("col2");
-        add_index->set_second_key("col5");
+        AddIndexToDB(index_map, db);
+
         // TODO(hw): check data provider type
-        LOG(INFO) << "after add index: " << DDLParser::Explain(sql, db);
+        LOG(INFO) << "after add index:\n" << DDLParser::Explain(sql, db);
     }
 
     {
@@ -129,14 +144,9 @@ TEST_F(DDLParserTest, joinExtract) {
         auto index_map = DDLParser::ExtractIndexes(sql, db);
         ASSERT_FALSE(index_map.empty());
         LOG(INFO) << index_map;
-        // only have key, no order
-        auto idx = GetTableIdxInDB(db, "t2");
-        auto table_def = db.mutable_tables(idx);
-        auto add_index = table_def->add_indexes();
-        add_index->set_name("index2_t2");
-        add_index->add_first_keys("col3");
-        add_index->set_second_key("col5");  // no order by, use any int64 col
-        LOG(INFO) << "after add index: " << DDLParser::Explain(sql, db);
+        // the added index only has key, no ts
+        AddIndexToDB(index_map, db);
+        LOG(INFO) << "after add index:\n" << DDLParser::Explain(sql, db);
     }
 }
 
@@ -165,21 +175,26 @@ TEST_F(DDLParserTest, windowExtractIndexes) {
         auto index_map = DDLParser::ExtractIndexes(sql, db);
         ASSERT_FALSE(index_map.empty());
         LOG(INFO) << index_map;
+        AddIndexToDB(index_map, db);
+        LOG(INFO) << "after add index:\n" << DDLParser::Explain(sql, db);
     }
-    
+
     {
+        // partition by col2 to avoid dup of the added index before
         // abs < 1min preceding -> 1min start
         auto sql =
             "SELECT "
             "col1, "
             "sum(col3) OVER w1 as w1_col3_sum, "
             "sum(col2) OVER w1 as w1_col2_sum "
-            "FROM t1 WINDOW w1 AS (PARTITION BY col1 ORDER BY col5 "
+            "FROM t1 WINDOW w1 AS (PARTITION BY col2 ORDER BY col5 "
             "ROWS_RANGE BETWEEN 3s "
             "PRECEDING AND CURRENT ROW) limit 10;";
         auto index_map = DDLParser::ExtractIndexes(sql, db);
         ASSERT_FALSE(index_map.empty());
         LOG(INFO) << index_map;
+        AddIndexToDB(index_map, db);
+        LOG(INFO) << "after add index:\n" << DDLParser::Explain(sql, db);
     }
 
     {
@@ -189,22 +204,25 @@ TEST_F(DDLParserTest, windowExtractIndexes) {
             "col1, "
             "sum(col3) OVER w1 as w1_col3_sum, "
             "sum(col2) OVER w1 as w1_col2_sum "
-            "FROM t1 WINDOW w1 AS (PARTITION BY col1 ORDER BY col5 "
+            "FROM t1 WINDOW w1 AS (PARTITION BY col3 ORDER BY col5 "
             "ROWS BETWEEN 3 "
             "PRECEDING AND CURRENT ROW) limit 10;";
         auto index_map = DDLParser::ExtractIndexes(sql, db);
         ASSERT_FALSE(index_map.empty());
         LOG(INFO) << index_map;
+        AddIndexToDB(index_map, db);
+        LOG(INFO) << "after add index:\n" << DDLParser::Explain(sql, db);
     }
 
     {
         // no order by
         auto sql = "SELECT sum(col1) as col1sum FROM t1 group by col3, col2, col1;";
+        // GROUP_BY node
         auto index_map = DDLParser::ExtractIndexesForBatch(sql, db);
         LOG(INFO) << "result: " << index_map;
 
+        // REQUEST_UNION node, this will use index(key=col1,no ts)
         index_map = DDLParser::ExtractIndexes(sql, db);
-        LOG(INFO) << "result: " << index_map;
     }
 }
 }  // namespace openmldb::base

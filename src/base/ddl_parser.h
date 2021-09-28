@@ -50,23 +50,24 @@ class IndexMapBuilder {
                                                      const std::vector<hybridse::node::ExprNode*>& nodes);
     // table, keys and ts -> table:key1,key2,...;ts
     std::string Encode(const std::string& table, const hybridse::node::ExprListNode* keys,
-                       const hybridse::node::OrderByNode* ts);
+                       const hybridse::node::OrderByNode* ts, bool ts_complete);
 
     static std::pair<std::string, common::ColumnKey> Decode(const std::string& index_str);
 
     static std::string GetTsCol(const std::string& index_str) {
-        if (index_str.empty() || index_str.back() == TS_MARK) {
+        std::size_t ts_mark_pos = index_str.find(TS_MARK);
+        if (ts_mark_pos == std::string::npos) {
             return {};
         }
-        auto ts_begin = index_str.find(TS_MARK) + 1;
+        auto ts_begin = ts_mark_pos + 1;
         return index_str.substr(ts_begin);
     }
 
     static std::string GetTable(const std::string& index_str) {
-        if (index_str.empty()) {
+        auto key_sep = index_str.find(KEY_MARK);
+        if (key_sep == std::string::npos) {
             return {};
         }
-        auto key_sep = index_str.find(KEY_MARK);
         return index_str.substr(0, key_sep);
     }
 

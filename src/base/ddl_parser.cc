@@ -21,7 +21,7 @@ namespace openmldb::base {
 bool IndexMapBuilder::CreateIndex(const std::string& table, const hybridse::node::ExprListNode* keys,
                                   const hybridse::node::OrderByNode* ts) {
     // we encode table, keys and ts to one string
-    auto index = Encode(table, keys, ts);
+    auto index = Encode(table, keys, ts, false);
     if (index.empty()) {
         LOG(WARNING) << "index encode failed for table " << table;
         return false;
@@ -32,10 +32,9 @@ bool IndexMapBuilder::CreateIndex(const std::string& table, const hybridse::node
         return false;
     }
     LOG(INFO) << "create index with unset ttl: " << index;
+
+    // default TTLSt is abs and ttl=0, rows will never expire.
     common::TTLSt ttl_st;
-    // TODO(hw): how about ttl vals?
-    // 因为fesql支持任意范围的窗口，所以需要kAbsAndLat这个类型。确保窗口中本该有数据，而没有被淘汰出去
-    ttl_st.set_ttl_type(type::TTLType::kAbsAndLat);
     index_map_[index] = ttl_st;
     latest_record_ = index;
     return true;
@@ -49,11 +48,12 @@ bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range& range) {
     auto ts_col = GetTsCol(latest_record_);
 
     if (!range.Valid()) {
-        LOG(INFO) << "range is invalid, can't update ttl, use the default";
+        LOG(INFO) << "range is invalid, can't update ttl, still use the default ttl";
         return true;
     }
     if (range.range_key()->GetExprString() != ts_col) {
-        LOG(ERROR) << "want ts col " << ts_col << ", but get " << range.range_key()->GetExprString();
+        LOG(ERROR) << "want " << (ts_col.empty() ? "NO TS" : ts_col) << " as ts column, but get "
+                   << range.range_key()->GetExprString();
         return false;
     }
 
@@ -65,7 +65,7 @@ bool IndexMapBuilder::UpdateIndex(const hybridse::vm::Range& range) {
 
     std::stringstream ss;
     range.frame()->Print(ss, "");
-    LOG(INFO) << "frame info: " << ss.str() << ", get bounds: " << start << ", " << rows_start;
+    LOG(INFO) << "frame info: " << ss.str() << ", get start points: " << start << ", " << rows_start;
 
     common::TTLSt ttl_st;
 
@@ -103,7 +103,7 @@ IndexMap IndexMapBuilder::ToMap() {
 }
 
 std::string IndexMapBuilder::Encode(const std::string& table, const hybridse::node::ExprListNode* keys,
-                                    const hybridse::node::OrderByNode* ts) {
+                                    const hybridse::node::OrderByNode* ts, bool ts_complete) {
     // children are ColumnRefNode
     auto cols = NormalizeColumns(table, keys->children_);
     if (cols.empty()) {
@@ -131,7 +131,7 @@ std::string IndexMapBuilder::Encode(const std::string& table, const hybridse::no
                 ss << res[0];
             }
         }
-    } else {
+    } else if (ts_complete) {
         // If no ts, we should find one column which type is int64/timestamp
         auto schema = cl_->GetTable(DDLParser::DB_NAME, table)->GetSchema();
         bool find_ts = false;
@@ -176,7 +176,6 @@ std::pair<std::string, common::ColumnKey> IndexMapBuilder::Decode(const std::str
         return {};
     }
 
-    // TODO(hw): use functions
     auto key_sep = index_str.find(KEY_MARK);
     auto table_name = index_str.substr(0, key_sep);
 
@@ -190,8 +189,11 @@ std::pair<std::string, common::ColumnKey> IndexMapBuilder::Decode(const std::str
         DLOG_ASSERT(!key.empty());
         column_key.add_col_name(key);
     }
-    auto ts = index_str.substr(ts_sep + 1);
-    column_key.set_ts_name(ts);
+    // if no ts hint, do not set. No ts in index is OK
+    auto ts_col = GetTsCol(index_str);
+    if (!ts_col.empty()) {
+        column_key.set_ts_name(ts_col);
+    }
     return std::make_pair(table_name, column_key);
 }
 
