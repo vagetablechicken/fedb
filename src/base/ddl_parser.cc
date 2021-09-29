@@ -28,7 +28,8 @@ bool IndexMapBuilder::CreateIndex(const std::string& table, const hybridse::node
     }
 
     if (index_map_.find(index) != index_map_.end()) {
-        LOG(DFATAL) << "already set, needs merge?";
+        // TODO(hw): ttl merge
+        LOG(DFATAL) << "index existed in cache, can't handle it now";
         return false;
     }
     LOG(INFO) << "create index with unset ttl: " << index;
