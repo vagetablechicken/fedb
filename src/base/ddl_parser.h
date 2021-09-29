@@ -27,7 +27,6 @@
 #include "vm/engine.h"
 #include "vm/physical_op.h"
 #include "vm/simple_catalog.h"
-#include "vm/sql_compiler.h"
 
 namespace openmldb::base {
 
@@ -202,13 +201,11 @@ class DDLParser {
         }
         auto compile_info = session.GetCompileInfo();
         auto plan = session.GetCompileInfo()->GetPhysicalPlan();
-        auto& ctx = std::dynamic_pointer_cast<SqlCompileInfo>(compile_info)->get_sql_context();
-        return ParseIndexes(catalog, const_cast<hybridse::vm::PhysicalOpNode*>(plan), ctx);
+        return ParseIndexes(catalog, const_cast<hybridse::vm::PhysicalOpNode*>(plan));
     }
 
     // DLR
-    static IndexMap ParseIndexes(const std::shared_ptr<Catalog>& catalog, hybridse::vm::PhysicalOpNode* node,
-                                 hybridse::vm::SqlContext& ctx) {
+    static IndexMap ParseIndexes(const std::shared_ptr<Catalog>& catalog, hybridse::vm::PhysicalOpNode* node) {
         // This physical plan is optimized, but no real optimization about index(cuz no index in fake catalog).
         // So we can run GroupAndSortOptimizedParser on the plan(very like transformer's pass-ApplyPasses)
         GroupAndSortOptimizedParser parser(catalog);
