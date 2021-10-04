@@ -222,7 +222,7 @@ TEST_P(SQLSDKQueryTest, sql_sdk_distribute_request_test) {
     auto sql_case = GetParam();
     LOG(INFO) << "ID: " << sql_case.id() << ", DESC: " << sql_case.desc();
     if (!IsRequestSupportMode(sql_case.mode())) {
-        LOG(WARNING) << "Unsupport mode: " << sql_case.mode();
+        LOG(WARNING) << "Unsupported mode: " << sql_case.mode();
         return;
     }
     ASSERT_TRUE(router_ != nullptr) << "Fail new cluster sql router with multi partitions";
