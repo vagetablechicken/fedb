@@ -81,7 +81,7 @@ class ResultSetSQL : public ::hybridse::sdk::ResultSet {
 
     const ::hybridse::sdk::Schema* GetSchema() { return result_set_base_->GetSchema(); }
 
-    int32_t Size() { return result_set_base_->Size(); }
+    int32_t Size() override { return result_set_base_->Size(); }
 
  private:
     ::hybridse::vm::Schema schema_;

@@ -538,8 +538,10 @@ void SQLSDKQueryTest::RequestExecuteSQL(hybridse::sqlcase::SqlCase& sql_case,  /
                 ASSERT_TRUE(router->ExecuteInsert(sql_case.db(), inserts[i], &status)) << status.msg;
                 rs = router->ExecuteSQL(sql_case.db(), "select * from " + insert_table.name() + ";", &status);
                 ASSERT_TRUE(rs && status.code == 0);
+                ASSERT_TRUE(rs->Size() > 0);
                 LOG(INFO) << "select table:";
                 PrintResultSet(rs);
+                LOG(INFO) << "select table done";
             }
         }
         LOG(INFO) << "Request execute sql done!";
