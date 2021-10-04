@@ -42,7 +42,7 @@ then
             rm -f /tmp/"${line}"."${USER}".log
         fi 
     done
-else    
+else
     CASE_NAME=$1
     CASE_LEVEL=$2
     ROOT_DIR=$(pwd)

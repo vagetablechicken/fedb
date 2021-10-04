@@ -231,6 +231,7 @@ bool ClusterSDK::InitTabletClient() {
         std::string cur_endpoint = ::openmldb::base::ExtractEndpoint(endpoint);
         std::string real_endpoint;
         if (!GetRealEndpoint(cur_endpoint, &real_endpoint)) {
+            LOG(WARNING) << "fail to get real endpoint";
             return false;
         }
         real_ep_map.emplace(cur_endpoint, real_endpoint);

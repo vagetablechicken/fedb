@@ -48,29 +48,23 @@ static std::shared_ptr<SQLRouter> GetNewSQLRouter() {
     return NewClusterSQLRouter(sql_opt);
 }
 static bool IsRequestSupportMode(const std::string& mode) {
-    if (mode.find("hybridse-only") != std::string::npos ||
-        mode.find("rtidb-unsupport") != std::string::npos ||
-            mode.find("request-unsupport") != std::string::npos
-        || mode.find("standalone-unsupport") != std::string::npos) {
+    if (mode.find("hybridse-only") != std::string::npos || mode.find("rtidb-unsupport") != std::string::npos ||
+        mode.find("request-unsupport") != std::string::npos || mode.find("standalone-unsupport") != std::string::npos) {
         return false;
     }
     return true;
 }
 static bool IsBatchRequestSupportMode(const std::string& mode) {
-    if (mode.find("hybridse-only") != std::string::npos ||
-        mode.find("rtidb-unsupport") != std::string::npos ||
+    if (mode.find("hybridse-only") != std::string::npos || mode.find("rtidb-unsupport") != std::string::npos ||
         mode.find("batch-request-unsupport") != std::string::npos ||
-        mode.find("request-unsupport") != std::string::npos
-        || mode.find("standalone-unsupport") != std::string::npos) {
+        mode.find("request-unsupport") != std::string::npos || mode.find("standalone-unsupport") != std::string::npos) {
         return false;
     }
     return true;
 }
 static bool IsBatchSupportMode(const std::string& mode) {
-    if (mode.find("hybridse-only") != std::string::npos ||
-        mode.find("rtidb-unsupport") != std::string::npos ||
-        mode.find("batch-unsupport") != std::string::npos
-        || mode.find("standalone-unsupport") != std::string::npos) {
+    if (mode.find("hybridse-only") != std::string::npos || mode.find("rtidb-unsupport") != std::string::npos ||
+        mode.find("batch-unsupport") != std::string::npos || mode.find("standalone-unsupport") != std::string::npos) {
         return false;
     }
     return true;
@@ -239,8 +233,8 @@ TEST_F(SQLSDKQueryTest, execute_where_test) {
     }
     std::string db = "sql_where_test";
     hybridse::sdk::Status status;
-    ASSERT_TRUE(router->CreateDB(db, &status));
-    ASSERT_TRUE(router->ExecuteDDL(db, ddl, &status));
+    ASSERT_TRUE(router->CreateDB(db, &status)) << status.msg;
+    ASSERT_TRUE(router->ExecuteDDL(db, ddl, &status)) << status.msg;
     ASSERT_TRUE(router->RefreshCatalog());
     int64_t ts = 1594800959827;
     char buffer[4096];
