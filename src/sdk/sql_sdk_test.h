@@ -471,7 +471,7 @@ void SQLSDKQueryTest::RequestExecuteSQL(hybridse::sqlcase::SqlCase& sql_case,  /
         boost::replace_all(sql, placeholder, sql_case.inputs()[i].name_);
     }
     boost::replace_all(sql, "{auto}", hybridse::sqlcase::SqlCase::GenRand("auto_t") +
-            std::to_string((int64_t)time(NULL)));
+            std::to_string(static_cast<int64_t>(time(NULL))));
     LOG(INFO) << sql;
     std::string lower_sql = sql;
     boost::to_lower(lower_sql);
