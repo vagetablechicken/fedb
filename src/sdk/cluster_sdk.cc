@@ -424,10 +424,6 @@ bool StandAloneClusterSDK::BuildCatalog() {
     for (const auto& tablet : tablets) {
         std::string cur_endpoint = ::openmldb::base::ExtractEndpoint(tablet.endpoint);
         std::string real_endpoint = tablet.real_endpoint;
-        // TODO(hw): if real_endpoint may be empty
-        //            if (!GetRealEndpoint(cur_endpoint, &real_endpoint)) {
-        //                return false;
-        //            }
         real_ep_map.emplace(cur_endpoint, real_endpoint);
     }
     client_manager_->UpdateClient(real_ep_map);
@@ -447,9 +443,21 @@ bool StandAloneClusterSDK::BuildCatalog() {
         DLOG(INFO) << "load table info with name " << table.name() << " in db " << table.db();
     }
     // TODO(hw): no show procedure api, can't build dp_sp_map
-
-    // TODO(hw): use tables and sp map(no sp map now) to init a new catalog
-    if (!new_catalog->Init(tables, {})) {
+    Procedures db_sp_map;
+    // ns client show procedure -> repreated ::openmldb::api::ProcedureInfo
+    for(sp_info_pb){
+        // convert to ProcedureInfoImpl
+        auto sp_info = openmldb::catalog::SchemaAdapter::ConvertProcedureInfo(sp_info_pb);
+        if (!sp_info) {
+            LOG(WARNING) << "convert procedure info failed, sp_name: " << sp_info_pb.sp_name()
+            << " db: " << sp_info_pb.db_name();
+            continue;
+        }
+        auto& sp_map = db_sp_map[sp_info->GetDbName()];
+        sp_map[sp_info->GetSpName()] = sp_info;
+        DLOG(INFO) << "load procedure info with sp name " << sp_info->GetSpName() << " in db " << sp_info->GetDbName();
+    }
+    if (!new_catalog->Init(tables, db_sp_map)) {
         LOG(WARNING) << "fail to init catalog";
         return false;
     }

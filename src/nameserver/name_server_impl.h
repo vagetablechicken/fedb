@@ -210,6 +210,8 @@ class NameServerImpl : public NameServer {
 
     void ShowTable(RpcController* controller, const ShowTableRequest* request, ShowTableResponse* response,
                    Closure* done);
+    void ShowProcedure(RpcController* controller, const ShowProcedureRequest* request, ShowProcedureResponse* response,
+                       Closure* done);
 
     void MakeSnapshotNS(RpcController* controller, const MakeSnapshotNSRequest* request, GeneralResponse* response,
                         Closure* done);

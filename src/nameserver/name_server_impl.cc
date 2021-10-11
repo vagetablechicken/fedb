@@ -1351,8 +1351,7 @@ void NameServerImpl::UpdateTablets(const std::vector<std::string>& endpoints) {
     }
     // handle offline tablet
     for (Tablets::iterator tit = tablets_.begin(); tit != tablets_.end(); ++tit) {
-        if (alive.find(tit->first) == alive.end() &&
-            tit->second->state_ == ::openmldb::type::EndpointState::kHealthy) {
+        if (alive.find(tit->first) == alive.end() && tit->second->state_ == ::openmldb::type::EndpointState::kHealthy) {
             // tablet offline
             PDLOG(INFO, "offline tablet with endpoint[%s]", tit->first.c_str());
             tit->second->state_ = ::openmldb::type::EndpointState::kOffline;
@@ -3964,13 +3963,13 @@ void NameServerImpl::CreateTable(RpcController* controller, const CreateTableReq
             return;
         }
     }
-    if (table_info->column_key_size() == 1 && table_info->column_key(0).index_name().empty()
-            && table_info->column_key(0).col_name_size() == 0) {
+    if (table_info->column_key_size() == 1 && table_info->column_key(0).index_name().empty() &&
+        table_info->column_key(0).col_name_size() == 0) {
         auto ret = CreateOfflineTable(table_info->db(), table_info->name(), table_info->column_key(0).ts_name(),
-                    table_info->column_desc());
+                                      table_info->column_desc());
         response->set_code(ret.code);
         if (ret.code != 0) {
-          response->set_code(::openmldb::base::ReturnCode::kCreateTableFailed);
+            response->set_code(::openmldb::base::ReturnCode::kCreateTableFailed);
         }
         response->set_msg(ret.msg);
         return;
@@ -4058,7 +4057,8 @@ void NameServerImpl::CreateTable(RpcController* controller, const CreateTableReq
 }
 
 ::openmldb::base::ResultMsg NameServerImpl::CreateOfflineTable(const std::string& db_name,
-        const std::string& table_name, const std::string& partition_key, const Schema& schema) {
+                                                               const std::string& table_name,
+                                                               const std::string& partition_key, const Schema& schema) {
     if (nearline_tablet_.client_ && nearline_tablet_.Health()) {
         auto ret = nearline_tablet_.client_->CreateTable(db_name, table_name, partition_key, schema);
         if (ret.OK()) {
@@ -10044,8 +10044,7 @@ void NameServerImpl::CreateProcedure(RpcController* controller, const CreateProc
         PDLOG(WARNING, "cur nameserver is not leader");
         return;
     }
-    std::shared_ptr<::openmldb::nameserver::ProcedureInfo> sp_info =
-        std::make_shared<::openmldb::nameserver::ProcedureInfo>();
+    auto sp_info = std::make_shared<ProcedureInfo>();
     sp_info->CopyFrom(request->sp_info());
     const std::string& db_name = sp_info->db_name();
     const std::string& sp_name = sp_info->sp_name();
@@ -10154,7 +10153,7 @@ void NameServerImpl::DropProcedureOnTablet(const std::string& db_name, const std
             tb_client_vec.push_back(kv.second->client_);
         }
     }
-    for (auto tb_client : tb_client_vec) {
+    for (const auto& tb_client : tb_client_vec) {
         if (!tb_client->DropProcedure(db_name, sp_name)) {
             PDLOG(WARNING, "drop procedure on tablet failed. db_name[%s], sp_name[%s], endpoint[%s]", db_name.c_str(),
                   sp_name.c_str(), tb_client->GetEndpoint().c_str());
@@ -10174,8 +10173,8 @@ void NameServerImpl::DropProcedure(RpcController* controller, const DropProcedur
         PDLOG(WARNING, "cur nameserver is not leader");
         return;
     }
-    const std::string db_name = request->db_name();
-    const std::string sp_name = request->sp_name();
+    const std::string& db_name = request->db_name();
+    const std::string& sp_name = request->sp_name();
     bool wrong = false;
     {
         std::lock_guard<std::mutex> lock(mu_);

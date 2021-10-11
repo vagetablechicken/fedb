@@ -461,6 +461,15 @@ message ShowCatalogResponse {
     optional string msg = 3;
 }
 
+message ShowProcedureRequest {
+}
+
+message ShowProcedureResponse {
+  required int32 code = 1;
+  optional string msg = 2;
+  repeated ProcedureInfo sp_info = 3;
+}
+
 service NameServer {
     rpc CreateTable(CreateTableRequest) returns (GeneralResponse);
     rpc DropTable(DropTableRequest) returns (GeneralResponse);
