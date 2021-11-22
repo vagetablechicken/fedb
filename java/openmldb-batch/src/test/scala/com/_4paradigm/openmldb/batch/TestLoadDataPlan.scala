@@ -32,6 +32,7 @@ class TestLoadDataPlan extends SparkTestSuite {
       StructField("amt", DoubleType)
     ))
 
+    // empty table
     val t1 = sess.createDataFrame(Seq(
       (0, 1L, 1.0),
       (3, 3L, 3.0),
@@ -41,8 +42,9 @@ class TestLoadDataPlan extends SparkTestSuite {
     ).map(Row.fromTuple(_)).asJava, schema)
 
     val planner = new SparkPlanner(sess)
-    val res = planner.plan("load data infile 'nonexistent.csv' into table t1;", Map("t1" -> t1))
+    val res = planner.plan("load data infile 'nonexistent.csv' into table t1 options(format='csv', foo='bar');", Map("t1" -> t1))
 
+    // after loaded
     val output = res.getDf()
     output.show()
   }
