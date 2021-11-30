@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-package com._4paradigm.openmldb.spark
+package com._4paradigm.openmldb.spark.openmldb
 
-import com._4paradigm.openmldb.spark.OpenMLDBWriteOptions._
+import com._4paradigm.openmldb.spark.openmldb.OpenMLDBWriteOptions._
 import org.apache.hadoop.classification.{InterfaceAudience, InterfaceStability}
 
 /**

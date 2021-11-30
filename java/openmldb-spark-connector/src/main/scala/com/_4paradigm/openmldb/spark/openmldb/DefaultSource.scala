@@ -14,18 +14,19 @@
  * limitations under the License.
  */
 
-package com._4paradigm.openmldb.spark
+package com._4paradigm.openmldb.spark.openmldb
 
-import com._4paradigm.openmldb.sdk.{Column, Schema}
+import com._4paradigm.openmldb.sdk.Schema
 import org.apache.hadoop.classification.{InterfaceAudience, InterfaceStability}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.execution.streaming.Sink
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.streaming.OutputMode
-import org.apache.spark.sql.types.{StructField, StructType}
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 import org.slf4j.{Logger, LoggerFactory}
 
+import java.sql.Types
 import scala.collection.JavaConverters.asScalaBufferConverter
 
 /**
@@ -36,7 +37,7 @@ import scala.collection.JavaConverters.asScalaBufferConverter
  * `DefaultSource` when the user specifies the path of a source during DDL
  * operations through [[org.apache.spark.sql.DataFrameReader.format]].
  *
- * No DataSourceV2 in spark 3.0.0, so we use DataSource
+ * how about DataSourceV2?
  */
 @InterfaceAudience.Private
 @InterfaceStability.Unstable
@@ -45,7 +46,7 @@ class DefaultSource
     with SchemaRelationProvider with StreamSinkProvider {
   /**
    * A nice alias for the data source so that when specifying the format
-   * "kudu" can be used in place of "com._4paradigm.openmldb.spark".
+   * "kudu" can be used in place of "com._4paradigm.openmldb.spark.openmldb.spark".
    * Note: This class is discovered by Spark via the entry in
    * `META-INF/services/org.apache.spark.sql.sources.DataSourceRegister`
    */
@@ -70,7 +71,41 @@ class DefaultSource
    * @param data       Dataframe to save into kudu
    * @return returns populated base relation
    */
-  override def createRelation(sqlContext: SQLContext, mode: SaveMode, parameters: Map[String, String], data: DataFrame): BaseRelation = ???
+  override def createRelation(sqlContext: SQLContext, mode: SaveMode, parameters: Map[String, String], data: DataFrame): BaseRelation = {
+    val dbName = getDbName(parameters)
+    val tableName = getTableName(parameters)
+    val addrs = getMasterAddrs(parameters)
+    val writeOptions = getWriteOptions(parameters)
+
+    new OpenMLDBRelation(
+      dbName,
+      tableName,
+      addrs,
+      "",
+      writeOptions
+    )(sqlContext)
+  }
+
+  private def getDbName(stringToString: Map[String, String]): String = {
+    "db"
+  }
+
+  private def getTableName(stringToString: Map[String, String]): String = {
+    "t1"
+  }
+
+  private def getMasterAddrs(parameters: Map[String, String]): String = {
+    val addr = parameters.get("")
+    //    if (addr.isEmpty) {
+    //      throw new IllegalArgumentException("")
+    //    }
+    //    addr.get
+    ""
+  }
+
+  private def getWriteOptions(parameters: Map[String, String]): OpenMLDBWriteOptions = {
+    new OpenMLDBWriteOptions()
+  }
 
   /**
    * Construct a BaseRelation using the provided context, parameters and schema.
@@ -113,7 +148,20 @@ class OpenMLDBRelation(val dbName: String,
 
   private val tableSchema: Schema = context.client.getTableSchema(dbName, tableName)
 
-  def sdkTypeToSparkType(col: Product with Serializable) = ???
+  def sdkTypeToSparkType(sqlType: Int): DataType =
+    sqlType match {
+      case Types.BOOLEAN => BooleanType
+      case Types.SMALLINT => ShortType
+      case Types.INTEGER => IntegerType
+      case Types.BIGINT => LongType
+      case Types.FLOAT => FloatType
+      case Types.DOUBLE => DoubleType
+      case Types.VARCHAR => StringType
+      case Types.DATE => DateType
+      case Types.TIMESTAMP => TimestampType
+      case _ =>
+        throw new IllegalArgumentException(s"No support for sql type $sqlType")
+    }
 
   /**
    * Generates a SparkSQL schema from a OpenMLDB schema.
@@ -126,14 +174,16 @@ class OpenMLDBRelation(val dbName: String,
     val colMap = openmldbSchema.getColumnList.asScala.map(c => {
       (c.getColumnName, c)
     }).toMap
-    val activeCols: Seq[Column] = fields match {
-      // TODO(hw):
-      case Some(fieldNames) => fieldNames.map(colMap.get).map { col => col.getOrElse() }
+    val activeCols = fields match {
+      case Some(fieldNames) => fieldNames.map(colMap.get).map {
+        case Some(value) => value
+        case None => throw new RuntimeException("invalid column name")
+      }
       case None => openmldbSchema.getColumnList.asScala
     }
     val sparkColumns = activeCols.map { col =>
-      val sparkType = sdkTypeToSparkType(col)
-      StructField(col.getName, sparkType, col.isNullable)
+      val sparkType = sdkTypeToSparkType(col.getSqlType)
+      StructField(col.getColumnName, sparkType, !col.isNotNull)
     }
     StructType(sparkColumns)
   }
@@ -158,7 +208,7 @@ class OpenMLDBRelation(val dbName: String,
   override def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = ???
 
   /**
-   * Writes data into an existing Kudu table.
+   * Writes data into an existing OpenMLDB table.
    *
    * If the `kudu.operation` parameter is set, the data will use that operation
    * type. If the parameter is unset, the data will be upserted.
@@ -170,7 +220,7 @@ class OpenMLDBRelation(val dbName: String,
     if (overwrite) {
       throw new UnsupportedOperationException("overwrite is not yet supported")
     }
-    context.writeRows(data, tableName, writeOptions)
+    context.writeRows(data, dbName, tableName, writeOptions)
   }
 
   /**
@@ -179,7 +229,7 @@ class OpenMLDBRelation(val dbName: String,
    * @return OpenMLDB + tableName of the relation
    */
   override def toString: String = {
-    "OpenMLDB " + this.tableName
+    "OpenMLDB " + this.dbName + "." + this.tableName
   }
 }
 
@@ -198,15 +248,16 @@ private[spark] object OpenMLDBRelation {
  * Insert ignore support (KUDU-1563) would be useful, but while that doesn't exist,
  * using Upsert will work. Delete ignore would also be useful.
  */
-class OpenMLDBSink(val tableName: String,
+class OpenMLDBSink(val dbName: String,
+                   val tableName: String,
                    val openMLDBAddrs: String,
                    val writeOptions: OpenMLDBWriteOptions)(val sqlContext: SQLContext)
   extends Sink {
 
   private val context: OpenMLDBContext =
-    new OpenMLDBContext(openMLDBAddrs, sqlContext.sparkContext)
+    new OpenMLDBContext(openMLDBAddrs, "/path", sqlContext.sparkContext)
 
   override def addBatch(batchId: Long, data: DataFrame): Unit = {
-    context.writeRows(data, tableName, writeOptions)
+    context.writeRows(data, dbName, tableName, writeOptions)
   }
 }

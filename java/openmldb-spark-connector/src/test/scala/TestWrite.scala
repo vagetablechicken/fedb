@@ -23,6 +23,8 @@ class TestWrite extends FunSuite {
     val sess = SparkSession.builder().master("local[*]").getOrCreate()
     val df = sess.read.option("header", "true").csv("openmldb-spark-connector/src/test/resources/test.csv")
     df.show()
-
+    val options = Map("db" -> "db", "table" -> "t1")
+//    df.write.format("openmldb").options(options).save("/tmp/test.csv")
+    df.write.csv("/tmp/test.csv")
   }
 }

@@ -14,30 +14,53 @@
  * limitations under the License.
  */
 
-package com._4paradigm.openmldb.spark
+package com._4paradigm.openmldb.spark.openmldb
 
+import com._4paradigm.openmldb.SQLInsertRow
 import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor
 import com._4paradigm.openmldb.sdk.{SdkOption, SqlExecutor}
 import org.apache.hadoop.classification.{InterfaceAudience, InterfaceStability}
 import org.apache.spark.SparkContext
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.{DataFrame, Row}
 import org.slf4j.{Logger, LoggerFactory}
 
 @InterfaceAudience.Public
 @InterfaceStability.Evolving
-//@SerialVersionUID(1L)
 class OpenMLDBContext(val zkAddress: String,
                       val zkPath: String,
                       sc: SparkContext)
 //                   val socketReadTimeoutMs: Option[Long])
   extends Serializable {
-  def writeRows(data: DataFrame, tableName: String, writeOptions: OpenMLDBWriteOptions): Unit = ???
+
+  def appendToInsertRow(insertRow: SQLInsertRow, i: Int, value: Any): Unit = {
+    // TODO(hw):
+  }
+
+  def buildInsertRow(row: Row, dbName: String, tableName: String): SQLInsertRow = {
+    val insertRow = client.getInsertRow(dbName, tableName)
+    insertRow.Init(10)
+    for (i <- 0 until insertRow.GetSchema().GetColumnCnt()) {
+      appendToInsertRow(insertRow, i, row.get(i))
+    }
+    insertRow
+  }
+
+  def writeRows(data: DataFrame, dbName: String, tableName: String, writeOptions: OpenMLDBWriteOptions): Unit = {
+    data.foreach(row => {
+      val insertRow = buildInsertRow(row, dbName, tableName)
+      if (!client.executeInsert("", "", insertRow)) {
+        throw new RuntimeException(s"insert failed, row: $insertRow")
+      }
+    })
+  }
 
   val log: Logger = LoggerFactory.getLogger(getClass)
-  @transient lazy val client: SqlExecutor = {
+  lazy val client: SqlExecutor = {
     val option = new SdkOption
-    option.setZkCluster(zkAddress)
-    option.setZkPath(zkPath)
+//    option.setZkCluster(zkAddress)
+//    option.setZkPath(zkPath)
+    option.setZkCluster("127.0.0.1:6181")
+    option.setZkPath("/onebox")
     option.setSessionTimeout(200000) // TODO(hw): option?
     new SqlClusterExecutor(option)
   }
