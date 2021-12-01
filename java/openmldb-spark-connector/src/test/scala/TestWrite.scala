@@ -21,10 +21,14 @@ class TestWrite extends FunSuite {
 
   test("Test write a local file to openmldb") {
     val sess = SparkSession.builder().master("local[*]").getOrCreate()
-    val df = sess.read.option("header", "true").csv("openmldb-spark-connector/src/test/resources/test.csv")
+    val df = sess.read.option("header", "true").schema("c1 bigint").csv("openmldb-spark-connector/src/test/resources/test.csv")
     df.show()
     val options = Map("db" -> "db", "table" -> "t1")
-//    df.write.format("openmldb").options(options).save("/tmp/test.csv")
-    df.write.csv("/tmp/test.csv")
+    // TODO(hw): smaller format string?
+    // batch write can't use ErrorIfExists
+    df.write
+      //      .format("com._4paradigm.openmldb.spark.OpenmldbSource")
+      .format("openmldb")
+      .options(options).mode("append").save()
   }
 }
