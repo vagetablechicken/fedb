@@ -23,6 +23,7 @@ import com._4paradigm.openmldb.sdk.SqlException;
 import com._4paradigm.openmldb.sdk.SqlExecutor;
 import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor;
 import com._4paradigm.openmldb.spark.write.OpenmldbWriteBuilder;
+import com._4paradigm.openmldb.spark.write.OpenmldbWriteConfig;
 import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.TableCapability;
 import org.apache.spark.sql.connector.write.LogicalWriteInfo;
@@ -42,15 +43,19 @@ import java.util.Set;
 public class OpenmldbTable implements SupportsWrite {
     private final String dbName;
     private final String tableName;
-    private Set<TableCapability> capabilities;
+    private final SdkOption option;
     private SqlExecutor executor = null;
+
+    private Set<TableCapability> capabilities;
+
 
     public OpenmldbTable(String dbName, String tableName, SdkOption option) {
         this.dbName = dbName;
         this.tableName = tableName;
+        this.option = option;
         try {
             this.executor = new SqlClusterExecutor(option);
-            // TODO(hw): check table exists
+            // no need to check table exists, schema() will check it later
         } catch (SqlException e) {
             e.printStackTrace();
         }
@@ -58,7 +63,8 @@ public class OpenmldbTable implements SupportsWrite {
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        return new OpenmldbWriteBuilder(info);
+        OpenmldbWriteConfig config = new OpenmldbWriteConfig(dbName, tableName, option);
+        return new OpenmldbWriteBuilder(config, info);
     }
 
     @Override
@@ -67,7 +73,7 @@ public class OpenmldbTable implements SupportsWrite {
         return tableName;
     }
 
-    private DataType sdkTypeToSparkType(int sqlType) {
+    public static DataType sdkTypeToSparkType(int sqlType) {
         switch (sqlType) {
             case Types.BOOLEAN:
                 return DataTypes.BooleanType;
@@ -94,7 +100,6 @@ public class OpenmldbTable implements SupportsWrite {
 
     @Override
     public StructType schema() {
-        // TODO(hw): ref scala DefaultSource
         try {
             Schema schema = executor.getTableSchema(dbName, tableName);
             List<Column> schemaList = schema.getColumnList();
