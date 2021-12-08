@@ -36,6 +36,9 @@ public class HybridSeLibrary {
             return;
         }
         LibraryLoader.loadLibrary(DEFAULT_HYBRIDSE_JSDK_CORE_NAME);
+        LibraryLoader.loadLibrary("hybridse_flags");
+        LibraryLoader.loadLibrary("sql_jsdk");
+        LibraryLoader.loadLibrary("hybridse_flags");
         initialized = true;
     }
 

@@ -58,7 +58,7 @@ if (LLVM_EXT_ENABLE)
     add_definitions(-DLLVM_EXT_ENABLE)
 endif ()
 
-add_library(hybridse_flags STATIC ${CMAKE_CURRENT_SOURCE_DIR}/flags.cc)
+add_library(hybridse_flags SHARED ${CMAKE_CURRENT_SOURCE_DIR}/flags.cc)
 target_link_libraries(hybridse_flags gflags)
 # hybridse core library
 add_library(hybridse_core STATIC ${SRC_FILE_LIST} $<TARGET_OBJECTS:hybridse_proto> case/case_data_mock.cc)
