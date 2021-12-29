@@ -16,10 +16,8 @@
 
 package com._4paradigm.openmldb.batch
 
-import com._4paradigm.openmldb.batch.api.OpenmldbSession
-import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor
-import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StructField, StructType}
+import org.apache.spark.sql.{AnalysisException, Row}
 
 import scala.collection.JavaConverters.seqAsJavaListConverter
 
