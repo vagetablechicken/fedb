@@ -54,6 +54,7 @@ class TestSelectIntoPlan extends SparkTestSuite {
 
     // read data is disordered, so only check the count
     val df = getSparkSession.read.schema("id int").csv(filePath)
+    df.show()
     assert(df.count() == t1.count())
   }
 }

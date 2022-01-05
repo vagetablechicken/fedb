@@ -1318,7 +1318,7 @@ void HandleSQL(const std::string& sql) {
             } else {
                 ::openmldb::taskmanager::JobInfo job_info;
                 std::map<std::string, std::string> config;
-                status = sr->ExecuteOfflineQuery(sql, config, db, job_info);
+                status = sr->ExportOfflineData(sql, config, db, job_info);
                 if (status.OK() && job_info.id() > 0) {
                     PrintJobInfos(std::cout, {job_info});
                 }
