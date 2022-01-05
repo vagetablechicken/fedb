@@ -48,7 +48,7 @@ public interface TaskManagerInterface {
     TaskManager.ShowJobResponse ImportOfflineData(TaskManager.ImportOfflineDataRequest request);
 
     @BrpcMeta(serviceName = "openmldb.taskmanager.TaskManagerServer", methodName = "ExportOfflineData")
-    TaskManager.ShowJobResponse ExportOfflineData(TaskManager.ImportOfflineDataRequest request);
+    TaskManager.ShowJobResponse ExportOfflineData(TaskManager.ExportOfflineDataRequest request);
 
     @BrpcMeta(serviceName = "openmldb.taskmanager.TaskManagerServer", methodName = "DropOfflineTable")
     TaskManager.DropOfflineTableResponse DropOfflineTable(TaskManager.DropOfflineTableRequest request);

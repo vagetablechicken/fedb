@@ -132,9 +132,9 @@ namespace client {
                 job_info.CopyFrom(response.job());
             }
         }
-        return ::openmldb::base::Status(response.code(), response.msg());
+        return {response.code(), response.msg()};
     } else {
-        return ::openmldb::base::Status(-1, "Fail to request TaskManager server");
+        return {-1, "Fail to request TaskManager server"};
     }
 }
 

@@ -165,7 +165,7 @@ public class TaskManagerImpl implements TaskManagerInterface {
     }
 
     @Override
-    public TaskManager.ShowJobResponse ExportOfflineData(TaskManager.ImportOfflineDataRequest request) {
+    public TaskManager.ShowJobResponse ExportOfflineData(TaskManager.ExportOfflineDataRequest request) {
         try {
             JobInfo jobInfo = OpenmldbBatchjobManager.exportOfflineData(request.getSql(), request.getConfMap(), request.getDefaultDb());
             return TaskManager.ShowJobResponse.newBuilder().setCode(StatusCode.SUCCESS).setJob(jobInfoToProto(jobInfo))
