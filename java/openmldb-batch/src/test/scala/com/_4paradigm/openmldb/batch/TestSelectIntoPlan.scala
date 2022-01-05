@@ -42,12 +42,12 @@ class TestSelectIntoPlan extends SparkTestSuite {
     val planner = new SparkPlanner(sess)
     val filePath = "/tmp/select_into_test"
     val res = planner.plan(s"select id from t1 into outfile '$filePath' " +
-      "options(format='csv', foo='bar', header=false, mode='overwrite');", Map("t1" -> t1))
+      "options(format='csv', foo='bar', mode='overwrite');", Map("t1" -> t1))
     res.getDf().show()
     try {
       // writing in default mode 'errorifexsits' will get exception, cuz filePath contains data
       planner.plan(s"select id from t1 into outfile '$filePath' " +
-        "options(format='csv', foo='bar', header=false);", Map("t1" -> t1))
+        "options(format='csv', foo='bar');", Map("t1" -> t1))
     } catch {
       case e: AnalysisException => println("It should catch this: " + e.toString)
     }

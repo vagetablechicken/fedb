@@ -26,12 +26,21 @@ object SelectIntoPlan {
   def gen(ctx: PlanContext, node: PhysicalSelectIntoNode, input: SparkInstance): SparkInstance = {
     val outPath = node.OutFile();
     require(outPath.nonEmpty)
-    input.getDf().show()
+    input.getDf().printSchema()
+    if (logger.isDebugEnabled()) {
+      logger.debug("select {} rows", input.getDf().count())
+      input.getDf().show(10)
+    }
     // write options don't need deepCopy
     val (format, options, mode, _) = HybridseUtil.parseOptions(node)
     logger.info("select into offline storage: format[{}], options[{}], write mode[{}], out path {}", format, options,
       mode, outPath)
-    input.getDf().write.format(format).options(options).mode(mode).save(outPath)
+    if (input.getDf().isEmpty) {
+      logger.info("select empty, skip save")
+    } else {
+      input.getDf().write.format(format).options(options).mode(mode).save(outPath)
+    }
+
     SparkInstance.fromDataFrame(ctx.getSparkSession.emptyDataFrame)
   }
 }
