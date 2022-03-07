@@ -72,14 +72,15 @@ def lgb_modelfit_nocv(params, dtrain, dvalid, predictors, target='target', objec
 
 path = 'data/'
 
+# use pandas extension types to support NA in integer column
 dtypes = {
-    'ip': 'uint32',
-    'app': 'uint16',
-    'device': 'uint16',
-    'os': 'uint16',
-    'channel': 'uint16',
-    'is_attributed': 'uint8',
-    'click_id': 'uint32'
+    'ip': 'UInt32',
+    'app': 'UInt16',
+    'device': 'UInt16',
+    'os': 'UInt16',
+    'channel': 'UInt16',
+    'is_attributed': 'UInt8',
+    'click_id': 'UInt32'
 }
 
 common_schema = [('ip', 'int'), ('app', 'int'), ('device', 'int'),
@@ -96,17 +97,21 @@ test_df = pd.read_csv(path+"test.csv", dtype=dtypes, nrows=2,
 
 len_train = len(train_df)
 train_df = train_df.append(test_df)
-# after append, two cols become float, can't set to int cuz NaN
-# todo: how to resolve it?
-train_df['is_attributed'] = train_df['is_attributed'].astype('int')
-train_df['click_id'] = train_df['click_id'].astype('int')
+print(train_df)
+# after append, two cols become float, can't set to int cuz NA
+# so convert dtype, to make sure csv file which 'is_attributed' & 'click_id' are int
+# train_df = train_df.convert_dtypes() need?
 train_df.to_csv("train_prepared.csv", index=False)
 test_df.to_csv("test_prepared.csv", index=False)
-os.exit()
-
 del train_df
 del test_df
 gc.collect()
+
+
+# train_df = pd.read_csv("train_prepared.csv",
+#                        dtype=dtypes, usecols=[c[0] for c in train_schema + [('click_id', 'int')]])
+# train_df['is_attributed'] = train_df['is_attributed'].astype('int', errors='ignore')
+# train_df['click_id'] = train_df['click_id'].astype('int', errors='ignore')
 
 engine = db.create_engine(
     'openmldb:///db_test?zk=127.0.0.1:6181&zkPath=/onebox')
@@ -124,7 +129,7 @@ connection.execute("CREATE TABLE {}()".format(table_name))
 print("load data to offline storage for training")
 connection.execute("LOAD DATA INFILE {} INTO TABLE {}.{};".format(
     path+"train_prepared.csv", db_name, table_name))
-
+os._exit(233)
 
 print('data prep...')
 
