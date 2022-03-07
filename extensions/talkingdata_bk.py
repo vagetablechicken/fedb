@@ -1,3 +1,4 @@
+from operator import index
 import pandas as pd
 import time
 import numpy as np
@@ -74,9 +75,11 @@ dtypes = {
         }
 
 print('load train to openmldb ...')
-train_df = pd.read_csv(path+"train.csv", nrows=40000000, dtype=dtypes, usecols=['ip','app','device','os', 'channel', 'click_time', 'is_attributed'])
+train_df = pd.read_csv(path+"train.csv", nrows=4000000, 
+dtype=dtypes, usecols=['ip','app','device','os', 'channel', 'click_time', 'is_attributed'])
 print('load test...')
-test_df = pd.read_csv(path+"test.csv", dtype=dtypes, usecols=['ip','app','device','os', 'channel', 'click_time', 'click_id'])
+test_df = pd.read_csv(path+"test.csv",
+dtype=dtypes, usecols=['ip','app','device','os', 'channel', 'click_time', 'click_id'])
 
 import gc
 
@@ -121,7 +124,10 @@ train_df['qty'] = train_df['qty'].astype('uint16')
 train_df['ip_app_count'] = train_df['ip_app_count'].astype('uint16')
 train_df['ip_app_os_count'] = train_df['ip_app_os_count'].astype('uint16')
 
-train_df.head(20)
+train_df.to_csv("final_train.csv",index=False)
+print(train_df.head(20))
+import os
+os._exit(233)
 test_df = train_df[len_train:]
 val_df = train_df[(len_train-3000000):len_train]
 train_df = train_df[:(len_train-3000000)]
