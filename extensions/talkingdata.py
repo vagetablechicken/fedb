@@ -5,12 +5,14 @@ import pandas as pd
 import time
 import numpy as np
 from sklearn.model_selection import train_test_split
-import lightgbm as lgb # mac needs `brew install libomp`
-import sqlalchemy as db  # openmldb sdk after pr 1325
+import lightgbm as lgb  # mac needs `brew install libomp`
+# import sqlalchemy as db  # openmldb sqlalchemy doesn't support set/use sql
+import openmldb.sdk
 
 
 def lgb_modelfit_nocv(params, dtrain, dvalid, predictors, target='target', objective='binary', metrics='auc',
-                      feval=None, early_stopping_rounds=20, num_boost_round=3000, verbose_eval=10, categorical_features=None):
+                      feval=None, early_stopping_rounds=20, num_boost_round=3000, verbose_eval=10,
+                      categorical_features=None):
     lgb_params = {
         'boosting_type': 'gbdt',
         'objective': objective,
@@ -65,7 +67,7 @@ def lgb_modelfit_nocv(params, dtrain, dvalid, predictors, target='target', objec
     n_estimators = bst1.best_iteration
     print("\nModel Report")
     print("n_estimators : ", n_estimators)
-    print(metrics+":", evals_results['valid'][metrics][n_estimators-1])
+    print(metrics + ":", evals_results['valid'][metrics][n_estimators - 1])
 
     return bst1
 
@@ -89,24 +91,29 @@ train_schema = common_schema + [('is_attributed', 'int')]
 test_schema = common_schema + [('click_id', 'int')]
 print('prepare train&test data...')
 
-train_df = pd.read_csv(path+"train.csv", nrows=4,#0000000,
+train_df = pd.read_csv(path + "train.csv", nrows=4000000,
                        dtype=dtypes, usecols=[c[0] for c in train_schema])
 
-test_df = pd.read_csv(path+"test.csv", dtype=dtypes, nrows=2,
+test_df = pd.read_csv(path + "test.csv", dtype=dtypes,
                       usecols=[c[0] for c in test_schema])
 
 len_train = len(train_df)
 # after appending, schema changed
 # after append, two cols become float, can't set to int cuz NA
 train_df = train_df.append(test_df)
-train_schema = train_schema + [('click_id', 'int')]
-def column_string(col_tuple) -> str:
-    return ' '.join(col_tuple)
-schema_string = ','.join(list(map(column_string, train_schema)))
 
 # `hour`, `day` will be the groupby key
 train_df['hour'] = pd.to_datetime(train_df.click_time).dt.hour.astype('uint8')
 train_df['day'] = pd.to_datetime(train_df.click_time).dt.day.astype('uint8')
+
+train_schema = train_schema + [('click_id', 'int'), ('hour', 'int'), ('day', 'int')]
+
+
+def column_string(col_tuple) -> str:
+    return ' '.join(col_tuple)
+
+
+schema_string = ','.join(list(map(column_string, train_schema)))
 print(train_df)
 train_df.to_csv("train_prepared.csv", index=False)
 # test_df.to_csv("test_prepared.csv", index=False)
@@ -114,43 +121,58 @@ del train_df
 del test_df
 gc.collect()
 
+# macos python sdk got ImportError: dlopen(
+# /usr/local/lib/python3.9/site-packages/openmldb/dbapi/../native/_sql_router_sdk.so, 2): initializer function
+# 0x11611774c not in mapped image for /usr/local/lib/python3.9/site-packages/openmldb/dbapi/../native/_sql_router_sdk
+# .so https://zhuanlan.zhihu.com/p/107024982 健康引用关系
+# engine = db.create_engine(
+#     'openmldb:///foo?zk=127.0.0.1:6181&zkPath=/openmldb')
+# connection = engine.connect()
+option = openmldb.sdk.OpenMLDBClusterSdkOptions("127.0.0.1:6181", "/openmldb")
+sdk = openmldb.sdk.OpenMLDBSdk(option, True)
+sdk.init()
 
-
-# macos python sdk got
-# ImportError: dlopen(/usr/local/lib/python3.9/site-packages/openmldb/dbapi/../native/_sql_router_sdk.so, 2): 
-# initializer function 0x11611774c not in mapped image for /usr/local/lib/python3.9/site-packages/openmldb/dbapi/../native/_sql_router_sdk.so
-# https://zhuanlan.zhihu.com/p/107024982 健康引用关系
-engine = db.create_engine(
-    'openmldb:///foo?zk=127.0.0.1:6181&zkPath=/onebox')
-connection = engine.connect()
-os._exit(233)
 db_name = "kaggle"
-table_name = "talkingdata" + int(time.time())
+table_name = "talkingdata" + str(int(time.time()))
 print("use openmldb db {} table {}".format(db_name, table_name))
 
-connection.execute("set @@execute_mode='offline';")
-connection.execute("CREATE DATABASE {};".format(db_name))
-connection.execute("USE {};".format(db_name))
-connection.execute("CREATE TABLE {}({})".format(table_name, schema_string))
 
+# unsupported now
+# connection.execute("set @@execute_mode='offline';")
+
+def nothrow_execute(sql):
+    try:
+        print("execute " + sql)
+        ok, rs = sdk.executeQuery(db_name, sql)
+        print(rs)
+    except Exception as e:
+        print(e)
+
+
+nothrow_execute("CREATE DATABASE {};".format(db_name))
+nothrow_execute("USE {};".format(db_name))
+nothrow_execute("CREATE TABLE {}({});".format(table_name, schema_string))
+
+nothrow_execute("set @@execute_mode='offline';")
 print("load data to offline storage for training")
-connection.execute("LOAD DATA INFILE {} INTO TABLE {}.{};".format("train_prepared.csv", db_name, table_name))
-
+nothrow_execute("LOAD DATA INFILE 'file://{}' INTO TABLE {}.{};".format(os.path.abspath("train_prepared.csv"), db_name, table_name))
+# todo: must wait for load data finished
 
 print('data prep...')
-sql = """
+final_train_file = "final_train.csv"
+sql_part = """
 select ip, day, hour, 
 count(channel) over w1 as qty, 
 count(channel) over w2 as ip_app_count, 
 count(channel) over w3 as ip_app_os_count
 from {}.{} 
 window 
-w1 as (partition by ip, day, hour order by click_time), 
-w2 as(partition by ip, day order by click_time),
-w3 as(partition by ip, app order by click_time),
-
-;
+w1 as (partition by ip, day, hour order by click_time ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 
+w2 as(partition by ip, day order by click_time ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
+w3 as(partition by ip, app order by click_time ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 """.format(db_name, table_name)
+nothrow_execute("{} INTO OUTFILE '{}';".format(sql_part, os.path.abspath(final_train_file)))
+
 os._exit(233)
 
 # # of clicks for each ip-day-hour combination
@@ -178,7 +200,6 @@ train_df = train_df.merge(gp, on=['ip', 'app', 'os'], how='left')
 del gp
 gc.collect()
 
-
 print("vars and data type: ")
 train_df.info()
 train_df['qty'] = train_df['qty'].astype('uint16')
@@ -187,8 +208,8 @@ train_df['ip_app_os_count'] = train_df['ip_app_os_count'].astype('uint16')
 
 train_df.head(20)
 test_df = train_df[len_train:]
-val_df = train_df[(len_train-3000000):len_train]
-train_df = train_df[:(len_train-3000000)]
+val_df = train_df[(len_train - 3000000):len_train]
+train_df = train_df[:(len_train - 3000000)]
 
 print("train size: ", len(train_df))
 print("valid size: ", len(val_df))
@@ -198,7 +219,6 @@ target = 'is_attributed'
 predictors = ['app', 'device', 'os', 'channel', 'hour',
               'day', 'qty', 'ip_app_count', 'ip_app_os_count']
 categorical = ['app', 'device', 'os', 'channel', 'hour']
-
 
 sub = pd.DataFrame()
 sub['click_id'] = test_df['click_id'].astype('int')

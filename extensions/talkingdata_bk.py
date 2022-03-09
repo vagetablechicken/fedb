@@ -124,7 +124,7 @@ train_df['qty'] = train_df['qty'].astype('uint16')
 train_df['ip_app_count'] = train_df['ip_app_count'].astype('uint16')
 train_df['ip_app_os_count'] = train_df['ip_app_os_count'].astype('uint16')
 
-train_df.to_csv("final_train.csv",index=False)
+train_df.to_csv("final_train_bk.csv",index=False)
 print(train_df.head(20))
 import os
 os._exit(233)
