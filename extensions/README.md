@@ -10,3 +10,10 @@ session variable传阻塞配置，rpc发task manager前配置下rpc msg的阻塞
 taskmanager收到后，一样异步发，但是轮询是否成功，结束后回复。做成阻塞的样子。
 2. set/show variable
 3. use db
+
+
+data prepare:
+https://www.kaggle.com/c/talkingdata-adtracking-fraud-detection/overview
+
+kaggle competitions download -c talkingdata-adtracking-fraud-detection
+unzip to ./extensions/data 
