@@ -136,10 +136,6 @@ db_name = "kaggle"
 table_name = "talkingdata" + str(int(time.time()))
 print("use openmldb db {} table {}".format(db_name, table_name))
 
-
-# unsupported now
-# connection.execute("set @@execute_mode='offline';")
-
 def nothrow_execute(sql):
     try:
         print("execute " + sql)
@@ -157,6 +153,7 @@ nothrow_execute("set @@execute_mode='offline';")
 print("load data to offline storage for training")
 nothrow_execute("LOAD DATA INFILE 'file://{}' INTO TABLE {}.{};".format(os.path.abspath("train_prepared.csv"), db_name, table_name))
 # todo: must wait for load data finished
+#  set sync_job & job_timeout
 
 print('data prep...')
 final_train_file = "final_train.csv"
@@ -173,40 +170,42 @@ w3 as(partition by ip, app order by click_time ROWS BETWEEN UNBOUNDED PRECEDING 
 """.format(db_name, table_name)
 nothrow_execute("{} INTO OUTFILE '{}';".format(sql_part, os.path.abspath(final_train_file)))
 
-os._exit(233)
+# # original logic
+# # # of clicks for each ip-day-hour combination
+# print('group by...')
+# gp = train_df[['ip', 'day', 'hour', 'channel']].groupby(by=['ip', 'day', 'hour'])[
+#     ['channel']].count().reset_index().rename(index=str, columns={'channel': 'qty'})
+# print('merge...')
+# train_df = train_df.merge(gp, on=['ip', 'day', 'hour'], how='left')
+# del gp
+# gc.collect()
 
-# # of clicks for each ip-day-hour combination
-print('group by...')
-gp = train_df[['ip', 'day', 'hour', 'channel']].groupby(by=['ip', 'day', 'hour'])[
-    ['channel']].count().reset_index().rename(index=str, columns={'channel': 'qty'})
-print('merge...')
-train_df = train_df.merge(gp, on=['ip', 'day', 'hour'], how='left')
-del gp
-gc.collect()
+# # # of clicks for each ip-app combination
+# print('group by...')
+# gp = train_df[['ip', 'app', 'channel']].groupby(by=['ip', 'app'])[['channel']].count(
+# ).reset_index().rename(index=str, columns={'channel': 'ip_app_count'})
+# train_df = train_df.merge(gp, on=['ip', 'app'], how='left')
+# del gp
+# gc.collect()
 
-# # of clicks for each ip-app combination
-print('group by...')
-gp = train_df[['ip', 'app', 'channel']].groupby(by=['ip', 'app'])[['channel']].count(
-).reset_index().rename(index=str, columns={'channel': 'ip_app_count'})
-train_df = train_df.merge(gp, on=['ip', 'app'], how='left')
-del gp
-gc.collect()
+# # # of clicks for each ip-app-os combination
+# print('group by...')
+# gp = train_df[['ip', 'app', 'os', 'channel']].groupby(by=['ip', 'app', 'os'])[['channel']].count(
+# ).reset_index().rename(index=str, columns={'channel': 'ip_app_os_count'})
+# train_df = train_df.merge(gp, on=['ip', 'app', 'os'], how='left')
+# del gp
+# gc.collect()
 
-# # of clicks for each ip-app-os combination
-print('group by...')
-gp = train_df[['ip', 'app', 'os', 'channel']].groupby(by=['ip', 'app', 'os'])[['channel']].count(
-).reset_index().rename(index=str, columns={'channel': 'ip_app_os_count'})
-train_df = train_df.merge(gp, on=['ip', 'app', 'os'], how='left')
-del gp
-gc.collect()
+# print("vars and data type: ")
+# train_df.info()
+# train_df['qty'] = train_df['qty'].astype('uint16')
+# train_df['ip_app_count'] = train_df['ip_app_count'].astype('uint16')
+# train_df['ip_app_os_count'] = train_df['ip_app_os_count'].astype('uint16')
 
-print("vars and data type: ")
-train_df.info()
-train_df['qty'] = train_df['qty'].astype('uint16')
-train_df['ip_app_count'] = train_df['ip_app_count'].astype('uint16')
-train_df['ip_app_os_count'] = train_df['ip_app_os_count'].astype('uint16')
+# train_df.head(20)
 
-train_df.head(20)
+# todo: load train_df from final_train_file
+
 test_df = train_df[len_train:]
 val_df = train_df[(len_train - 3000000):len_train]
 train_df = train_df[:(len_train - 3000000)]
@@ -264,3 +263,5 @@ print("writing...")
 sub.to_csv('sub_lgb_balanced99.csv', index=False)
 print("done...")
 print(sub.info())
+
+# todo: start a predict server, and request it, get predict result
