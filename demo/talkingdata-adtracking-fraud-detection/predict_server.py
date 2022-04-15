@@ -1,18 +1,18 @@
 #!/usr/bin/env python3                                                                                            
- # -*- coding: utf-8 -*-
- # Copyright 2021 4Paradigm
- #
- # Licensed under the Apache License, Version 2.0 (the "License");
- # you may not use this file except in compliance with the License.
- # You may obtain a copy of the License at
- #
- #   http://www.apache.org/licenses/LICENSE-2.0
- #
- # Unless required by applicable law or agreed to in writing, software
- # distributed under the License is distributed on an "AS IS" BASIS,
- # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- # See the License for the specific language governing permissions and
- # limitations under the License.
+# -*- coding: utf-8 -*-
+# Copyright 2021 4Paradigm
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
  
 import numpy as np
 import tornado.web
@@ -34,15 +34,15 @@ table_schema = [
     ("click_time", "timestamp"),
     ("is_attributed", 'int'),
 ]
- 
+
 url = ""
- 
+
 def get_schema():
     dict_schema = {}
     for i in table_schema:
         dict_schema[i[0]] = i[1]
     return dict_schema
- 
+
 dict_schema = get_schema()
 json_schema = json.dumps(dict_schema)
 print(json_schema)
@@ -51,11 +51,11 @@ def build_feature(rs):
     var_Y = [rs[-1]]
     var_X = [rs[:-1]]
     return np.array(var_X)   
- 
+
 class SchemaHandler(tornado.web.RequestHandler):
     def get(self):
         self.write(json_schema)
- 
+
 class PredictHandler(tornado.web.RequestHandler):
     def post(self):
         row = json.loads(self.request.body)
@@ -87,18 +87,18 @@ class PredictHandler(tornado.web.RequestHandler):
             self.write("---------------predict whether is attributed -------------\n")
             print(prediction)
             self.write("%s"%str(prediction[0]))
- 
+
 class MainHandler(tornado.web.RequestHandler):
     def get(self):                   
         self.write("real time execute sparksql demo")
- 
+
 def make_app():
     return tornado.web.Application([
         (r"/", MainHandler),
         (r"/schema", SchemaHandler),
         (r"/predict", PredictHandler),
     ])
- 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("endpoint",  help="specify the endpoint of apiserver")
