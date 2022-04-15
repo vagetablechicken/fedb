@@ -60,9 +60,7 @@ class PredictHandler(tornado.web.RequestHandler):
     def post(self):
         row = json.loads(self.request.body)
         data = {}
-        data["input"] = []
-    #  rngbao@m7-pce-dev01 talkingdata-adtracking-fraud-detection]$ vim 
-         
+        data["input"] = []  
         row_data = []
         for i in table_schema:
             if i[1] == "string":
