@@ -64,7 +64,8 @@ train_schema = common_schema + [('is_attributed', 'int')]
 test_schema = common_schema + [('click_id', 'int')]
 print('Prepare train data...')
 
-train_df = pd.read_csv(path + "train.csv", nrows=40, #00000,
+sample_cnt = 4000000
+train_df = pd.read_csv(path + "train.csv", nrows=sample_cnt, 
                        dtype=dtypes, usecols=[c[0] for c in train_schema])
 len_train = len(train_df)
 # take a portion from train sample data
@@ -136,10 +137,11 @@ connection.execute("{} INTO OUTFILE '{}' OPTIONS(mode='overwrite');".format(
 # load features from train_feature_file
 # train_feature_dir has multi csv files
 train_df = pd.concat(map(lambda file: pd.read_csv(file), glob.glob(os.path.join('', train_feature_dir + "/*.csv"))))
-print(train_df)
+print(train_df.head())
 assert len(train_df) == len_train
-val_df = train_df[(len_train - 3000000):len_train]
-train_df = train_df[:(len_train - 3000000)]
+train_row_cnt = int(len_train * 3 / 4)
+train_df = train_df[(len_train - train_row_cnt):len_train]
+val_df = train_df[:(len_train - train_row_cnt)]
 
 print("train size: ", len(train_df))
 print("valid size: ", len(val_df))
@@ -163,26 +165,26 @@ params_xgb = {
      # Minimum sum of instance weight(hessian) needed in a child(leaf)
      'min_child_weight': 0
 }
-xgtrain = xgb.DMatrix(train_df[predictors], label=train_df[target])
-xgvalid = xgb.DMatrix(val_df[predictors], label=val_df[target])
-#watchlist = [(xgvalid, 'eval'), (xgtrain, 'train')]
+xgtrain = xgb.DMatrix(train_df[predictors].values, label=train_df[target].values)
+xgvalid = xgb.DMatrix(val_df[predictors].values, label=val_df[target].values)
+watchlist = [(xgvalid, 'eval'), (xgtrain, 'train')]
 
-# bst = xgb_modelfit_nocv(params_xgb,
-#                          xgtrain,
-#                          watchlist,
-#                          predictors,
-#                          target,
-#                          objective='binary:logistic',
-#                          metrics='auc',
-#                          num_boost_round=300,
-#                          early_stopping_rounds=50)
-# 
-# del train_df
-# del val_df
-# gc.collect()
-# 
-# print("Save model.txt")
-# bst.save_model("./model.json")
+bst = xgb_modelfit_nocv(params_xgb,
+                         xgtrain,
+                         watchlist,
+                         predictors,
+                         target,
+                         objective='binary:logistic',
+                         metrics='auc',
+                         num_boost_round=300,
+                         early_stopping_rounds=50)
+
+del train_df
+del val_df
+gc.collect()
+ 
+print("Save model.txt")
+bst.save_model("./model.json")
 
 
 print("Prepare online serving")
@@ -192,7 +194,7 @@ print("Deploy sql")
 deploy_name="demo"
 connection.execute("SET @@execute_mode='online';")
 connection.execute("USE {}".format(db_name))
-connection.execute("DROP DEPLOYMENT {}".format(deploy_name))
+nothrow_execute("DROP DEPLOYMENT {}".format(deploy_name))
 sql_part = """
 select ip, app, device, os, channel, is_attributed, hour(click_time) as hour, day(click_time) as day, 
 count(channel) over w1 as qty, 
@@ -204,7 +206,7 @@ w1 as (partition by ip order by click_time ROWS_RANGE BETWEEN 1h PRECEDING AND C
 w2 as(partition by ip, app order by click_time ROWS_RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
 w3 as(partition by ip, app, os order by click_time ROWS_RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 """.format(table_name)
-connection.execute("DEPLOY " + deploy_name + " " + sql_part)
+#connection.execute("DEPLOY " + deploy_name + " " + sql_part)
 print("Import data to online")
 # online feature extraction needs history data
 # set job_timeout bigger if the `LOAD DATA` job timeout
