@@ -69,9 +69,8 @@ class PredictHandler(tornado.web.RequestHandler):
                 row_data.append(row.get(i[0], 0))
             else:
                 row_data.append(None)
-        print('=======', row_data)
-        data["input"].append(row_data)
-        print("######", data)                        
+        print('receive request: ', row_data)
+        data["input"].append(row_data)                             
         rs = requests.post(url, json=data)
         result = json.loads(rs.text)
         print(result)
@@ -108,5 +107,5 @@ if __name__ == "__main__":
     bst = xgb.Booster(model_file=args.model_path)
     print("model is ready")
     app = make_app()
-    app.listen(8886)
+    app.listen(8881)
     tornado.ioloop.IOLoop.current().start()       

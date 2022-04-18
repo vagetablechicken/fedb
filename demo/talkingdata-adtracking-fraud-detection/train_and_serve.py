@@ -9,7 +9,7 @@ import xgboost as xgb
 import sqlalchemy as db
 import glob
 
-def xgb_modelfit_nocv(params, dtrain, dvalid, predictors, target='target', objective='binary', metrics='auc',
+def xgb_modelfit_nocv(params, dtrain, dvalid, predictors, target='target', objective='binary:logistic', metrics='auc',
                       feval=None,num_boost_round=3000,early_stopping_rounds=20):
     xgb_params = {
         'booster': 'gbtree',
@@ -67,7 +67,7 @@ train_schema = common_schema + [('is_attributed', 'int')]
 test_schema = common_schema + [('click_id', 'int')]
 print('Prepare train data...')
 
-train_df = pd.read_csv(path + "train.csv", nrows=4000000,
+train_df = pd.read_csv(path + "train.csv", nrows=40, #00000,
                        dtype=dtypes, usecols=[c[0] for c in train_schema])
 len_train = len(train_df)
 # take a portion from train sample data
@@ -166,32 +166,35 @@ params_xgb = {
      'min_child_weight': 0
 }
 xgtrain = xgb.DMatrix(train_df[predictors].values, label=train_df[target].values)
-xgvalid = xgb.DMatrix(val_df[predictors].values, label=val_df[target].values)
-watchlist = [(xgvalid, 'eval'), (xgtrain, 'train')]
+#xgvalid = xgb.DMatrix(val_df[predictors].values, label=val_df[target].values)
+#watchlist = [(xgvalid, 'eval'), (xgtrain, 'train')]
 
-bst = xgb_modelfit_nocv(params_xgb,
-                         xgtrain,
-                         watchlist,
-                         predictors,
-                         target,
-                         objective='binary:logistic',
-                         metrics='auc',
-                         num_boost_round=300,
-                         early_stopping_rounds=50)
-
-del train_df
-del val_df
-gc.collect()
-
-print("Save model.txt")
-bst.save_model("./model.json")
+# bst = xgb_modelfit_nocv(params_xgb,
+#                          xgtrain,
+#                          watchlist,
+#                          predictors,
+#                          target,
+#                          objective='binary:logistic',
+#                          metrics='auc',
+#                          num_boost_round=300,
+#                          early_stopping_rounds=50)
+# 
+# del train_df
+# del val_df
+# gc.collect()
+# 
+# print("Save model.txt")
+# bst.save_model("./model.json")
 
 
 print("Prepare online serving")
 
 print("Deploy sql")
+# predict server needs this name
+deploy_name="demo"
 connection.execute("SET @@execute_mode='online';")
 connection.execute("USE {}".format(db_name))
+connection.execute("DROP DEPLOYMENT {}".format(deploy_name))
 sql_part = """
 select ip, app, device, os, channel, is_attributed, hour(click_time) as hour, day(click_time) as day, 
 count(channel) over w1 as qty, 
@@ -203,9 +206,10 @@ w1 as (partition by ip order by click_time ROWS_RANGE BETWEEN 1h PRECEDING AND C
 w2 as(partition by ip, app order by click_time ROWS_RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
 w3 as(partition by ip, app, os order by click_time ROWS_RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 """.format(table_name)
-connection.execute("DEPLOY demo " + sql_part)
+connection.execute("DEPLOY " + deploy_name + " " + sql_part)
 print("Import data to online")
 # online feature extraction needs history data
 # set job_timeout bigger if the `LOAD DATA` job timeout
 connection.execute("LOAD DATA INFILE 'file://{}' INTO TABLE {}.{} OPTIONS(mode='append',format='csv',header=true);".format(
     os.path.abspath("train_sample.csv"), db_name, table_name))
+
