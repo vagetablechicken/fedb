@@ -1,6 +1,6 @@
 # Prepare
 ```
-pip install matplotlib pandas sklearn xgboost tornado
+pip install pandas xgboost tornado
 ```
 
 ## OpenMLDB

@@ -1,10 +1,7 @@
 import gc
 import os
-from matplotlib.pyplot import table
 import pandas as pd
 import time
-import numpy as np
-from sklearn.model_selection import train_test_split
 import xgboost as xgb
 import sqlalchemy as db
 import glob
@@ -139,6 +136,7 @@ connection.execute("{} INTO OUTFILE '{}' OPTIONS(mode='overwrite');".format(
 # load features from train_feature_file
 # train_feature_dir has multi csv files
 train_df = pd.concat(map(lambda file: pd.read_csv(file), glob.glob(os.path.join('', train_feature_dir + "/*.csv"))))
+print(train_df)
 assert len(train_df) == len_train
 val_df = train_df[(len_train - 3000000):len_train]
 train_df = train_df[:(len_train - 3000000)]
@@ -165,8 +163,8 @@ params_xgb = {
      # Minimum sum of instance weight(hessian) needed in a child(leaf)
      'min_child_weight': 0
 }
-xgtrain = xgb.DMatrix(train_df[predictors].values, label=train_df[target].values)
-#xgvalid = xgb.DMatrix(val_df[predictors].values, label=val_df[target].values)
+xgtrain = xgb.DMatrix(train_df[predictors], label=train_df[target])
+xgvalid = xgb.DMatrix(val_df[predictors], label=val_df[target])
 #watchlist = [(xgvalid, 'eval'), (xgtrain, 'train')]
 
 # bst = xgb_modelfit_nocv(params_xgb,
