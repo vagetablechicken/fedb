@@ -174,7 +174,7 @@ bst = xgb_modelfit_nocv(params_xgb,
                          watchlist,
                          predictors,
                          target,
-                         objective='binary',
+                         objective='binary:logistic',
                          metrics='auc',
                          num_boost_round=300,
                          early_stopping_rounds=50)
