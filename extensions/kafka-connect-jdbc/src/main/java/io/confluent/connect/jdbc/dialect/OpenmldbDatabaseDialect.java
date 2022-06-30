@@ -15,10 +15,8 @@
 
 package io.confluent.connect.jdbc.dialect;
 
-import java.util.Collection;
-import java.util.List;
-
 import io.confluent.connect.jdbc.sink.metadata.SinkRecordField;
+import io.confluent.connect.jdbc.util.ColumnDefinition;
 import io.confluent.connect.jdbc.util.ColumnId;
 import io.confluent.connect.jdbc.util.ExpressionBuilder;
 import io.confluent.connect.jdbc.util.IdentifierRules;
@@ -26,10 +24,15 @@ import io.confluent.connect.jdbc.util.TableId;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Time;
 import org.apache.kafka.connect.data.Timestamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.sql.Types;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * A {@link DatabaseDialect} for OpenMLDB.
@@ -102,8 +105,8 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
 
   @Override
   public String buildCreateTableStatement(
-          TableId table,
-          Collection<SinkRecordField> fields
+      TableId table,
+      Collection<SinkRecordField> fields
   ) {
     final List<String> pkFieldNames = extractPrimaryKeyFieldNames(fields);
     if (!pkFieldNames.isEmpty()) {
@@ -114,8 +117,8 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
 
   @Override
   protected void writeColumnSpec(
-          ExpressionBuilder builder,
-          SinkRecordField f
+      ExpressionBuilder builder,
+      SinkRecordField f
   ) {
     builder.appendColumnName(f.name());
     builder.append(" ");
@@ -124,11 +127,11 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
     if (f.defaultValue() != null) {
       builder.append(" DEFAULT ");
       formatColumnValue(
-              builder,
-              f.schemaName(),
-              f.schemaParameters(),
-              f.schemaType(),
-              f.defaultValue()
+          builder,
+          f.schemaName(),
+          f.schemaParameters(),
+          f.schemaType(),
+          f.defaultValue()
       );
     } else if (!isColumnOptional(f)) {
       builder.append(" NOT NULL");
@@ -137,8 +140,8 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
 
   @Override
   public String buildDropTableStatement(
-          TableId table,
-          DropOptions options
+      TableId table,
+      DropOptions options
   ) {
     // no ifExists, no cascade
     ExpressionBuilder builder = expressionBuilder();
@@ -150,25 +153,25 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
 
   @Override
   public List<String> buildAlterTable(
-          TableId table,
-          Collection<SinkRecordField> fields
+      TableId table,
+      Collection<SinkRecordField> fields
   ) {
     throw new UnsupportedOperationException("alter is unsupported");
   }
 
   @Override
   public String buildUpdateStatement(
-          TableId table,
-          Collection<ColumnId> keyColumns,
-          Collection<ColumnId> nonKeyColumns
+      TableId table,
+      Collection<ColumnId> keyColumns,
+      Collection<ColumnId> nonKeyColumns
   ) {
     throw new UnsupportedOperationException("update is unsupported");
   }
 
   @Override
   public final String buildDeleteStatement(
-          TableId table,
-          Collection<ColumnId> keyColumns
+      TableId table,
+      Collection<ColumnId> keyColumns
   ) {
     throw new UnsupportedOperationException("delete is unsupported");
   }
@@ -176,6 +179,97 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
   // type is useless, just a placeholder
   protected Integer getSqlTypeForSchema(Schema schema) {
     return 0;
+  }
+
+  // set name in schema
+  @Override
+  protected String addFieldToSchema(
+      final ColumnDefinition columnDefn,
+      final SchemaBuilder builder,
+      final String fieldName,
+      final int sqlType,
+      final boolean optional
+  ) {
+    int precision = columnDefn.precision();
+    int scale = columnDefn.scale();
+    SchemaBuilder schemaBuilder = null;
+    switch (sqlType) {
+      case Types.NULL: {
+        log.debug("JDBC type 'NULL' not currently supported for column '{}'", fieldName);
+        return null;
+      }
+
+      case Types.BOOLEAN: {
+        schemaBuilder = SchemaBuilder.bool();
+        break;
+      }
+
+      // 16 bit ints
+      case Types.SMALLINT: {
+        // TODO(hw): openmldb doesn't support unsigned, but jdbc metadata returns false,
+        //   fix it later. columnDefn.isSignedNumber()
+        schemaBuilder = SchemaBuilder.int16();
+        break;
+      }
+
+      // 32 bit ints
+      case Types.INTEGER: {
+        schemaBuilder = SchemaBuilder.int32();
+        break;
+      }
+
+      // 64 bit int
+      case Types.BIGINT: {
+        schemaBuilder = SchemaBuilder.int64();
+        break;
+      }
+
+      // FLOAT is, confusingly, double precision and effectively the same as DOUBLE. See REAL
+      // for single precision
+      case Types.FLOAT: {
+        schemaBuilder = SchemaBuilder.float32();
+        break;
+      }
+      case Types.DOUBLE: {
+        schemaBuilder = SchemaBuilder.float64();
+        break;
+      }
+
+      case Types.VARCHAR: {
+        // Some of these types will have fixed size, but we drop this from the schema conversion
+        // since only fixed byte arrays can have a fixed size
+        schemaBuilder = SchemaBuilder.string();
+        break;
+      }
+
+      // Date is day + moth + year
+      case Types.DATE: {
+        schemaBuilder = Date.builder();
+        break;
+      }
+
+      // Time is a time of day -- hour, minute, seconds, nanoseconds
+      case Types.TIME: {
+        schemaBuilder = Time.builder();
+        break;
+      }
+      // Timestamp is a date + time // TODO(hw): openmldb use int64
+//      case Types.TIMESTAMP: {
+//        schemaBuilder =
+//        break;
+//      }
+
+      default: {
+        log.warn("JDBC type {} ({}) not currently supported?", sqlType, columnDefn.typeName());
+      }
+    }
+    if (schemaBuilder == null) {
+      log.warn("schema builder is null, use GenericDatabaseDialect method");
+      return super.addFieldToSchema(columnDefn, builder, fieldName, sqlType, optional);
+    }
+    //    schemaBuilder.name(fieldName);
+    builder.field(fieldName, optional ? schemaBuilder.optional().build() : schemaBuilder.build());
+    return fieldName;
   }
 }
 

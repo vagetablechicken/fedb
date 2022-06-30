@@ -254,6 +254,11 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "view definition does not match the records' schemas (regardless of ``"
       + AUTO_EVOLVE + "``).";
 
+  public static final String AUTO_SCHEMA_CONFIG = "auto.schema";
+  private static final String AUTO_SCHEMA_DISPLAY = "Auto Schema";
+  public static final String AUTO_SCHEMA_DEFAULT = "false";
+  private static final String AUTO_SCHEMA_DOC = "";
+
   private static final EnumRecommender QUOTE_METHOD_RECOMMENDER =
       EnumRecommender.in(QuoteMethod.values());
 
@@ -491,6 +496,16 @@ public class JdbcSinkConfig extends AbstractConfig {
             2,
             ConfigDef.Width.SHORT,
             RETRY_BACKOFF_MS_DISPLAY
+        )
+        .define(
+            AUTO_SCHEMA_CONFIG,
+            ConfigDef.Type.BOOLEAN,
+            AUTO_SCHEMA_DEFAULT,
+            ConfigDef.Importance.MEDIUM,
+            AUTO_SCHEMA_DOC, DDL_GROUP,
+            1,
+            ConfigDef.Width.SHORT,
+            AUTO_SCHEMA_DISPLAY
         );
 
   public final String connectorName;
@@ -513,6 +528,8 @@ public class JdbcSinkConfig extends AbstractConfig {
   public final String dialectName;
   public final TimeZone timeZone;
   public final EnumSet<TableType> tableTypes;
+
+  public final boolean autoSchema;
 
   public JdbcSinkConfig(Map<?, ?> props) {
     super(CONFIG_DEF, props);
@@ -542,6 +559,9 @@ public class JdbcSinkConfig extends AbstractConfig {
           "Primary key mode must be 'record_key' when delete support is enabled");
     }
     tableTypes = TableType.parse(getList(TABLE_TYPES_CONFIG));
+
+    autoSchema = getBoolean(AUTO_SCHEMA_CONFIG);
+    // TODO(hw): check if autoCreate is true
   }
 
   private String getPasswordValue(String key) {
