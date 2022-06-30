@@ -623,6 +623,8 @@ public interface DatabaseDialect extends ConnectionProvider {
     bindField(statement, index, schema, value);
   }
 
+  List<ColumnDefinition> describeColumnsInOrder(Connection connection, TableId tableId) throws SQLException;
+
   /**
    * A function to bind the values from a sink record into a prepared statement.
    */

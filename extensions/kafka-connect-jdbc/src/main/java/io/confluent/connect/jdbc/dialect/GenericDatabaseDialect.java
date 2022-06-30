@@ -120,7 +120,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
   public static class Provider extends FixedScoreProvider {
     public Provider() {
       super(GenericDatabaseDialect.class.getSimpleName(),
-            DatabaseDialectProvider.AVERAGE_MATCHING_SCORE
+          DatabaseDialectProvider.AVERAGE_MATCHING_SCORE
       );
     }
 
@@ -199,7 +199,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
       );
     }
     if (config instanceof JdbcSourceConnectorConfig) {
-      mapNumerics = ((JdbcSourceConnectorConfig)config).numericMapping();
+      mapNumerics = ((JdbcSourceConnectorConfig) config).numericMapping();
       batchMaxRows = config.getInt(JdbcSourceConnectorConfig.BATCH_MAX_ROWS_CONFIG);
     } else {
       mapNumerics = NumericMapping.NONE;
@@ -345,13 +345,13 @@ public class GenericDatabaseDialect implements DatabaseDialect {
    *                   DriverManager#getConnection(String, Properties) getConnection(...) method};
    *                   never null
    * @return the updated connection properties, or {@code properties} if they are not modified or
-   *     should be returned; never null
+   * should be returned; never null
    */
   protected Properties addConnectionProperties(Properties properties) {
     // Get the set of config keys that are known to the connector
     Set<String> configKeys = config.values().keySet();
     // Add any configuration property that begins with 'connection.` and that is not known
-    config.originalsWithPrefix(JdbcSourceConnectorConfig.CONNECTION_PREFIX).forEach((k,v) -> {
+    config.originalsWithPrefix(JdbcSourceConnectorConfig.CONNECTION_PREFIX).forEach((k, v) -> {
       if (!configKeys.contains(JdbcSourceConnectorConfig.CONNECTION_PREFIX + k)) {
         properties.put(k, v);
       }
@@ -468,7 +468,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
    * @param metadata the database metadata; may not be null but may be empty if no table types
    * @param types    the case-independent table types that are desired
    * @return the array of table types take directly from the list of available types returned by the
-   *     JDBC driver; never null
+   * JDBC driver; never null
    * @throws SQLException if there is an error with the database connection
    */
   protected String[] tableTypes(
@@ -531,7 +531,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
   @Override
   public ExpressionBuilder expressionBuilder() {
     return identifierRules().expressionBuilder()
-                            .setQuoteIdentifiers(quoteSqlIdentifiers);
+        .setQuoteIdentifiers(quoteSqlIdentifiers);
   }
 
   /**
@@ -603,15 +603,15 @@ public class GenericDatabaseDialect implements DatabaseDialect {
   }
 
   public void setConnectionIsolationMode(
-          Connection connection,
-          TransactionIsolationMode transactionIsolationMode
+      Connection connection,
+      TransactionIsolationMode transactionIsolationMode
   ) {
     if (transactionIsolationMode
-            == TransactionIsolationMode.DEFAULT) {
+        == TransactionIsolationMode.DEFAULT) {
       return;
     }
     int isolationMode = TransactionIsolationMode.get(
-            transactionIsolationMode
+        transactionIsolationMode
     );
     try {
       DatabaseMetaData metadata = connection.getMetaData();
@@ -621,8 +621,8 @@ public class GenericDatabaseDialect implements DatabaseDialect {
         throw new ConfigException("Transaction Isolation level not supported by database");
       }
     } catch (SQLException | ConfigException ex) {
-      log.warn("Unable to set transaction.isolation.mode: " +  transactionIsolationMode.name()
-              +  ". No transaction isolation mode will be set for the queries: " + ex.getMessage());
+      log.warn("Unable to set transaction.isolation.mode: " + transactionIsolationMode.name()
+          + ". No transaction isolation mode will be set for the queries: " + ex.getMessage());
     }
   }
 
@@ -640,7 +640,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     TableId tableId = parseTableIdentifier(tablePattern);
     String catalog = tableId.catalogName() != null ? tableId.catalogName() : catalogPattern;
     String schema = tableId.schemaName() != null ? tableId.schemaName() : schemaPattern;
-    return describeColumns(connection, catalog , schema, tableId.tableName(), columnPattern);
+    return describeColumns(connection, catalog, schema, tableId.tableName(), columnPattern);
   }
 
   @Override
@@ -675,69 +675,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     )) {
       final int rsColumnCount = rs.getMetaData().getColumnCount();
       while (rs.next()) {
-        final String catalogName = rs.getString(1);
-        final String schemaName = rs.getString(2);
-        final String tableName = rs.getString(3);
-        final TableId tableId = new TableId(catalogName, schemaName, tableName);
-        final String columnName = rs.getString(4);
-        final ColumnId columnId = new ColumnId(tableId, columnName, null);
-        final int jdbcType = rs.getInt(5);
-        final String typeName = rs.getString(6);
-        final int precision = rs.getInt(7);
-        final int scale = rs.getInt(9);
-        final String typeClassName = null;
-        Nullability nullability;
-        final int nullableValue = rs.getInt(11);
-        switch (nullableValue) {
-          case DatabaseMetaData.columnNoNulls:
-            nullability = Nullability.NOT_NULL;
-            break;
-          case DatabaseMetaData.columnNullable:
-            nullability = Nullability.NULL;
-            break;
-          case DatabaseMetaData.columnNullableUnknown:
-          default:
-            nullability = Nullability.UNKNOWN;
-            break;
-        }
-        Boolean autoIncremented = null;
-        if (rsColumnCount >= 23) {
-          // Not all drivers include all columns ...
-          String isAutoIncremented = rs.getString(23);
-          if ("yes".equalsIgnoreCase(isAutoIncremented)) {
-            autoIncremented = Boolean.TRUE;
-          } else if ("no".equalsIgnoreCase(isAutoIncremented)) {
-            autoIncremented = Boolean.FALSE;
-          }
-        }
-        Boolean signed = null;
-        Boolean caseSensitive = null;
-        Boolean searchable = null;
-        Boolean currency = null;
-        Integer displaySize = null;
-        boolean isPrimaryKey = pkColumns.contains(columnId);
-        if (isPrimaryKey) {
-          // Some DBMSes report pks as null
-          nullability = Nullability.NOT_NULL;
-        }
-        ColumnDefinition defn = columnDefinition(
-            rs,
-            columnId,
-            jdbcType,
-            typeName,
-            typeClassName,
-            nullability,
-            Mutability.UNKNOWN,
-            precision,
-            scale,
-            signed,
-            displaySize,
-            autoIncremented,
-            caseSensitive,
-            searchable,
-            currency,
-            isPrimaryKey
-        );
+        defn = createColumnDefinition(rs,rsColumnCount, pkColumns);
         results.put(columnId, defn);
       }
       return results;
@@ -860,14 +798,97 @@ public class GenericDatabaseDialect implements DatabaseDialect {
       TableId tableId
   ) throws SQLException {
     Map<ColumnId, ColumnDefinition> columnDefns = describeColumns(connection, tableId.catalogName(),
-                                                                  tableId.schemaName(),
-                                                                  tableId.tableName(), null
+        tableId.schemaName(),
+        tableId.tableName(), null
     );
     if (columnDefns.isEmpty()) {
       return null;
     }
     TableType tableType = tableTypeFor(connection, tableId);
     return new TableDefinition(tableId, columnDefns.values(), tableType);
+  }
+
+  public List<ColumnDefinition> describeColumnsInOrder(Connection connection, TableId tableId) throws SQLException {
+    List<ColumnDefinition> results = new ArrayList<>();
+    try (ResultSet rs = connection.getMetaData().getColumns(
+        tableId.catalogName(),
+        tableId.schemaName(),
+        tableId.tableName(), null
+    )) {
+      while (rs.next()) {
+        ColumnDefinition defn = createColumnDefinition(rs);
+        results.add(defn);
+      }
+    }
+    return results;
+  }
+
+  // use the current row in result set to create column definition
+  // TODO(hw): how to return multi class?
+  private Map.Entry<ColumnId, ColumnDefinition> createColumnDefinition(ResultSet rs, int rsColumnCount, Set<ColumnId> pkColumns) throws SQLException {
+    final String catalogName = rs.getString(1);
+    final String schemaName = rs.getString(2);
+    final String tableName = rs.getString(3);
+    final TableId tableId = new TableId(catalogName, schemaName, tableName);
+    final String columnName = rs.getString(4);
+    final ColumnId columnId = new ColumnId(tableId, columnName, null);
+    final int jdbcType = rs.getInt(5);
+    final String typeName = rs.getString(6);
+    final int precision = rs.getInt(7);
+    final int scale = rs.getInt(9);
+    final String typeClassName = null;
+    Nullability nullability;
+    final int nullableValue = rs.getInt(11);
+    switch (nullableValue) {
+      case DatabaseMetaData.columnNoNulls:
+        nullability = Nullability.NOT_NULL;
+        break;
+      case DatabaseMetaData.columnNullable:
+        nullability = Nullability.NULL;
+        break;
+      case DatabaseMetaData.columnNullableUnknown:
+      default:
+        nullability = Nullability.UNKNOWN;
+        break;
+    }
+    Boolean autoIncremented = null;
+    if (rsColumnCount >= 23) {
+      // Not all drivers include all columns ...
+      String isAutoIncremented = rs.getString(23);
+      if ("yes".equalsIgnoreCase(isAutoIncremented)) {
+        autoIncremented = Boolean.TRUE;
+      } else if ("no".equalsIgnoreCase(isAutoIncremented)) {
+        autoIncremented = Boolean.FALSE;
+      }
+    }
+    Boolean signed = null;
+    Boolean caseSensitive = null;
+    Boolean searchable = null;
+    Boolean currency = null;
+    Integer displaySize = null;
+    boolean isPrimaryKey = pkColumns.contains(columnId);
+    if (isPrimaryKey) {
+      // Some DBMSes report pks as null
+      nullability = Nullability.NOT_NULL;
+    }
+    return Map.entry(columnId, columnDefinition(
+        rs,
+        columnId,
+        jdbcType,
+        typeName,
+        typeClassName,
+        nullability,
+        Mutability.UNKNOWN,
+        precision,
+        scale,
+        signed,
+        displaySize,
+        autoIncremented,
+        caseSensitive,
+        searchable,
+        currency,
+        isPrimaryKey
+    );
   }
 
   protected TableType tableTypeFor(
@@ -1003,7 +1024,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
       SchemaBuilder builder
   ) {
     return addFieldToSchema(columnDefn, builder, fieldNameFor(columnDefn), columnDefn.type(),
-                            columnDefn.isOptional()
+        columnDefn.isOptional()
     );
   }
 
@@ -1250,7 +1271,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
       ColumnMapping mapping
   ) {
     return columnConverterFor(mapping, mapping.columnDefn(), mapping.columnNumber(),
-                              jdbcDriverInfo().jdbcVersionAtLeast(4, 0)
+        jdbcDriverInfo().jdbcVersionAtLeast(4, 0)
     );
   }
 
@@ -1549,9 +1570,9 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     builder.append(table);
     builder.append("(");
     builder.appendList()
-           .delimitedBy(",")
-           .transformedBy(ExpressionBuilder.columnNames())
-           .of(keyColumns, nonKeyColumns);
+        .delimitedBy(",")
+        .transformedBy(ExpressionBuilder.columnNames())
+        .of(keyColumns, nonKeyColumns);
     builder.append(") VALUES(");
     builder.appendMultiple(",", "?", keyColumns.size() + nonKeyColumns.size());
     builder.append(")");
@@ -1570,15 +1591,15 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     builder.append(table);
     builder.append(" SET ");
     builder.appendList()
-           .delimitedBy(", ")
-           .transformedBy(ExpressionBuilder.columnNamesWith(" = ?"))
-           .of(nonKeyColumns);
+        .delimitedBy(", ")
+        .transformedBy(ExpressionBuilder.columnNamesWith(" = ?"))
+        .of(nonKeyColumns);
     if (!keyColumns.isEmpty()) {
       builder.append(" WHERE ");
       builder.appendList()
-             .delimitedBy(" AND ")
-             .transformedBy(ExpressionBuilder.columnNamesWith(" = ?"))
-             .of(keyColumns);
+          .delimitedBy(" AND ")
+          .transformedBy(ExpressionBuilder.columnNamesWith(" = ?"))
+          .of(keyColumns);
     }
     return builder.toString();
   }
@@ -1595,8 +1616,8 @@ public class GenericDatabaseDialect implements DatabaseDialect {
 
   @Override
   public String buildDeleteStatement(
-          TableId table,
-          Collection<ColumnId> keyColumns
+      TableId table,
+      Collection<ColumnId> keyColumns
   ) {
     ExpressionBuilder builder = expressionBuilder();
     builder.append("DELETE FROM ");
@@ -1772,9 +1793,9 @@ public class GenericDatabaseDialect implements DatabaseDialect {
       builder.append(System.lineSeparator());
       builder.append("PRIMARY KEY(");
       builder.appendList()
-             .delimitedBy(",")
-             .transformedBy(ExpressionBuilder.quote())
-             .of(pkFieldNames);
+          .delimitedBy(",")
+          .transformedBy(ExpressionBuilder.quote())
+          .of(pkFieldNames);
       builder.append(")");
     }
     builder.append(")");
@@ -1819,17 +1840,18 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     builder.append(table);
     builder.append(" ");
     builder.appendList()
-           .delimitedBy(",")
-           .transformedBy(transform)
-           .of(fields);
+        .delimitedBy(",")
+        .transformedBy(transform)
+        .of(fields);
     return Collections.singletonList(builder.toString());
   }
 
   @Override
   public void validateSpecificColumnTypes(
-          ResultSetMetaData rsMetadata,
-          List<ColumnId> columns
-  ) throws ConnectException { }
+      ResultSetMetaData rsMetadata,
+      List<ColumnId> columns
+  ) throws ConnectException {
+  }
 
   protected List<String> extractPrimaryKeyFieldNames(Collection<SinkRecordField> fields) {
     final List<String> pks = new ArrayList<>();

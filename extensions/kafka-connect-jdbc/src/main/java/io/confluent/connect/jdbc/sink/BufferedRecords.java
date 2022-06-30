@@ -15,29 +15,39 @@
 
 package io.confluent.connect.jdbc.sink;
 
+import io.confluent.connect.jdbc.dialect.DatabaseDialect;
+import io.confluent.connect.jdbc.dialect.DatabaseDialect.StatementBinder;
+import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
+import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
+import io.confluent.connect.jdbc.util.ColumnDefinition;
+import io.confluent.connect.jdbc.util.ColumnId;
+import io.confluent.connect.jdbc.util.TableDefinition;
+import io.confluent.connect.jdbc.util.TableId;
+import org.apache.kafka.connect.data.Date;
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.data.Time;
+import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.BatchUpdateException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.BatchUpdateException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
-
-import io.confluent.connect.jdbc.dialect.DatabaseDialect;
-import io.confluent.connect.jdbc.dialect.DatabaseDialect.StatementBinder;
-import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
-import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
-import io.confluent.connect.jdbc.util.ColumnId;
-import io.confluent.connect.jdbc.util.TableId;
 
 import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
@@ -75,9 +85,90 @@ public class BufferedRecords {
     this.dbStructure = dbStructure;
     this.connection = connection;
     this.recordValidator = RecordValidator.create(config);
+    if (true) { //config.autoSchema) {
+      // columns map in tableDefinition is not the right order. We must use the list
+      TableDefinition tableDefn = null;
+
+      SchemaBuilder builder = SchemaBuilder.struct();
+      for (ColumnDefinition colDefn : dbDialect.describeColumnsInOrder(connection, tableId)) {
+        dbDialect.addFieldToSchema(colDefn, builder);
+      }
+      valueSchema = builder.build();
+    }
+  }
+
+  private Object convertToLogicalType(Field field, Object value) {
+    if (field.schema().name() != null) {
+      switch (field.schema().name()) {
+        case Date.LOGICAL_NAME:
+        case Time.LOGICAL_NAME:
+        case Timestamp.LOGICAL_NAME:
+          return new java.util.Date((Long) value);
+        default:
+      }
+    }
+    return null;
+  }
+
+  private Object convertToSchemaType(Field field, Object value) {
+    Object result = value;
+    switch (field.schema().type()) {
+      case INT16: {
+        Long realV = null;
+        if (value instanceof Long) {
+          realV = (Long) value;
+        }
+        if (realV != null) {
+          result = realV.shortValue();
+        }
+        break;
+      }
+      case INT32: {
+        Long realV = null;
+        if (value instanceof Long) {
+          realV = (Long) value;
+        }
+        if (realV != null) {
+          result = realV.intValue();
+        }
+        break;
+      }
+      default: {
+        log.info("field {}-type {}, value type {}, stay", field.name(),
+            field.schema().type(), value.getClass().getSimpleName());
+      }
+    }
+    return result;
   }
 
   public List<SinkRecord> add(SinkRecord record) throws SQLException, TableAlterOrCreateException {
+    // if auto.schema=true, auto.create should be false, and we will use the schema from connection,
+    // not the record.valueSchema()
+    // TODO(hw): openmldb doesn't support pk mode, so we only handle value schema here. Leave key
+    //  schema as it is.
+    // HashMap value to Struct
+    Object value = record.value();
+    if (record.value() instanceof HashMap) {
+      Struct structValue = new Struct(valueSchema);
+      HashMap<String, Object> map = (HashMap) record.value();
+      // values should follow the value schema order
+      for(Field field: valueSchema.fields()){
+        Object v = map.get(field.name());
+        // convert to the right type with schema(logical type first, if not, schema type)
+        Object newV = convertToLogicalType(field, v);
+        if (newV == null) {
+          newV = convertToSchemaType(field, v);
+        }
+        structValue.put(field.name(), newV);
+      }
+      value = structValue;
+    }
+
+    record = new SinkRecord(record.topic(), record.kafkaPartition(),
+        record.keySchema(), record.key(),
+        valueSchema, value,
+        record.kafkaOffset(), record.timestamp(), record.timestampType(), record.headers());
+
     recordValidator.validate(record);
     final List<SinkRecord> flushed = new ArrayList<>();
 
@@ -156,7 +247,7 @@ public class BufferedRecords {
         );
       }
     }
-    
+
     // set deletesInBatch if schema value is not null
     if (isNull(record.value()) && config.deleteEnabled) {
       deletesInBatch = true;
@@ -197,7 +288,7 @@ public class BufferedRecords {
     for (int updateCount : batchStatus) {
       if (updateCount == Statement.EXECUTE_FAILED) {
         throw new BatchUpdateException(
-                "Execution failed for part of the batch update", batchStatus);
+            "Execution failed for part of the batch update", batchStatus);
       }
     }
   }
@@ -208,7 +299,7 @@ public class BufferedRecords {
       for (int updateCount : batchStatus) {
         if (updateCount == Statement.EXECUTE_FAILED) {
           throw new BatchUpdateException(
-                  "Execution failed for part of the batch delete", batchStatus);
+              "Execution failed for part of the batch delete", batchStatus);
         }
       }
     }
