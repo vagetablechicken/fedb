@@ -190,20 +190,8 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
       final int sqlType,
       final boolean optional
   ) {
-    int precision = columnDefn.precision();
-    int scale = columnDefn.scale();
     SchemaBuilder schemaBuilder = null;
     switch (sqlType) {
-      case Types.NULL: {
-        log.debug("JDBC type 'NULL' not currently supported for column '{}'", fieldName);
-        return null;
-      }
-
-      case Types.BOOLEAN: {
-        schemaBuilder = SchemaBuilder.bool();
-        break;
-      }
-
       // 16 bit ints
       case Types.SMALLINT: {
         // TODO(hw): openmldb doesn't support unsigned, but jdbc metadata returns false,
@@ -235,39 +223,17 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
         break;
       }
 
-      case Types.VARCHAR: {
-        // Some of these types will have fixed size, but we drop this from the schema conversion
-        // since only fixed byte arrays can have a fixed size
-        schemaBuilder = SchemaBuilder.string();
-        break;
-      }
-
       // Date is day + moth + year
-      case Types.DATE: {
-        schemaBuilder = Date.builder();
-        break;
-      }
-
       // Time is a time of day -- hour, minute, seconds, nanoseconds
-      case Types.TIME: {
-        schemaBuilder = Time.builder();
-        break;
-      }
-      // Timestamp is a date + time // TODO(hw): openmldb use int64
-//      case Types.TIMESTAMP: {
-//        schemaBuilder =
-//        break;
-//      }
-
+      // Timestamp is a date + time, openmldb jdbc setTimestamp is compatible
       default: {
-        log.warn("JDBC type {} ({}) not currently supported?", sqlType, columnDefn.typeName());
       }
     }
     if (schemaBuilder == null) {
-      log.warn("schema builder is null, use GenericDatabaseDialect method");
+      log.warn("openmldb schema builder for sqlType {} is null, " +
+          "use GenericDatabaseDialect method", sqlType);
       return super.addFieldToSchema(columnDefn, builder, fieldName, sqlType, optional);
     }
-    //    schemaBuilder.name(fieldName);
     builder.field(fieldName, optional ? schemaBuilder.optional().build() : schemaBuilder.build());
     return fieldName;
   }

@@ -86,7 +86,6 @@ public class BufferedRecords {
     this.connection = connection;
     this.recordValidator = RecordValidator.create(config);
     if (config.autoSchema) {
-      // no-order columns
       TableDefinition tableDefn;
       try {
         tableDefn = dbStructure.tableDefinition(connection, tableId);
