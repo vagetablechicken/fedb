@@ -200,7 +200,7 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
         break;
       }
 
-      // 32 bit ints
+      // 32 bit int
       case Types.INTEGER: {
         schemaBuilder = SchemaBuilder.int32();
         break;
@@ -212,8 +212,6 @@ public class OpenmldbDatabaseDialect extends GenericDatabaseDialect {
         break;
       }
 
-      // FLOAT is, confusingly, double precision and effectively the same as DOUBLE. See REAL
-      // for single precision
       case Types.FLOAT: {
         schemaBuilder = SchemaBuilder.float32();
         break;
