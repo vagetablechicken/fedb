@@ -11,25 +11,27 @@ TODO: `<cluster-name>-conf` is better than custom dest name?
 config:
 ```
 <dest>/
-  <ip:port>-ns/
+  <ip:port>-nameserver/
     nameserver.flags
-  <ip:port>-tablet1/
+  <ip:port>-tablet/
     tablet.flags
-  <ip:port>-tablet2/
+  <ip:port>-tablet/
     tablet.flags
-  <ip:port>-taskmanager1/
+  <ip:port>-taskmanager/
     taskmanager.properties
 ```
 
 log:
 ```
 <dest>/
-  <ip:port>-ns/
-    log.INFO.1
-    log.INFO.2
+  <ip:port>-nameserver/
+    nameserver.info.log.1
+    nameserver.info.log.2
     ...
-  <ip:port>-tablet
-  <ip:port>-taskmanager
+  <ip:port>-tablet/
+    ...
+  <ip:port>-taskmanager/
+    ...
 ```
 
 versions:
