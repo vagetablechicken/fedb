@@ -9,28 +9,36 @@
 
 ## 1.  环境准备和预备知识
 
-### 1.1 OneFlow工具包安装
-OneFlow工具依赖GPU的强大算力，所以请确保部署机器具备Nvidia GPU，并且保证驱动版本 >=460.X.X  [驱动版本需支持CUDA 11.0](https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html#cuda-major-component-versions)。
-使用一下指令安装OneFlow：
-```bash
-conda activate oneflow
-python3 -m pip install --pre oneflow -f https://staging.oneflow.info/branch/support_oneembedding_serving/cu102
+### 1.1 下载demo演示用的脚本
+
+下载demo演示用的脚本，在后面的步骤中可以直接使用。
+
+我们将脚本目录定为环境变量`demo_dir`，之后的脚本中多会使用这一环境变量。所以，你需要配置这一变量：
 ```
-还需要安装以下Python工具包：
+export demo_dir=<your_path>/demo
+```
+
+### 1.2 OneFlow工具包安装
+OneFlow工具依赖GPU的强大算力，所以请确保部署机器具备Nvidia GPU，并且保证驱动版本 >=460.X.X  [驱动版本需支持CUDA 11.0](https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html#cuda-major-component-versions)。
+我们推荐使用conda来管理oneflow环境，使用以下指令创建默认python3，并安装OneFlow，以及本案例演示所需的依赖：
 ```bash
+conda env create -n oneflow python=3.9.2 -y
+pip install --pre oneflow -f https://staging.oneflow.info/branch/support_oneembedding_serving/cu102
 pip install psutil petastorm pandas sklearn
 ```
 
-### 1.2 拉取和启动 OpenMLDB Docker 镜像
+### 1.3 启动 OpenMLDB Docker 容器
 - 注意，请确保 Docker Engine 版本号 >= 18.03
-- 拉取 OpenMLDB docker 镜像，并且运行相应容器
-- 下载demo文件包，并映射demo文件夹至`/root/project`，这里我们使用的路径为`demodir=/home/gtest/demo`
+
+为了快速运行OpenMLDB集群，我们推荐使用镜像启动的方式。由于OpenMLDB集群需要和其他组件网络通信，我们直接使用host网络。并且，我们将在容器中使用已下载的脚本，所以请将脚本目录`demo_dir`映射为容器中的目录：
+
 ```bash
-export demodir=/home/gtest/demo
-docker run -dit --name=demo --network=host -v $demodir:/root/project 4pdosc/openmldb:0.5.2 bash
+docker run -dit --name=demo --network=host -v $demodir:/work/oneflow_demo 4pdosc/openmldb:0.6.0 bash
 docker exec -it demo bash
 ```
 - 上述镜像预装了OpenMLDB的工具等，我们需要进一步安装OneFlow推理所需依赖。
+
+todo: 下面的是否需要装在openmldb容器里？
 
 因为我们将在OpenMLDB的容器中嵌入OneFlow模型推理的预处理及调用，需要安装以下的依赖。
 ```bash
