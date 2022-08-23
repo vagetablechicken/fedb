@@ -3,10 +3,10 @@ import os
 import sys
 import pandas as pd
 import xxhash
-
+import shutil
 
 # feature csv
-feature_path = '../out/1'  # sys.argv[1]
+feature_path = 'out/1'  # sys.argv[1]
 save_path = os.path.dirname(__file__) + '/out'
 
 # from pyspark.sql import SparkSession
@@ -19,10 +19,9 @@ features = pd.concat([pd.read_csv(f)
                      for f in [i for i in glob.glob(feature_path + '/*.csv')]])
 total_rows = features.shape[0]
 print('feature total count:', total_rows)
-print(features['reqId_1'])
 
 # rename for deepfm train
-features.rename(columns={'action_actionValue_multi_direct_2': 'Label', # notice: this is label
+features.rename(columns={'action_actionValue_multi_direct_2': 'Label',  # notice: this is label
                          'reqId_1': 'C1',
                          'flattenRequest_eventTime_original_0': 'C2',
                          'flattenRequest_reqId_original_1': 'C3',
@@ -67,11 +66,33 @@ features.rename(columns={'action_actionValue_multi_direct_2': 'Label', # notice:
                 inplace=True)
 
 cols = ['Label',
-        'I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10', 'I11', 'I12', 'I13', 
-        'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7','C8', 'C9', 'C10', 'C11', 'C12', 'C13', 'C14', 
-        'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21', 'C22','C23', 'C24', 'C25', 'C26', 'C27', 'C28']
+        'I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10', 'I11', 'I12', 'I13',
+        'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13', 'C14',
+        'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26', 'C27', 'C28']
 # reorder columns
-features=features[cols]
+features = features[cols]
+
+
+def generate_hash(val):
+    res = []
+    if val.name == 'Label':
+        return val
+    for i in val:
+        test = xxhash.xxh64(str(i), seed=10)
+        res.append(test.intdigest())
+    return res
+
+
+def convert_type(df):
+    for col in df.columns:
+        if col == 'Label':
+            df[col] = df[col].astype('float32')
+        else:
+            df[col] = df[col].astype('int64')
+
+# onehot encoding
+features = features.apply(lambda x: generate_hash(x), axis=0)
+convert_type(features)
 
 # split to train/test/valid ~ 0.8/0.1/0.1
 train_rows = int(total_rows * 0.8)
@@ -79,33 +100,27 @@ test_rows = int(total_rows * 0.1)
 # rest is valid
 # use dict to manage feature set
 feature_set = {}
-feature_set['train'] = features.iloc[0:train_rows].copy()
-feature_set['test'] = features.iloc[train_rows:train_rows+test_rows].copy()
-feature_set['valid'] = features.iloc[train_rows+test_rows:].copy()
+feature_set['train'] = features.iloc[0:train_rows]
+feature_set['test'] = features.iloc[train_rows:train_rows+test_rows]
+feature_set['valid'] = features.iloc[train_rows+test_rows:]
 
-def generate_hash(val):
-    res = []
-    if val.name == 'Label':
-        return val
-    for i in val:
-        test = xxhash.xxh64(str(i), seed = 10)
-        res.append(test.intdigest())
-    return res
-
-def convert_type(df):
-    for col in df.columns:
-        if col == 'Label':
-            df[col] = df[col].astype('float32') 
-        else:
-            print(col)
-            # why req_Id C1 can be convert to int64?
-            df[col] = df[col].astype('int64')
 
 for name, df in feature_set.items():
     print(f'{name} count:', df.shape[0])
-    print(df['C1'])
-    df.apply(lambda x: generate_hash(x), axis = 0)
-    convert_type(df)
-    df.to_parquet(f'{save_path}/{name}/.parquet', engine='pyarrow', index=False)
-    print(f'saved to {save_path}/{name}')
 
+    # re-mkdir first
+    dir = f'{save_path}/{name}'
+    shutil.rmtree(dir, ignore_errors=True)
+    os.makedirs(dir)
+    df.to_parquet(f'{dir}/{name}.parquet', engine='pyarrow', index=False)
+    print(f'saved to {dir}')
+
+
+del features['Label']
+table_size = features.apply(lambda x: x.nunique(), axis=0)
+
+print('table size array:\n', ','.join(map(str, table_size.array)))
+
+print(f'saved to {save_path}/table_size_array.txt')
+with open(f'{save_path}/table_size_array.txt', 'w') as text_file:
+    text_file.write(','.join(map(str, table_size.array)))
