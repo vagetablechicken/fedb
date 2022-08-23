@@ -28,7 +28,7 @@ OneFlow工具依赖GPU的强大算力，所以请确保部署机器具备Nvidia 
 ```bash
 conda env create -n oneflow python=3.9.2 -y
 pip install --pre oneflow -f https://staging.oneflow.info/branch/support_oneembedding_serving/cu102
-pip install psutil petastorm pandas sklearn
+pip install psutil petastorm pandas sklearn xxhash
 ```
 或使用todo environment.yml
 
@@ -245,23 +245,42 @@ INTO OUTFILE '/work/oneflow_demo/out/1';
 
 > χ may include categorical fields (e.g., gender, location) and continuous fields (e.g., age). Each categorical field is represented as a vector of one-hot encoding, and each continuous field is represented as the value itself, or a vector of one-hot encoding after discretization.
 
-进入demodir文件夹，并使用预处理脚本做特征数据预处理。
+进入demodir文件夹，并使用预处理脚本做特征数据预处理。运行需要pandas,xxhash等依赖，推荐在`oneflow`虚拟环境中运行。
 ```bash
 cd $demodir/feature_preprocess/
-sh jd_fe_preprocess.sh $demodir/out/1
+python preprocess.py $demodir/out/1
 ```
-对应生成parquet数据集将生成在 `$demodir/feature_preprocess/out`。数据信息将被打印如下，该信息将被输入为训练的配置文件。
+
+脚本将在 `$demodir/feature_preprocess/out`对应生成train，test，valid三个parquet数据集，并将`table_size_array`保存在文件中。运行结果打印类似：
 ```
-train samples = 4007924
-val samples = 504398
-test samples = 530059
+feature total count: 13916
+train count: 11132
+saved to <demodir>/feature_preprocess/out/train
+test count: 1391
+saved to <demodir>/feature_preprocess/out/test
+valid count: 1393
+saved to <demodir>/feature_preprocess/out/valid
 table size array:
-11,42,1105,200,11,1295,1,1,5,3,23,23,7,5042381,3127923,5042381,3649642,28350,105180,7,2,5042381,5,4,4,41,2,2,8,3456,4,5,5042381,10,60,5042381,843,17,1276,101,100
+ 4,26,16,4,11,809,1,1,5,3,17,16,7,13916,13890,13916,10000,3674,9119,7,2,13916,5,4,4,33,2,2,7,2580,3,5,13916,10,47,13916,365,17,132,32,37
+saved to <demodir>/feature_preprocess/out/table_size_array.txt
+```
+得到的文件结构类似：
+```
+out/
+├── table_size_array.txt
+├── test
+│   └── test.parquet
+├── train
+│   └── train.parquet
+└── valid
+    └── valid.parquet
+
+3 directories, 4 files
 ```
 
 ### 2.4 启动OneFlow进行模型训练
 ```{note}
-注意，以下命令在安装1.1所描述的OneFlow运行环境中运行
+注意，以下命令在安装1.2所描述的OneFlow运行环境中运行
 ```
 #### 2.4.1 修改对应`train_deepfm.sh`配置文件
 注意根据上一节所打印出的数据信息更新配置文件。具体包括`num_train_samples`,`num_val_samples`,`num_test_samples`和`table_size_array`等。

@@ -6,7 +6,7 @@ import xxhash
 import shutil
 
 # feature csv
-feature_path = 'out/1'  # sys.argv[1]
+feature_path = sys.argv[1]
 save_path = os.path.dirname(__file__) + '/out'
 
 # from pyspark.sql import SparkSession
@@ -124,3 +124,5 @@ print('table size array:\n', ','.join(map(str, table_size.array)))
 print(f'saved to {save_path}/table_size_array.txt')
 with open(f'{save_path}/table_size_array.txt', 'w') as text_file:
     text_file.write(','.join(map(str, table_size.array)))
+
+# todo: save 3 parquets row count for num_train_samples... how about a json or other format, 4 values?
