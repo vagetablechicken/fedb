@@ -1,5 +1,5 @@
 USE JD_db;
-deploy demo select * from
+DEPLOY demo select * from
 (
 select
 `reqId` as reqId_1,
