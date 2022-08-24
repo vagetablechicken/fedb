@@ -29,6 +29,6 @@ instance_group [
 parameters {
     key: "one_embedding_persistent_table_path"
     value: {
-      string_value: "/root/demo/persistent/0-1",
+      string_value: "<demodir>/oneflow_process/persistent/0-1",
     }
 }

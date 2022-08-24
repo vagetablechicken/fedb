@@ -94,15 +94,16 @@ def convert_type(df):
 features = features.apply(lambda x: generate_hash(x), axis=0)
 convert_type(features)
 
-# split to train/test/valid ~ 0.8/0.1/0.1
+# split to train/test/val ~ 0.8/0.1/0.1
 train_rows = int(total_rows * 0.8)
 test_rows = int(total_rows * 0.1)
-# rest is valid
+# rest is val
+val_rows = total_rows - train_rows - test_rows
 # use dict to manage feature set
 feature_set = {}
 feature_set['train'] = features.iloc[0:train_rows]
 feature_set['test'] = features.iloc[train_rows:train_rows+test_rows]
-feature_set['valid'] = features.iloc[train_rows+test_rows:]
+feature_set['val'] = features.iloc[train_rows+test_rows:]
 
 
 for name, df in feature_set.items():
@@ -121,8 +122,9 @@ table_size = features.apply(lambda x: x.nunique(), axis=0)
 
 print('table size array:\n', ','.join(map(str, table_size.array)))
 
-print(f'saved to {save_path}/table_size_array.txt')
-with open(f'{save_path}/table_size_array.txt', 'w') as text_file:
+print(f'saved to {save_path}/data_info.txt')
+with open(f'{save_path}/data_info.txt', 'w') as text_file:
+    text_file.write(str(train_rows) + '\n')
+    text_file.write(str(test_rows) + '\n')
+    text_file.write(str(val_rows) + '\n')
     text_file.write(','.join(map(str, table_size.array)))
-
-# todo: save 3 parquets row count for num_train_samples... how about a json or other format, 4 values?
