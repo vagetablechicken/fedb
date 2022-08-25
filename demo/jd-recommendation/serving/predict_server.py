@@ -77,7 +77,7 @@ class PredictHandler(tornado.web.RequestHandler):
             res = np.array(r)
             self.write("----------------ins---------------\n")
             self.write(str(res) + "\n")
-            pred = process_infer(res)
+            pred = process_infer(triton_url, res)
             self.write("---------------predict change of purchase -------------\n")
             self.write(f"{str(pred)}")
 
@@ -96,8 +96,8 @@ def make_app():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("apiserver", "-a", help="specify the endpoint of openmldb apiserver")
-    parser.add_argument("triton", "-o", help="specify the endpoint of oneflow triton")
+    parser.add_argument("apiserver", help="specify the endpoint of openmldb apiserver")
+    parser.add_argument("triton", help="specify the endpoint of oneflow triton")
     args = parser.parse_args()
     apiserver_url = f"http://{args.apiserver}/dbs/JD_db/deployments/demo"
     triton_url = args.triton

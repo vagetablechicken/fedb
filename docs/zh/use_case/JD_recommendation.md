@@ -397,7 +397,6 @@ docker run --runtime=nvidia --name triton-serving -d --network=host \
 ```
 启动后，可访问`http://127.0.0.1:8000`进行推理。
 
-
 ### 3.4 启动推理服务
 
 ```{note}
@@ -405,28 +404,29 @@ docker run --runtime=nvidia --name triton-serving -d --network=host \
 ```
 脚本中参数使用`127.0.0.1:9080`作为OpenMLDB ApiServer地址，`127.0.0.1:8000`作为OneFlow Triton地址。
 ```bash
-cd $demodir/serving
-./start_predict_server.sh todo
+sh $demodir/serving/start_predict_server.sh
 ```
 
 ### 3.5 发送预估请求
+
 预估请求可在OpenMLDB的容器外执行。容器外部访问的具体信息可参见[IP 配置](https://openmldb.ai/docs/zh/main/reference/ip_tips.html)。
-在普通命令行下执行内置的 `predict.py` 脚本。该脚本发送一行请求数据到预估服务，接收返回的预估结果，并打印出来。
+
+执行 `predict.py` 脚本。该脚本发送一行请求数据到预估服务，接收返回的预估结果，并打印出来。
 ```bash
 python $demodir/serving/predict.py
 ```
-范例输出：
+输出范例：
 ```
 ----------------ins---------------
-['200001_80005_2016-03-31 18:11:20' 1459419080000
- '200001_80005_2016-03-31 18:11:20' '200001_80005' '80005' '200001' 1 1.0
- 1.0 1 1 5 1 '200001_80005_2016-03-31 18:11:20' None None None None None
- None None None None None None '200001_80005_2016-03-31 18:11:20'
- 0.019200000911951065 0.0 0.0 2 2 '1,,NULL' '4,0,NULL'
- '200001_80005_2016-03-31 18:11:20' ',NULL,NULL' ',NULL,NULL' ',NULL,NULL'
+['200080_5505_2016-03-15 20:43:04' 1458045784000
+ '200080_5505_2016-03-15 20:43:04' '200080_5505' '5505' '200080' 1 1.0 1.0
+ 1 1 3 1 '200080_5505_2016-03-15 20:43:04' None '3' '1' '1' '214' '8'
+ 1603438960564 None None None None '200080_5505_2016-03-15 20:43:04'
+ 0.02879999950528145 0.0 0.0 2 2 '1,,NULL' '4,0,NULL'
+ '200080_5505_2016-03-15 20:43:04' ',NULL,NULL' ',NULL,NULL' ',NULL,NULL'
  1 1 1 ',NULL,NULL' ',NULL,NULL']
 ---------------predict change of purchase -------------
-[[b'0.006222:0']]
+[[b'0.010727:0']]
 ```
 
 
