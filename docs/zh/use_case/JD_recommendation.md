@@ -11,11 +11,15 @@
 
 ### 1.1 下载demo演示用的数据与脚本
 
-下载demo演示用的数据与脚本，在后面的步骤中可以直接使用。
-todo demo中应该有这个文件夹，不用去哪儿下载。
-http://openmldb.ai/download/jd-recommendation/demo.tgz 或者checkout最新代码，`demo/jd-recommendation`。
+下载demo演示用的数据、脚本以及推理所需的OneEmbedding库（详情见[配置oneflow推理服务](#33-配置oneflow推理服务)），在后面的步骤中可以直接使用。
 
-我们将脚本目录定为环境变量`demodir`，之后的脚本中多会使用这一环境变量。所以，你需要配置这一变量：
+```
+wget http://openmldb.ai/download/jd-recommendation/demo.tgz
+tar xzf demo.tgz
+ls demo
+```
+
+我们将这个`demo`目录定为环境变量`demodir`，之后的脚本中多会使用这一环境变量。所以，你需要配置这一变量：
 ```
 export demodir=<your_path>/demo
 ```
@@ -23,14 +27,16 @@ export demodir=<your_path>/demo
 我们仅使用小数据集做演示。如果你想要使用全量数据集，请下载[JD_data](http://openmldb.ai/download/jd-recommendation/JD_data.tgz)。
 
 ### 1.2 OneFlow工具包安装
+
 OneFlow工具依赖GPU的强大算力，所以请确保部署机器具备Nvidia GPU，并且保证驱动版本 >=460.X.X  [驱动版本需支持CUDA 11.0](https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html#cuda-major-component-versions)。
-我们推荐使用conda来管理oneflow环境，使用以下指令创建默认python3，并安装OneFlow，以及本案例演示所需的依赖：
+
+我们推荐使用conda来管理oneflow环境，安装OneFlow开发版（支持oneembedding），以及本案例演示所需的其他依赖，手动创建方法如下：
+
 ```bash
-conda env create -n oneflow python=3.9.2 -y
+conda env create -n oneflow python=3.9.2
 pip install --pre oneflow -f https://staging.oneflow.info/branch/support_oneembedding_serving/cu102
 pip install psutil petastorm pandas sklearn xxhash tritonclient geventhttpclient tornado
 ```
-或使用todo environment.yml
 
 ### 1.3 启动 OpenMLDB Docker 容器
 - 注意，请确保 Docker Engine 版本号 >= 18.03
@@ -41,14 +47,6 @@ pip install psutil petastorm pandas sklearn xxhash tritonclient geventhttpclient
 docker run -dit --name=openmldb --network=host -v $demodir:/work/oneflow_demo 4pdosc/openmldb:0.6.0 bash
 docker exec -it openmldb bash
 ```
-- 上述镜像预装了OpenMLDB的工具等，我们需要进一步安装OneFlow推理所需依赖。
-
-todo: 下面的是否需要装在openmldb容器里？放oneflow，pyspark？
-
-因为我们将在OpenMLDB的容器中嵌入OneFlow模型推理的预处理及调用，需要安装以下的依赖。
-```bash
-pip install tritonclient geventhttpclient
-```
 
 ```{note}
 注意，本教程以下的OpenMLDB部分的演示命令默认均在 1.3 启动的 docker 容器`openmldb`内运行。OneFlow命令默认在 1.2 安装的OneFlow虚拟环境`oneflow`下运行。
@@ -57,7 +55,7 @@ pip install tritonclient geventhttpclient
 ### 1.4 创建OpenMLDB集群
 
 ```bash
-./init.sh
+/work/init.sh
 ```
 我们在镜像内提供了init.sh脚本帮助用户快速创建集群。
 
@@ -251,7 +249,7 @@ cd $demodir/feature_preprocess/
 python preprocess.py $demodir/out/1
 ```
 
-脚本将在 `$demodir/feature_preprocess/out`对应生成train，test，valid三个parquet数据集，并将三者的行数和`table_size_array`保存在文件`data_info.txt`中。运行结果打印类似：
+`$demodir/out/1`即上一步OpenMLDB计算得到的特征数据目录。脚本将在 `$demodir/feature_preprocess/out`对应生成train，test，valid三个parquet数据集，并将三者的行数和`table_size_array`保存在文件`data_info.txt`中（下一步可以直接使用info文件，不需要手动填写参数）。运行结果打印类似：
 ```
 feature total count: 13916
 train count: 11132
@@ -315,7 +313,7 @@ bash train_deepfm.sh $demodir/feature_preprocess/out
 
 1. 重新启动 OpenMLDB CLI。
    ```bash
-   docker exec -it demo bash
+   docker exec -it openmldb bash
    /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client
    ```
 2. 执行上线部署，在 OpenMLDB CLI 中deploy 离线特征抽取使用的SQL（SQL较长，见[离线特征抽取](#224-离线特征抽取)，此处不展示SQL）。
@@ -367,13 +365,18 @@ deploy后，可通过访问OpenMLDB ApiServer `127.0.0.1:9080`进行实时特征
 
 ### 3.3 配置OneFlow推理服务
 
-OneFlow的推理服务需要[OneEmbedding](https://docs.oneflow.org/master/cookies/one_embedding.html)的支持。该支持目前还没有合入主框架中。若需要重新编译，可参考附录A进行编译测试。接下来步骤默认相关支持已编译完成，并且存放在`$demodir/oneflow_serving/`路径中。todo有点大，提供下载？1.7G说一下用了哪些库，编译的话在哪个位置
+OneFlow的推理服务需要[OneEmbedding](https://docs.oneflow.org/master/cookies/one_embedding.html)的支持。该支持目前还没有合入主框架中。
+
+我们提供预编译版本的库在`$demodir/oneflow_serving/`中。若与你的环境不兼容，你需要重新编译，可参考附录A进行编译测试。接下来步骤默认相关支持已编译完成，并且存放在`$demodir/oneflow_serving/`路径中。
 
 #### 3.3.1 检查
 
 1. 模型路径（`$demodir/oneflow_process/model`）结果是否如下所示。
 ```
-$ tree  -L 3 model/
+cd $demodir/oneflow_process/
+tree -L 3 model/
+```
+```
 model/
 └── embedding
     ├── 1
@@ -397,6 +400,11 @@ docker run --runtime=nvidia --name triton-serving -d --network=host \
 ```
 启动后，可访问`http://127.0.0.1:8000`进行推理。
 
+可通过以下方式测试服务是否启动，如果出现`Connection refused`，说明服务启动失败：
+```
+curl -v localhost:8000/v2/health/ready
+```
+
 ### 3.4 启动推理服务
 
 ```{note}
@@ -406,10 +414,9 @@ docker run --runtime=nvidia --name triton-serving -d --network=host \
 ```bash
 sh $demodir/serving/start_predict_server.sh
 ```
+你可以通过查看日志文件`/tmp/p.log`，获得predict server的运行日志。
 
 ### 3.5 发送预估请求
-
-预估请求可在OpenMLDB的容器外执行。容器外部访问的具体信息可参见[IP 配置](https://openmldb.ai/docs/zh/main/reference/ip_tips.html)。
 
 执行 `predict.py` 脚本。该脚本发送一行请求数据到预估服务，接收返回的预估结果，并打印出来。
 ```bash
@@ -430,20 +437,19 @@ python $demodir/serving/predict.py
 ```
 
 
-## 附录A -- OneFlow定制代码编译
+## 附录A -- OneFlow定制代码编译(todo, need demo_file client.py to test)
 此章节介绍为OneEmbedding推理服务所定制的代码修改的编译过程。该代码会尽快合入OneFlow中，届时以下步骤可省略。
 
 ### A.1 容器环境准备
 使用以下容器环境进行编译。该容器已经安装编译所需的依赖等。
 ```
-docker pull registry.cn-beijing.aliyuncs.com/oneflow/triton-devel:latest
+docker run -it -v <your_path>:/work/oneflow-build registry.cn-beijing.aliyuncs.com/oneflow/triton-devel:latest
 ```
-启动容器，请映射相关路径(映射本地目录至`/work/oneflow_demo`)，方便保存编译产物。接下来的操作均在容器内进行。
+启动容器，请映射相关路径(映射本地目录至`/work/oneflow-build`)，方便保存编译产物。接下来的操作均在容器内进行。
 
 ### A.2 编译OneFlow
 ```shell
-cd /work/oneflow_demo
-mkdir oneflow_serving && cd oneflow_serving
+cd /work/oneflow-build
 git clone -b support_oneembedding_serving --single-branch https://github.com/Oneflow-Inc/oneflow --depth=1 
 cd oneflow
 mkdir build && cd build
@@ -463,30 +469,29 @@ ninja
 ### A.3 编译Serving
 
 ```shell
-git clone -b support_one_embedding --single-branchhttps://github.com/Oneflow-Inc/serving.git
+cd /work/oneflow-build
+git clone -b support_one_embedding --single-branch https://github.com/Oneflow-Inc/serving.git
 cd serving
 mkdir build && cd build
-cmake -DCMAKE_PREFIX_PATH=/path/to/liboneflow_cpp/share -DTRITON_RELATED_REPO_TAG=r21.10 \
+cmake -DCMAKE_PREFIX_PATH=/work/oneflow-build/oneflow/build/liboneflow_cpp/share -DTRITON_RELATED_REPO_TAG=r21.10 \
   -DTRITON_ENABLE_GPU=ON -G Ninja -DTHIRD_PARTY_MIRROR=aliyun ..
 ninja
 ```
-上述命令中的`/path/to/liboneflow_cpp/share`要替换成上边编译的oneflow的里面的路径，在`{oneflow路径}/build/liboneflow_cpp/share`
-
 
 ### A.4 测试TritonServer
 复制backend库文件：
 ```shell
-mkdir /work/oneflow_demo/oneflow_sering/backends && cd /work/oneflow_demo/oneflow_sering/backends
+mkdir /work/oneflow-build/oneflow_serving/backends && cd /work/oneflow-build/oneflow_serving/backends
 mkdir oneflow
-cp /roor/prject/oneflow_serving/serving/build/libtriton_oneflow.so oneflow/.
+cp /work/oneflow-build/serving/build/libtriton_oneflow.so oneflow/.
 ```
 
 在命令行启动 TritonServer测试：
 ```shell
-LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/work/oneflow_demo/oneflow_serving/oneflow/build/liboneflow_cpp/lib \
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/work/oneflow-build/oneflow/build/liboneflow_cpp/lib \
 /opt/tritonserver/bin/tritonserver \
---model-repository=/work/oneflow_demo/oneflow_process/model \
---backend-directory=/work/oneflow_demo/oneflow_serving/backends
+--model-repository=/work/oneflow-build/oneflow_process/model \
+--backend-directory=/work/oneflow-build/oneflow_serving/backends
 ```
 
 在另一个命令行运行如下指令，若成功，输出示例如下：
@@ -500,4 +505,3 @@ python $demodir/serving/client.py
 注意：
 - 如果出现`libunwind.so.8`未找到需要用`-v /lib/x86_64-linux-gnu:/unwind_path` 映射一下`libunwind.so.8`所在目录，然后添加到`LD_LIBRARY_PATH`里面: `... bash -c 'LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/mylib:/unwind_path ...`
 - 如果出现`libcupti.so`未找到需要用`-v /usr/local/cuda-11.7/extras/CUPTI/lib64:/cupti_path` 映射一下`libcupti.so`所在目录，然后添加到`LD_LIBRARY_PATH`里面: `... bash -c 'LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/mylib:/cupti_path ...`, 其中具体的cuda的路径按实际安装的位置，可以用`ldd {oneflow路径}/build/liboneflow.so | grep cupti`来找到
-

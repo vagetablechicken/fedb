@@ -1,34 +1,60 @@
-For full instructions, please refer to https://github.com/4paradigm/OpenMLDB/blob/main/docs/zh/use_case/JD_recommendation.md 
+For full instructions, please refer to [website page](http://openmldb.ai/docs/zh/main/use_case/JD_recommendation.html) or [github md](https://github.com/4paradigm/OpenMLDB/blob/main/docs/zh/use_case/JD_recommendation.md)
 
-#Training:
-1. Engage openmldb for feature extraction:
-##in openmldb docker
-docker exec -it demo bash
-##launch openmldb CLI
-./init.sh
-##create data tables
+# Pre
+1. env var `demodir`: the dir of demo source
+
+
+1. Oneflow Env: use conda
+
+
+
+# Training
+
+## OpenMLDB Feature Extraction
+
+```
+docker run -dit --name=openmldb --network=host -v $demodir:/work/oneflow_demo 4pdosc/openmldb:0.6.0 bash
+docker exec -it openmldb bash
+```
+
+in docker:
+
+1. start cluster and create tables, load offline data
+```
+/work/init.sh
+
 /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < /root/project/create_tables.sql
-##load offline data
-/work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < /root/project/load_data.sql
+
+/work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < /work/oneflow_demo/sql_scripts/load_offline_data.sql
+```
+
+2. waiting for load jobs done
+```
 echo "show jobs;" | /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client
-##select features
-/work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < /root/project/sync_select_out.sql
+```
 
-2. process openmldb output data:
-##outside openmldb docker
-conda activate oneflow
+3. feature extraction
+```
+/work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < /work/oneflow_demo/sql_scripts/sync_select_out.sql
+```
+The feature data will be saved in `/work/oneflow_demo/out/1` in docker container file system.
 
-cd openmldb_process
-##pass in directory of openmldb results
-sh process_JD_out_full.sh $demodir/out/1
-##output data in $demodir/openmldb_process/out
-##note output information, table_size_array
+## Oneflow Train
 
-3. Launch oneflow deepfm model training:
-cd oneflow_process/
-##modify directory, sample size, table_size_array information in train_deepfm.sh accordingly
-sh train_deepfm.sh $demodir
+Use conda env:
+```
+conda env create -n oneflow python=3.9.2
+pip install --pre oneflow -f https://staging.oneflow.info/branch/support_oneembedding_serving/cu102
+pip install psutil petastorm pandas sklearn xxhash tritonclient geventhttpclient tornado
 
+
+```
+
+1. Launch oneflow deepfm model training:
+```
+cd $demodir/feature_preprocess/
+python preprocess.py $demodir/out/1
+```
 
 #Model Serving
 1. Configure openmldb for online feature extraction:
