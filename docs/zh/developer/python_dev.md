@@ -11,9 +11,10 @@
 
 只运行部分测试，可以使用：
 ```
-pytest test/ -k '<keyword>'
-pytest test/xxx.py::<test_func>
-pytest test/xxx.py::<test_class>::<test_func>
+cd python/openmldb_sdk
+pytest tests/ -k '<keyword>'
+pytest tests/xxx.py::<test_func>
+pytest tests/xxx.py::<test_class>::<test_func>
 ```
 `-k`使用方式见[keyword expressions](https://docs.pytest.org/en/latest/example/markers.html#using-k-expr-to-select-tests-based-on-their-name)。
 
@@ -23,10 +24,11 @@ pytest test/xxx.py::<test_class>::<test_func>
 
 普通测试：
 ```
-pytest test/
+cd python/openmldb_tool
+pytest tests/
 ```
 
-测试如果需要log信息:
+测试如果需要python log信息:
 ```
-pytest -o log_cli=true --log-cli-level=DEBUG test/
+pytest -o log_cli=true --log-cli-level=DEBUG tests/
 ```

@@ -72,11 +72,11 @@ class OpenMLDBSdk(object):
             options = sql_router_sdk.SQLRouterOptions()
             options.zk_cluster = self.options.zk_cluster
             options.zk_path = self.options.zk_path
-            if self.options.request_timeout:
+            if self.options.request_timeout is not None:
                 options.request_timeout = int(self.options.request_timeout)
-            if self.options.zk_log_level:
+            if self.options.zk_log_level is not None:
                 options.zk_log_level = int(self.options.zk_log_level)
-            if self.options.zk_log_file:
+            if self.options.zk_log_file is not None:
                 options.zk_log_file = self.options.zk_log_file
             self.sdk = sql_router_sdk.NewClusterSQLRouter(options)
             if not self.sdk:
@@ -91,7 +91,7 @@ class OpenMLDBSdk(object):
             options = sql_router_sdk.StandaloneOptions()
             options.host = self.options.host
             options.port = self.options.port
-            if self.options.request_timeout:
+            if self.options.request_timeout is not None:
                 options.request_timeout = int(self.options.request_timeout)
             self.sdk = sql_router_sdk.NewStandaloneSQLRouter(options)
             if not self.sdk:
