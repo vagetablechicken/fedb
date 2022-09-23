@@ -1,0 +1,148 @@
+/*
+ * Copyright 2021 4Paradigm
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#ifndef SRC_BASE_STATUS_UTIL_H_
+#define SRC_BASE_STATUS_UTIL_H_
+
+#include "sdk/base.h"
+#include "glog/logging.h"
+
+// ref kudu
+
+/// @brief Return the given status if it is not @c OK.
+#define RETURN_NOT_OK(s) do { \
+    const ::hybridse::sdk::Status& _s = (s);             \
+    if (PREDICT_FALSE(!_s.IsOK())) return _s;     \
+  } while (0)
+
+/// @brief Return the given status if it is not OK, but first clone it and
+///   prepend the given message.
+#define RETURN_NOT_OK_PREPEND(s, msg) do { \
+    const ::hybridse::sdk::Status& _s = (s);                              \
+    if (PREDICT_FALSE(!_s.IsOK())) return _s.CloneAndPrepend(msg); \
+  } while (0)
+
+/// @brief Return @c to_return if @c to_call returns a bad status.
+///   The substitution for 'to_return' may reference the variable
+///   @c s for the bad status.
+#define RETURN_NOT_OK_RET(to_call, to_return) do { \
+    const ::hybridse::sdk::Status& s = (to_call);                \
+    if (PREDICT_FALSE(!s.IsOK())) return (to_return);  \
+  } while (0)
+
+/// @brief Return the given status if it is not OK, evaluating `on_error` if so.
+#define RETURN_NOT_OK_EVAL(s, on_error) do { \
+    const ::hybridse::sdk::Status& _s = (s); \
+    if (PREDICT_FALSE(!_s.IsOK())) { \
+      (on_error); \
+      return _s; \
+    } \
+  } while (0)
+
+/// @brief Emit a warning if @c to_call returns a bad status.
+#define WARN_NOT_OK(to_call, warning_prefix) do { \
+    const ::hybridse::sdk::Status& _s = (to_call);              \
+    if (PREDICT_FALSE(!_s.IsOK())) { \
+      LOG(WARNING) << (warning_prefix) << ": " << _s.msg;  \
+    } \
+  } while (0)
+
+/// @brief Log the given status and return immediately.
+#define LOG_AND_RETURN(level, status) do { \
+    const ::hybridse::sdk::Status& _s = (status);        \
+    LOG(level) << _s.msg; \
+    return _s; \
+  } while (0)
+
+/// @brief If the given status is not OK, log it and 'msg' at 'level' and return the status.
+#define RETURN_NOT_OK_LOG(s, level, msg) do { \
+    const ::hybridse::sdk::Status& _s = (s);             \
+    if (PREDICT_FALSE(!_s.IsOK())) { \
+      LOG(level) << "Status: " << _s.msg << " " << (msg); \
+      return _s;     \
+    } \
+  } while (0)
+
+/// @brief must be not ok, skip check code
+#define SET_STATUS_AND_WARN(s, code, msg) do { \
+    ::hybridse::sdk::Status* _s = (s);                              \
+    _s->SetCode(code); \
+    _s->SetMsg((msg)); \
+    LOG(WARNING) << "Status: " << _s->Str(); \
+  } while (0)
+
+/// @brief must be not ok, skip check code
+#define APPEND_FROM_BASE_AND_WARN(s, base_s, msg) do { \
+    ::hybridse::sdk::Status* _s = (s); \
+    _s->SetMsg((msg));  \
+    _s->Append(base_s.GetMsg()); \
+    LOG(WARNING) << "Status: " << _s->Str(); \
+  } while (0)
+
+#define CODE_PREPEND_AND_WARN(s, code, msg) do { \
+    ::hybridse::sdk::Status* _s = (s); \
+    _s->SetCode(code); \
+    _s->Prepend((msg)); \
+    LOG(WARNING) << "Status: " << _s->Str(); \
+  } while (0)
+
+#define CODE_APPEND_AND_WARN(s, code, msg) do { \
+    ::hybridse::sdk::Status* _s = (s); \
+    _s->SetCode(code); \
+    _s->Append((msg)); \
+    LOG(WARNING) << "Status: " << _s->Str(); \
+  } while (0)
+
+/// @brief If @c to_call returns a bad status, CHECK immediately with
+///   a logged message of @c msg followed by the status.
+#define CHECK_OK_PREPEND(to_call, msg) do { \
+    const ::hybridse::sdk::Status& _s = (to_call);                   \
+    CHECK(_s.IsOK()) << (msg) << ": " << _s.msg;  \
+  } while (0)
+
+/// @brief If the status is bad, CHECK immediately, appending the status to the
+///   logged message.
+#define CHECK_OK(s) CHECK_OK_PREPEND(s, "Bad status")
+
+/// @brief If @c to_call returns a bad status, DCHECK immediately with
+///   a logged message of @c msg followed by the status.
+#define DCHECK_OK_PREPEND(to_call, msg) do { \
+    const ::hybridse::sdk::Status& _s = (to_call);                   \
+    DCHECK(_s.IsOK()) << (msg) << ": " << _s.msg;  \
+  } while (0)
+
+/// @brief If the status is bad, DCHECK immediately, appending the status to the
+///   logged 'Bad status' message.
+#define DCHECK_OK(s) DCHECK_OK_PREPEND(s, "Bad status")
+
+/// @brief A macro to use at the main() function level if it's necessary to
+///   return a non-zero status from the main() based on the non-OK status 's'
+///   and extra message 'msg' prepended. The desired return code is passed as
+///   'ret_code' parameter.
+#define RETURN_MAIN_NOT_OK(to_call, msg, ret_code) do { \
+    DCHECK_NE(0, (ret_code)) << "non-OK return code should not be 0"; \
+    const ::hybridse::sdk::Status& _s = (to_call); \
+    if (!_s.IsOK()) { \
+      const ::hybridse::sdk::Status& _ss = _s.CloneAndPrepend((msg)); \
+      LOG(ERROR) << _ss.msg; \
+      return (ret_code); \
+    } \
+  } while (0)
+
+namespace openmldb::base {
+// use hybridse::common::StatusCode?
+}  // namespace openmldb::base
+
+#endif  // SRC_BASE_STATUS_UTIL_H_
