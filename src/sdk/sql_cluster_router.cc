@@ -525,7 +525,7 @@ bool SQLClusterRouter::GetMultiRowInsertInfo(const std::string& db, const std::s
     }
     *table_info = cluster_sdk_->GetTableInfo(db_name, insert_stmt->table_name_);
     if (!(*table_info)) {
-        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, db_name + "-" insert_stmt->table_name_ + " not exist");
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, db_name + "-" + insert_stmt->table_name_ + " not exist");
         return false;
     }
     std::map<uint32_t, uint32_t> column_map;
@@ -798,7 +798,7 @@ std::shared_ptr<SQLInsertRows> SQLClusterRouter::GetInsertRows(const std::string
 bool SQLClusterRouter::ExecuteDDL(const std::string& db, const std::string& sql, hybridse::sdk::Status* status) {
     auto ns_ptr = cluster_sdk_->GetNsClient();
     if (!ns_ptr) {
-        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "no nameserver exist";
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "no nameserver exist");
         return false;
     }
     // TODO(wangtaize) update ns client to thread safe
