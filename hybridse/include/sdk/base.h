@@ -39,6 +39,10 @@ struct Status {
         : code(status_code), msg(msg_str), trace(trace) {}
     bool IsOK() const { return code == 0; }
 
+    void SetOK() {
+        code = 0;
+        msg = "ok";
+    }
     void SetCode(int c) { code = c; }
     void SetMsg(const std::string& new_msg) { msg = new_msg; }
     void Prepend(const std::string& pre) { msg = pre + "--" + msg; }

@@ -20,6 +20,26 @@
 #include "glog/logging.h"
 
 // ref kudu
+//
+// GCC can be told that a certain branch is not likely to be taken (for
+// instance, a CHECK failure), and use that information in static analysis.
+// Giving it this information can help it optimize for the common case in
+// the absence of better information (ie. -fprofile-arcs).
+//
+#ifndef PREDICT_FALSE
+#if defined(__GNUC__)
+#define PREDICT_FALSE(x) (__builtin_expect(x, 0))
+#else
+#define PREDICT_FALSE(x) x
+#endif
+#endif
+#ifndef PREDICT_TRUE
+#if defined(__GNUC__)
+#define PREDICT_TRUE(x) (__builtin_expect(!!(x), 1))
+#else
+#define PREDICT_TRUE(x) x
+#endif
+#endif
 
 /// @brief Return the given status if it is not @c OK.
 #define RETURN_NOT_OK(s) do { \
@@ -103,6 +123,17 @@
     _s->SetCode(code); \
     _s->Append((msg)); \
     LOG(WARNING) << "Status: " << _s->Str(); \
+  } while (0)
+
+/// @brief Return @c to_return if @c to_call returns a bad status.
+///   The substitution for 'to_return' may reference the variable
+///   @c s for the bad status.
+#define WARN_NOT_OK_AND_RET(to_call, warning_prefix, to_return) do { \
+    ::hybridse::sdk::Status* _s = (to_call);                \
+    if (PREDICT_FALSE(!_s->IsOK())) { \
+      LOG(WARNING) << (warning_prefix) << "--" << _s->Str(); \
+      return (to_return);  \
+    } \
   } while (0)
 
 /// @brief If @c to_call returns a bad status, CHECK immediately with
