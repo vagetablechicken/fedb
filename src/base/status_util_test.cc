@@ -19,8 +19,8 @@
 #include <iostream>
 #include <string>
 
-#include "gtest/gtest.h"
 #include "base/fe_status.h"
+#include "gtest/gtest.h"
 
 namespace openmldb {
 namespace base {
@@ -29,9 +29,14 @@ class StatusUtilTest : public ::testing::Test {
  public:
     StatusUtilTest() {}
     ~StatusUtilTest() {}
+
+    bool TestRetBool(::hybridse::sdk::Status* s) {
+        WARN_NOT_OK_AND_RET(s, "not ok", false);
+        return true;
+    }
 };
 
-TEST_F(StatusUtilTest, fromBase) {
+TEST_F(StatusUtilTest, simple) {
     ::hybridse::sdk::Status status;
     ::hybridse::base::Status base_status(StatusCode::kCmdError, "no ok");
     std::string abc = "abc";
@@ -41,6 +46,7 @@ TEST_F(StatusUtilTest, fromBase) {
     CODE_APPEND_AND_WARN(&status, StatusCode::kNoDatabase, "app1");
 
     SET_STATUS_AND_WARN(&status, StatusCode::kCmdError, "a new error");
+    ASSERT_FALSE(TestRetBool(&status));
 }
 
 }  // namespace base
