@@ -7,7 +7,7 @@
     <artifactId>openmldb-parent</artifactId>
     <packaging>pom</packaging>
     <name>openmldb</name>
-    <version>0.6.0-SNAPSHOT</version>
+    <version>0.6.2</version>
     <modules>
         <module>hybridse-sdk</module>
         <module>hybridse-native</module>
@@ -476,4 +476,3 @@
     </repository>
   </distributionManagement>
 </project>
-
