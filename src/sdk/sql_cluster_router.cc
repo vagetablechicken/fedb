@@ -307,10 +307,8 @@ bool SQLClusterRouter::Init() {
 
 std::shared_ptr<SQLRequestRow> SQLClusterRouter::GetRequestRow(const std::string& db, const std::string& sql,
                                                                ::hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        LOG(WARNING) << "output status is null";
-        return {};
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+
     auto cache = GetCache(db, sql, hybridse::vm::kRequestMode);
     std::set<std::string> col_set;
     std::shared_ptr<RouterSQLCache> router_cache;
@@ -354,9 +352,7 @@ std::shared_ptr<SQLRequestRow> SQLClusterRouter::GetRequestRow(const std::string
 std::shared_ptr<SQLRequestRow> SQLClusterRouter::GetRequestRowByProcedure(const std::string& db,
                                                                           const std::string& sp_name,
                                                                           ::hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return nullptr;
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::shared_ptr<hybridse::sdk::ProcedureInfo> sp_info = cluster_sdk_->GetProcedureInfo(db, sp_name, &status->msg);
     if (!sp_info) {
         CODE_PREPEND_AND_WARN(status, StatusCode::kProcedureNotFound, db + "-" + sp_name);
@@ -369,9 +365,7 @@ std::shared_ptr<SQLRequestRow> SQLClusterRouter::GetRequestRowByProcedure(const 
 std::shared_ptr<openmldb::sdk::SQLDeleteRow> SQLClusterRouter::GetDeleteRow(const std::string& db,
                                                                             const std::string& sql,
                                                                             ::hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return {};
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::shared_ptr<SQLCache> cache = GetCache(db, sql, hybridse::vm::kBatchMode);
     if (cache) {
         auto delete_cache = std::dynamic_pointer_cast<DeleteSQLCache>(cache);
@@ -453,9 +447,7 @@ std::shared_ptr<openmldb::sdk::SQLDeleteRow> SQLClusterRouter::GetDeleteRow(cons
 
 std::shared_ptr<SQLInsertRow> SQLClusterRouter::GetInsertRow(const std::string& db, const std::string& sql,
                                                              ::hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return {};
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::shared_ptr<SQLCache> cache = GetCache(db, sql, hybridse::vm::kBatchMode);
     if (cache) {
         auto insert_cache = std::dynamic_pointer_cast<InsertSQLCache>(cache);
@@ -490,11 +482,12 @@ bool SQLClusterRouter::GetMultiRowInsertInfo(const std::string& db, const std::s
                                              std::shared_ptr<::openmldb::nameserver::TableInfo>* table_info,
                                              std::vector<DefaultValueMap>* default_maps,
                                              std::vector<uint32_t>* str_lengths) {
-    if (status == NULL || table_info == NULL || default_maps == NULL || str_lengths == NULL) {
-        status->msg = "insert info is null";
-        LOG(WARNING) << status->msg;
-        return false;
-    }
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
+    // TODO(hw): return status?
+    RET_FALSE_IF_NULL_AND_WARN(table_info, "output table_info is nullptr");
+    RET_FALSE_IF_NULL_AND_WARN(default_maps, "output default_maps is nullptr");
+    RET_FALSE_IF_NULL_AND_WARN(str_lengths, "output str_lengths is nullptr");
+
     ::hybridse::node::NodeManager nm;
     ::hybridse::plan::PlanNodeList plans;
     bool ok = GetSQLPlan(sql, &nm, &plans);
@@ -584,10 +577,12 @@ bool SQLClusterRouter::GetInsertInfo(const std::string& db, const std::string& s
                                      std::shared_ptr<::openmldb::nameserver::TableInfo>* table_info,
                                      DefaultValueMap* default_map, uint32_t* str_length,
                                      std::vector<uint32_t>* stmt_column_idx_in_table) {
-    if (status == nullptr || table_info == nullptr || default_map == nullptr || str_length == nullptr) {
-        LOG(WARNING) << "insert info is null" << sql;
-        return false;
-    }
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
+    RET_FALSE_IF_NULL_AND_WARN(table_info, "output table_info is nullptr");
+    RET_FALSE_IF_NULL_AND_WARN(default_map, "output default_map is nullptr");
+    RET_FALSE_IF_NULL_AND_WARN(str_length, "output str_length is nullptr");
+    RET_FALSE_IF_NULL_AND_WARN(stmt_column_idx_in_table, "output stmt_column_idx_in_table is nullptr");
+
     ::hybridse::node::NodeManager nm;
     ::hybridse::plan::PlanNodeList plans;
     bool ok = GetSQLPlan(sql, &nm, &plans);
@@ -767,9 +762,7 @@ void SQLClusterRouter::SetCache(const std::string& db, const std::string& sql,
 
 std::shared_ptr<SQLInsertRows> SQLClusterRouter::GetInsertRows(const std::string& db, const std::string& sql,
                                                                ::hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return {};
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::shared_ptr<SQLCache> cache = GetCache(db, sql, hybridse::vm::kBatchMode);
     std::shared_ptr<InsertSQLCache> insert_cache;
     if (cache) {
@@ -798,6 +791,7 @@ std::shared_ptr<SQLInsertRows> SQLClusterRouter::GetInsertRows(const std::string
 }
 
 bool SQLClusterRouter::ExecuteDDL(const std::string& db, const std::string& sql, hybridse::sdk::Status* status) {
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     auto ns_ptr = cluster_sdk_->GetNsClient();
     if (!ns_ptr) {
         SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "no nameserver exist");
@@ -833,6 +827,7 @@ bool SQLClusterRouter::ExecuteDDL(const std::string& db, const std::string& sql,
 }
 
 bool SQLClusterRouter::ShowDB(std::vector<std::string>* dbs, hybridse::sdk::Status* status) {
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     auto ns_ptr = cluster_sdk_->GetNsClient();
     if (!ns_ptr) {
         SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "no nameserver exist");
@@ -851,9 +846,7 @@ bool SQLClusterRouter::ShowDB(std::vector<std::string>* dbs, hybridse::sdk::Stat
 std::vector<std::string> SQLClusterRouter::GetAllTables() { return cluster_sdk_->GetAllTables(); }
 
 bool SQLClusterRouter::CreateDB(const std::string& db, hybridse::sdk::Status* status) {
-    if (status == NULL) {
-        return false;
-    }
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     // We use hybridse parser to check db name, to ensure syntactic consistency.
     if (db.empty() || !CheckSQLSyntax("CREATE DATABASE `" + db + "`;")) {
         SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "db name(" + db + ") is invalid");
@@ -877,6 +870,7 @@ bool SQLClusterRouter::CreateDB(const std::string& db, hybridse::sdk::Status* st
 }
 
 bool SQLClusterRouter::DropDB(const std::string& db, hybridse::sdk::Status* status) {
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     if (db.empty() || !CheckSQLSyntax("DROP DATABASE `" + db + "`;")) {
         SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "db name(" + db + ") is invalid");
         return false;
@@ -897,6 +891,7 @@ bool SQLClusterRouter::DropDB(const std::string& db, hybridse::sdk::Status* stat
 }
 
 bool SQLClusterRouter::DropTable(const std::string& db, const std::string& table, hybridse::sdk::Status* status) {
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     if (db.empty() || table.empty()) {
         SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
                             "db name(" + db + ") or table name(" + table + ") is invalid");
@@ -1004,6 +999,7 @@ std::shared_ptr<SQLCache> SQLClusterRouter::GetSQLCache(const std::string& db, c
                                                         const ::hybridse::vm::EngineMode engine_mode,
                                                         const std::shared_ptr<SQLRequestRow>& parameter,
                                                         hybridse::sdk::Status* status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     ::hybridse::codec::Schema parameter_schema_raw;
     if (parameter) {
         for (int i = 0; i < parameter->GetSchema()->GetColumnCnt(); i++) {
@@ -1066,11 +1062,10 @@ std::shared_ptr<::openmldb::client::TabletClient> SQLClusterRouter::GetTabletCli
     const std::string& db, const std::string& sql, const ::hybridse::vm::EngineMode engine_mode,
     const std::shared_ptr<SQLRequestRow>& row, const std::shared_ptr<openmldb::sdk::SQLRequestRow>& parameter,
     hybridse::sdk::Status* status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     auto cache = GetSQLCache(db, sql, engine_mode, parameter, status);
     WARN_NOT_OK_AND_RET(status, "sql plan failed(get/create cache failed)", nullptr);
-    // if (!status->IsOK()) {
-    //     return {};
-    // }
+
     std::shared_ptr<::openmldb::catalog::TabletAccessor> tablet;
     if (cache) {
         auto router_cache = std::dynamic_pointer_cast<RouterSQLCache>(cache);
@@ -1105,9 +1100,7 @@ std::shared_ptr<::openmldb::client::TabletClient> SQLClusterRouter::GetTabletCli
 std::shared_ptr<::openmldb::client::TabletClient> SQLClusterRouter::GetTabletClientForBatchQuery(
     const std::string& db, const std::string& sql, const std::shared_ptr<SQLRequestRow>& parameter,
     hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return {};
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     auto cache = GetSQLCache(db, sql, hybridse::vm::kBatchMode, parameter, status);
     if (0 != status->code) {
         return {};
@@ -1145,7 +1138,7 @@ std::shared_ptr<TableReader> SQLClusterRouter::GetTableReader() {
 std::shared_ptr<openmldb::client::TabletClient> SQLClusterRouter::GetTablet(const std::string& db,
                                                                             const std::string& sp_name,
                                                                             hybridse::sdk::Status* status) {
-    if (status == nullptr) return nullptr;
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::shared_ptr<hybridse::sdk::ProcedureInfo> sp_info = cluster_sdk_->GetProcedureInfo(db, sp_name, &status->msg);
     if (!sp_info) {
         CODE_PREPEND_AND_WARN(status, StatusCode::kCmdError, "procedure not found");
@@ -1196,12 +1189,9 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLRequest(co
                                                                               const std::string& sql,
                                                                               std::shared_ptr<SQLRequestRow> row,
                                                                               hybridse::sdk::Status* status) {
-    if (!row || !status) {
-        LOG(WARNING) << "input is invalid";
-        return {};
-    }
-    if (!row->OK()) {
-        LOG(WARNING) << "make sure the request row is built before execute sql";
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row || !row->OK()) {
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "make sure the request row is built before execute sql");
         return {};
     }
     auto cntl = std::make_shared<::brpc::Controller>();
@@ -1212,11 +1202,11 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLRequest(co
         return {};
     }
     if (!client) {
-        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,"not tablet found");
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "tablet client not found");
         return {};
     }
     if (!client->Query(db, sql, row->GetRow(), cntl.get(), response.get(), options_->enable_debug)) {
-        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,"request server error, msg: " + response->msg());
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "request server error, msg: " + response->msg());
         return {};
     }
     if (response->code() != ::openmldb::base::kOk) {
@@ -1231,9 +1221,10 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLRequest(co
 std::shared_ptr<::hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLParameterized(
     const std::string& db, const std::string& sql, std::shared_ptr<openmldb::sdk::SQLRequestRow> parameter,
     ::hybridse::sdk::Status* status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::vector<openmldb::type::DataType> parameter_types;
     if (parameter && !ExtractDBTypes(parameter->GetSchema(), &parameter_types)) {
-        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,"convert parameter types error");
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "convert parameter types error");
         return {};
     }
     auto client = GetTabletClientForBatchQuery(db, sql, parameter, status);
@@ -1257,8 +1248,9 @@ std::shared_ptr<::hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLParamete
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLBatchRequest(
     const std::string& db, const std::string& sql, std::shared_ptr<SQLRequestRowBatch> row_batch,
     hybridse::sdk::Status* status) {
-    if (!row_batch || !status) {
-        LOG(WARNING) << "input arg is invalid";
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row_batch) {
+        LOG(WARNING) << "input row_batch is nullptr";
         return nullptr;
     }
     auto cntl = std::make_shared<::brpc::Controller>();
@@ -1274,11 +1266,11 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLBatchReque
         return nullptr;
     }
     if (!client->SQLBatchRequestQuery(db, sql, row_batch, cntl.get(), response.get(), options_->enable_debug)) {
-        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,"request server error " + response->msg());
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "request server error " + response->msg());
         return nullptr;
     }
     if (response->code() != ::openmldb::base::kOk) {
-        sSET_STATUS_AND_WARN(status, StatusCode::kCmdError, response->msg());
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, response->msg());
         return nullptr;
     }
     auto rs = std::make_shared<openmldb::sdk::SQLBatchRequestResultSet>(response, cntl);
@@ -1290,7 +1282,8 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQLBatchReque
 }
 
 bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& sql, ::hybridse::sdk::Status* status) {
-    if (status == NULL) return false;
+    RET_FALSE_IF_NULL_AND_WARN(status, "status is nullptr");
+
     std::shared_ptr<::openmldb::nameserver::TableInfo> table_info;
     std::vector<DefaultValueMap> default_maps;
     std::vector<uint32_t> str_lengths;
@@ -1303,7 +1296,8 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& s
     std::vector<std::shared_ptr<::openmldb::catalog::TabletAccessor>> tablets;
     bool ret = cluster_sdk_->GetTablet(table_info->db(), table_info->name(), &tablets);
     if (!ret || tablets.empty()) {
-        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,"Fail to execute insert statement: fail to get " + table_info->name() + " tablets");
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                            "Fail to execute insert statement: fail to get " + table_info->name() + " tablets");
         return false;
     }
     size_t cnt = 0;
@@ -1339,9 +1333,7 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& s
 bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>& row,
                               const std::vector<std::shared_ptr<::openmldb::catalog::TabletAccessor>>& tablets,
                               ::hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return false;
-    }
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     const auto& dimensions = row->GetDimensions();
     uint64_t cur_ts = ::baidu::common::timer::get_micros() / 1000;
     for (const auto& kv : dimensions) {
@@ -1355,16 +1347,16 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                                << kv.second.size();
                     bool ret = client->Put(tid, pid, cur_ts, row->GetRow(), kv.second);
                     if (!ret) {
-                        status->msg = "fail to make a put request to table. tid " + std::to_string(tid);
-                        LOG(WARNING) << status->msg;
+                        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                                            "fail to make a put request to table. tid " + std::to_string(tid));
                         return false;
                     }
                     continue;
                 }
             }
         }
-        status->msg = "fail to get tablet client. pid " + std::to_string(pid);
-        LOG(WARNING) << status->msg;
+
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "fail to get tablet client. pid " + std::to_string(pid));
         return false;
     }
     return true;
@@ -1372,8 +1364,9 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
 
 bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& sql, std::shared_ptr<SQLInsertRows> rows,
                                      hybridse::sdk::Status* status) {
-    if (!rows || !status) {
-        LOG(WARNING) << "input is invalid";
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");                          
+    if (!rows) {
+        LOG(WARNING) << "input rows is invalid";
         return false;
     }
     std::shared_ptr<SQLCache> cache = GetCache(db, sql, hybridse::vm::kBatchMode);
@@ -1399,7 +1392,9 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& s
 
 bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& sql, std::shared_ptr<SQLInsertRow> row,
                                      hybridse::sdk::Status* status) {
-    if (!row || !status) {
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row) {
+        // TODO
         return false;
     }
     std::shared_ptr<SQLCache> cache = GetCache(db, sql, hybridse::vm::kBatchMode);
@@ -1426,6 +1421,7 @@ bool SQLClusterRouter::GetSQLPlan(const std::string& sql, ::hybridse::node::Node
     ::hybridse::base::Status sql_status;
     PlanAPI::CreatePlanTreeFromScript(sql, *plan, nm, sql_status);
     if (0 != sql_status.code) {
+        // TODO(hw): return status?
         LOG(WARNING) << sql_status.msg;
         return false;
     }
@@ -1436,6 +1432,7 @@ bool SQLClusterRouter::RefreshCatalog() { return cluster_sdk_->Refresh(); }
 
 std::shared_ptr<ExplainInfo> SQLClusterRouter::Explain(const std::string& db, const std::string& sql,
                                                        ::hybridse::sdk::Status* status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     ::hybridse::vm::ExplainOutput explain_output;
     ::hybridse::base::Status vm_status;
     ::hybridse::codec::Schema parameter_schema;
@@ -1460,14 +1457,9 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::CallProcedure(const 
                                                                           const std::string& sp_name,
                                                                           std::shared_ptr<SQLRequestRow> row,
                                                                           hybridse::sdk::Status* status) {
-    if (!row || !status) {
-        LOG(WARNING) << status->msg;
-        return nullptr;
-    }
-    if (!row->OK()) {
-        status->code = -1;
-        status->msg = "make sure the request row is built before execute sql";
-        LOG(WARNING) << "make sure the request row is built before execute sql";
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row || !row->OK()) {
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "make sure the request row is built before execute sql");
         return nullptr;
     }
     auto tablet = GetTablet(db, sp_name, status);
@@ -1480,15 +1472,11 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::CallProcedure(const 
     bool ok = tablet->CallProcedure(db, sp_name, row->GetRow(), cntl.get(), response.get(), options_->enable_debug,
                                     options_->request_timeout);
     if (!ok) {
-        status->code = -1;
-        status->msg = "request server error" + response->msg();
-        LOG(WARNING) << status->msg;
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "request server error" + response->msg());
         return nullptr;
     }
     if (response->code() != ::openmldb::base::kOk) {
-        status->code = -1;
-        status->msg = response->msg();
-        LOG(WARNING) << status->msg;
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, response->msg());
         return nullptr;
     }
     auto rs = ResultSetSQL::MakeResultSet(response, cntl, status);
@@ -1498,7 +1486,9 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::CallProcedure(const 
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::CallSQLBatchRequestProcedure(
     const std::string& db, const std::string& sp_name, std::shared_ptr<SQLRequestRowBatch> row_batch,
     hybridse::sdk::Status* status) {
-    if (!row_batch || !status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row_batch) {
+        SET_STATUS_AND_WARN(status, StatusCode::kNullInputPointer, "row_batch is nullptr");
         return nullptr;
     }
     auto tablet = GetTablet(db, sp_name, status);
@@ -1511,19 +1501,16 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::CallSQLBatchRequestP
     bool ok = tablet->CallSQLBatchRequestProcedure(db, sp_name, row_batch, cntl.get(), response.get(),
                                                    options_->enable_debug, options_->request_timeout);
     if (!ok) {
-        status->code = -1;
-        status->msg = "request server error, msg: " + response->msg();
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "request server error, msg: " + response->msg());
         return nullptr;
     }
     if (response->code() != ::openmldb::base::kOk) {
-        status->code = -1;
-        status->msg = response->msg();
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, response->msg());
         return nullptr;
     }
     auto rs = std::make_shared<::openmldb::sdk::SQLBatchRequestResultSet>(response, cntl);
     if (!rs->Init()) {
-        status->code = -1;
-        status->msg = "SQLBatchRequestResultSet init failed";
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "SQLBatchRequestResultSet init failed");
         return nullptr;
     }
     return rs;
@@ -1532,14 +1519,10 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::CallSQLBatchRequestP
 std::shared_ptr<hybridse::sdk::ProcedureInfo> SQLClusterRouter::ShowProcedure(const std::string& db,
                                                                               const std::string& sp_name,
                                                                               hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return nullptr;
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::shared_ptr<hybridse::sdk::ProcedureInfo> sp_info = cluster_sdk_->GetProcedureInfo(db, sp_name, &status->msg);
     if (!sp_info) {
-        status->code = -1;
-        status->msg = "procedure not found, msg: " + status->msg;
-        LOG(WARNING) << status->msg;
+        SET_STATUS_AND_WARN(status, StatusCode::kProcedureNotFound, status->msg);
         return nullptr;
     }
     return sp_info;
@@ -1548,13 +1531,14 @@ std::shared_ptr<hybridse::sdk::ProcedureInfo> SQLClusterRouter::ShowProcedure(co
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::HandleSQLCmd(const hybridse::node::CmdPlanNode* cmd_node,
                                                                          const std::string& db,
                                                                          ::hybridse::sdk::Status* status) {
-    if (cmd_node == nullptr || status == nullptr) {
-        *status = {StatusCode::kCmdError, "null pointer"};
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (cmd_node == nullptr) {
+        SET_STATUS_AND_WARN(status, StatusCode::kNullInputPointer, " node is nullptr");
         return {};
     }
     auto ns_ptr = cluster_sdk_->GetNsClient();
     if (!ns_ptr) {
-        *status = {StatusCode::kCmdError, "no nameserver exist"};
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "no nameserver exist");
         return {};
     }
     bool ret = true;
@@ -2129,13 +2113,9 @@ std::shared_ptr<openmldb::sdk::QueryFuture> SQLClusterRouter::CallProcedure(cons
                                                                             int64_t timeout_ms,
                                                                             std::shared_ptr<SQLRequestRow> row,
                                                                             hybridse::sdk::Status* status) {
-    if (!row || !status) {
-        return {};
-    }
-    if (!row->OK()) {
-        status->code = -1;
-        status->msg = "make sure the request row is built before execute sql";
-        LOG(WARNING) << "make sure the request row is built before execute sql";
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row || !row->OK()) {
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "make sure the request row is built before execute sql");
         return {};
     }
     auto tablet = GetTablet(db, sp_name, status);
@@ -2150,9 +2130,7 @@ std::shared_ptr<openmldb::sdk::QueryFuture> SQLClusterRouter::CallProcedure(cons
     std::shared_ptr<openmldb::sdk::QueryFutureImpl> future = std::make_shared<openmldb::sdk::QueryFutureImpl>(callback);
     bool ok = tablet->CallProcedure(db, sp_name, row->GetRow(), timeout_ms, options_->enable_debug, callback);
     if (!ok) {
-        status->code = -1;
-        status->msg = "request server error, msg: " + response->msg();
-        LOG(WARNING) << status->msg;
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "request server error, msg: " + response->msg());
         return {};
     }
     return future;
@@ -2161,7 +2139,9 @@ std::shared_ptr<openmldb::sdk::QueryFuture> SQLClusterRouter::CallProcedure(cons
 std::shared_ptr<openmldb::sdk::QueryFuture> SQLClusterRouter::CallSQLBatchRequestProcedure(
     const std::string& db, const std::string& sp_name, int64_t timeout_ms,
     std::shared_ptr<SQLRequestRowBatch> row_batch, hybridse::sdk::Status* status) {
-    if (!row_batch || !status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row_batch) {
+        // todo
         return nullptr;
     }
     auto tablet = GetTablet(db, sp_name, status);
@@ -2179,9 +2159,7 @@ std::shared_ptr<openmldb::sdk::QueryFuture> SQLClusterRouter::CallSQLBatchReques
     bool ok =
         tablet->CallSQLBatchRequestProcedure(db, sp_name, row_batch, options_->enable_debug, timeout_ms, callback);
     if (!ok) {
-        status->code = -1;
-        status->msg = "request server error, msg: " + response->msg();
-        LOG(WARNING) << status->msg;
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "request server error, msg: " + response->msg());
         return nullptr;
     }
     return future;
@@ -2366,6 +2344,7 @@ bool SQLClusterRouter::UpdateOfflineTableInfo(const ::openmldb::nameserver::Tabl
 }
 
 std::string SQLClusterRouter::GetJobLog(const int id, hybridse::sdk::Status* status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     auto taskmanager_client_ptr = cluster_sdk_->GetTaskManagerClient();
     if (!taskmanager_client_ptr) {
         status->code = -1;
@@ -2404,9 +2383,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQL(const std
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQL(
     const std::string& db, const std::string& sql, std::shared_ptr<openmldb::sdk::SQLRequestRow> parameter,
     bool is_online_mode, bool is_sync_job, int offline_job_timeout, hybridse::sdk::Status* status) {
-    if (status == nullptr) {
-        return {};
-    }
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     hybridse::node::NodeManager node_manager;
     hybridse::node::PlanNodeList plan_trees;
     hybridse::base::Status sql_status;
@@ -2619,6 +2596,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteOfflineQuery(
                                                                                 const std::string& sql,
                                                                                 bool is_sync_job, int job_timeout,
                                                                                 ::hybridse::sdk::Status* status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::map<std::string, std::string> config;
     ReadSparkConfFromFile(std::dynamic_pointer_cast<SQLRouterOptions>(options_)->spark_conf_path, &config);
 
@@ -3055,7 +3033,9 @@ hybridse::sdk::Status SQLClusterRouter::HandleDelete(const std::string& db, cons
 }
 
 bool SQLClusterRouter::ExecuteDelete(std::shared_ptr<SQLDeleteRow> row, hybridse::sdk::Status* status) {
-    if (!row || !status) {
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
+    if (!row) {
+        // TODO
         return false;
     }
     const auto& db = row->GetDatabase();
@@ -3613,6 +3593,7 @@ hybridse::sdk::Status SQLClusterRouter::HandleLongWindows(
 bool SQLClusterRouter::CheckPreAggrTableExist(const std::string& base_table, const std::string& base_db,
                                               const openmldb::base::LongWindowInfo& lw,
                                               ::hybridse::sdk::Status* status) {
+    RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::string meta_db = openmldb::nameserver::INTERNAL_DB;
     std::string meta_table = openmldb::nameserver::PRE_AGG_META_NAME;
     std::string filter_cond = lw.filter_col_.empty() ? "" : " and filter_col = '" + lw.filter_col_ + "'";
@@ -3668,7 +3649,7 @@ static const std::initializer_list<std::string> GetComponetSchema() {
 // - Status can be 'online', 'offline' or 'NULL' (otherwise)
 // - Ns_role can be 'master', 'standby', or 'NULL' (for non-namespace component)
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowComponents(hybridse::sdk::Status* status) {
-    DCHECK(status != nullptr);
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     std::vector<std::shared_ptr<ResultSetSQL>> data;
 
     {
@@ -3721,7 +3702,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowComponent
 }
 
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowNameServers(hybridse::sdk::Status* status) {
-    DCHECK(status != nullptr);
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
 
     const auto& schema = GetComponetSchema();
 
@@ -3798,7 +3779,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowNameServe
 }
 
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowTablets(hybridse::sdk::Status* status) {
-    DCHECK(status != nullptr);
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     const auto& schema = GetComponetSchema();
     auto ns_client = cluster_sdk_->GetNsClient();
 
@@ -3835,13 +3816,12 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowTablets(h
 }
 
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowTaskManagers(hybridse::sdk::Status* status) {
-    DCHECK(status != nullptr);
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
 
     auto zk_client = cluster_sdk_->GetZkClient();
     if (!cluster_sdk_->IsClusterMode() || zk_client == nullptr) {
         // standalone mode
-        status->code = hybridse::common::kUnSupport;
-        status->msg = "show taskmanagers not supported in standalone mode";
+        SET_STATUS_AND_WARN(status, hybridse::common::kUnSupport, "show taskmanagers not supported in standalone mode");
         return {};
     }
 
@@ -3902,6 +3882,7 @@ static const std::initializer_list<std::string> GetTableStatusSchema() {
 // else: show table status in current database, include hidden database
 std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteShowTableStatus(const std::string& db,
                                                                                    hybridse::sdk::Status* status) {
+    RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     // NOTE: cluster_sdk_->GetTables(db) seems not accurate, query directly
     std::vector<nameserver::TableInfo> tables;
     std::string msg;
