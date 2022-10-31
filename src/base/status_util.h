@@ -106,6 +106,7 @@
 /// @brief must be not ok, skip check code
 #define APPEND_FROM_BASE_AND_WARN(s, base_s, msg) do { \
     ::hybridse::sdk::Status* _s = (s); \
+    _s->SetCode((base_s.GetCode())); \
     _s->SetMsg((msg));  \
     _s->Append(base_s.GetMsg()); \
     LOG(WARNING) << "Status: " << _s->Str(); \
@@ -124,6 +125,18 @@
     _s->Append((msg)); \
     LOG(WARNING) << "Status: " << _s->Str(); \
   } while (0)
+
+#define RET_FALSE_IF_NULL_AND_WARN(call, msg) \
+  if ((call) == nullptr) { \
+    LOG(WARNING) << (msg); \
+    return false; \
+  }
+
+#define RET_IF_NULL_AND_WARN(call, msg) \
+  if ((call) == nullptr) { \
+    LOG(WARNING) << (msg); \
+    return {}; \
+  }
 
 /// @brief Return @c to_return if @c to_call returns a bad status.
 ///   The substitution for 'to_return' may reference the variable
