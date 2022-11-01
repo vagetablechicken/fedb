@@ -45,8 +45,10 @@ struct Status {
     }
     void SetCode(int c) { code = c; }
     void SetMsg(const std::string& new_msg) { msg = new_msg; }
+    void SetTraces(const std::string& new_trace) { trace = new_trace; }
     void Prepend(const std::string& pre) { msg = pre + "--" + msg; }
     void Append(const std::string& app) { msg.append("--").append(app); }
+    void Append(int other_code) { msg.append("--").append("ReturnCode[").append(std::to_string(other_code)).append("]"); }
 
     Status CloneAndPrepend(const std::string& pre_msg) const {
         if (IsOK()) {
@@ -55,7 +57,11 @@ struct Status {
         return Status(code, pre_msg + msg);
     }
 
-    std::string Str() { return msg; }
+    std::string ToString() const {
+        std::string str("[");
+        str.append(std::to_string(code)).append("] ").append(msg);
+        return str;
+    };
 
     int code;
     std::string msg;

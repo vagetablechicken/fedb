@@ -20,6 +20,7 @@
 #include <string>
 
 #include "base/fe_status.h"
+#include "base/status.h"
 #include "gtest/gtest.h"
 
 namespace openmldb {
@@ -40,13 +41,16 @@ TEST_F(StatusUtilTest, simple) {
     ::hybridse::sdk::Status status;
     ::hybridse::base::Status base_status(StatusCode::kCmdError, "no ok");
     std::string abc = "abc";
-    APPEND_FROM_BASE_AND_WARN(&status, base_status, "pre1" + abc);
+    COPY_PREPEND_AND_WARN(&status, base_status, "(copy from hybirdse base status) pre1" + abc);
 
     CODE_PREPEND_AND_WARN(&status, StatusCode::kNoDatabase, "pre2");
     CODE_APPEND_AND_WARN(&status, StatusCode::kNoDatabase, "app1");
 
     SET_STATUS_AND_WARN(&status, StatusCode::kCmdError, "a new error");
     ASSERT_FALSE(TestRetBool(&status));
+
+    openmldb::base::Status obs(-1, "no ok");
+    APPEND_FROM_BASE_AND_WARN(&status, obs, "(copy from openmldb base status) pre3");
 }
 
 }  // namespace base
