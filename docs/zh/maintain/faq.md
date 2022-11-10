@@ -87,6 +87,12 @@ spark.default.conf=spark.driver.extraJavaOptions=-Dfile.encoding=utf-8;spark.exe
 spark.default.conf=spark.yarn.keytab=/tmp/test.keytab;spark.yarn.principal=test@EXAMPLE.COM
 ```
 
+#### Can't get kerberos realm
+
+KrbException: Cannot locate default realm
+
+todo: 可能是文件读取权限不够，taskmanager读文件系统的krb5.conf
+
 ### 5. 如何配置客户端的core日志？
 
 客户端core日志主要有两种，zk日志和sdk日志（glog日志），两者是独立的。
