@@ -100,8 +100,8 @@ jobs:
           MAVEN_TOKEN: ${{ secrets.OSSRH_TOKEN }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
-      - name: download shared libraries
-        uses: actions/download-artifact@v2
+      - name: upload
+        uses: actions/upload-artifact@v2
         with:
-          name: shared-library-${{ github.sha }}
-          path: java
+          name: native-jar
+          path: java/openmldb-native/target/openmldb-native-0.6.6-macos.jar
