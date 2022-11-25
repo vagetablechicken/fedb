@@ -24,7 +24,18 @@ list(APPEND CMAKE_MODULE_PATH
     "${CMAKE_SOURCE_DIR}/cmake")
 
 project(openmldb)
-
+if(APPLE)
+   message("hw test target: ${CMAKE_OSX_DEPLOYMENT_TARGET}, ${CMAKE_OSX_SYSROOT}" )
+   find_library(COREFOUNDATION_FRAMEWORK NAMES CoreFoundation
+       NO_DEFAULT_PATH
+       NO_CMAKE_ENVIRONMENT_PATH
+       NO_CMAKE_PATH
+       NO_SYSTEM_ENVIRONMENT_PATH
+       NO_CMAKE_SYSTEM_PATH
+       PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks/"
+   )
+   message("hw test framework: ${COREFOUNDATION_FRAMEWORK}" )
+endif()
 if (CMAKE_BUILD_TYPE STREQUAL "")
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif ()
