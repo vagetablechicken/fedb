@@ -22,6 +22,7 @@ import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 import java.util.Map;
+import java.sql.SQLException;
 import java.util.HashMap;
 
 public class StatementTest {
@@ -201,5 +202,29 @@ public class StatementTest {
                 e.printStackTrace();
             }
         }
+    }
+
+    @Test
+    void testCallablePreparedStmt() throws SQLException {
+        java.sql.Statement state = router.getStatement();
+
+        boolean ret = state.execute("create database if not exists test");
+        Assert.assertFalse(ret);
+        ret = state.execute("use test");
+        Assert.assertFalse(ret);
+        ret = state.execute("set @@execute_mode='online'");
+        Assert.assertFalse(ret);
+        ret = state.execute("create table if not exists testcallable(col1 bigint, col2 int);");
+        Assert.assertFalse(ret);
+        // ret = state.execute("deploy call1 select col1, count(col1) over w1 from testcallable window w1 as (partition by col1 order by col2 rows between unbounded preceding and current row);");
+        // Assert.assertFalse(ret);
+        CallablePreparedStatement preparedStatement = router.getCallablePreparedStmt("test", "call1");
+        preparedStatement.setLong(1, 233);
+        preparedStatement.setInt(2, 233);
+        preparedStatement.executeQuery();
+        preparedStatement.setLong(1, 455);
+        preparedStatement.setInt(2, 455);
+        preparedStatement.executeQuery();
+        // TODO: doc
     }
 }
