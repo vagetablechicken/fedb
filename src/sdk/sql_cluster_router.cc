@@ -1523,7 +1523,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::HandleSQLCmd(const h
                                                                          ::hybridse::sdk::Status* status) {
     RET_IF_NULL_AND_WARN(status, "output status is nullptr");
     if (cmd_node == nullptr) {
-        SET_STATUS_AND_WARN(status, StatusCode::kNullInputPointer, " node is nullptr");
+        SET_STATUS_AND_WARN(status, StatusCode::kNullInputPointer, "node is nullptr");
         return {};
     }
     auto ns_ptr = cluster_sdk_->GetNsClient();
