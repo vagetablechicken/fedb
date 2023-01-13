@@ -151,25 +151,36 @@ def status(args):
         assert flags.FLAGS.conf_file
         checker.check_startup('')
 
+def inspect(args):
+    print(args)
+    insepct_online(args)
+    pass
 
-def main1():
+def insepct_online(args):
+    pass
+
+def main1(argv):
     parser = argparse_flags.ArgumentParser()
     # use args.header returned by parser.parse_args
-    parser.add_argument('--header', help='Header message to print.')
     subparsers = parser.add_subparsers(help='The command to execute.')
 
     status_parser = subparsers.add_parser(
         'status', help='check the OpenMLDB server status')
     status_parser.add_argument('--diff', default=False, type=lambda x: (str(x).lower() == 'true'), 
         help='check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`')
-
     status_parser.set_defaults(command=status)
 
-    args = parser.parse_args(['status', '--cluster=127.0.0.1:8181/hw', '--logger_levels=:WARN', '--diff=true', '--conf_file=hosts'])#, '--sdk_log'])
+    inspect_parser = subparsers.add_parser(
+        'inspect', help='inspect online storage, do simple create&insert test. Support table status later')
+    inspect_parser.set_defaults(command=inspect)
+    inspect_sub = inspect_parser.add_subparsers()
+    online = inspect_sub.add_parser('online', help='123')
+    online.set_defaults(command=insepct_online)
+    offline = inspect_sub.add_parser('offline', help='123')
+    args = parser.parse_args(argv)
+    print(args)
     args.command(args)
-    logging.warning("hw_test")
-    print(parser.parse_args(['status', '--diff=true']))
-    print(parser.parse_args(['status', '-h'])) # raise SystemExit
+
 
 def run():
     app.run(main1)

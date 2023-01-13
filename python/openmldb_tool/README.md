@@ -12,11 +12,21 @@ read distribution yaml/hosts by dist_conf.py
 
 core commands:
 status
-test
+inspect [online] do sql test or check all table status
+        offline offline jobs status
+        no sub means all
 remote needs config file(dist.yml or hosts)
 
 openmldb_tool status --cluster=127.0.0.1:2181/openmldb
-openmldb_tool 
+
+status [-h] [--helpfull] [--diff DIFF]
+
+optional arguments:
+  -h, --help   show this help message and exit
+  --helpfull   show full help message and exit
+  --diff DIFF  check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`
+
+
 
 ## Collector
 
