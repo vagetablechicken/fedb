@@ -139,6 +139,7 @@ def main(argv):
 def status(args):
     """use OpenMLDB Python SDK to connect OpenMLDB"""
     assert flags.FLAGS.cluster
+    assert not args.diff or flags.FLAGS.conf_file, 'if diff, need conf_file'
     conn = Connector()
     res = conn.execute("SHOW COMPONENTS")
     # check components
@@ -159,14 +160,16 @@ def main1():
 
     status_parser = subparsers.add_parser(
         'status', help='check the OpenMLDB server status')
-    status_parser.add_argument('--diff', default=False, type=lambda x: (str(x).lower() == 'true'), help='Sub command flag.')
+    status_parser.add_argument('--diff', default=False, type=lambda x: (str(x).lower() == 'true'), 
+        help='check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`')
 
     status_parser.set_defaults(command=status)
 
     args = parser.parse_args(['status', '--cluster=127.0.0.1:8181/hw', '--logger_levels=:WARN', '--diff=true', '--conf_file=hosts'])#, '--sdk_log'])
     args.command(args)
     logging.warning("hw_test")
-    # print(parser.parse_args(['status', '-h'])) # raise SystemExit
+    print(parser.parse_args(['status', '--diff=true']))
+    print(parser.parse_args(['status', '-h'])) # raise SystemExit
 
 def run():
     app.run(main1)
