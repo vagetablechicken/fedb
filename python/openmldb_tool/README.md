@@ -6,7 +6,17 @@ main: diagnose.py
 
 ssh/scp by connections.py
 
-read distribution yaml by dist_conf.py
+read distribution yaml/hosts by dist_conf.py
+
+## Usage
+
+core commands:
+status
+test
+remote needs config file(dist.yml or hosts)
+
+openmldb_tool status --cluster=127.0.0.1:2181/openmldb
+openmldb_tool 
 
 ## Collector
 

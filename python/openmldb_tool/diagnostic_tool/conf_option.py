@@ -27,7 +27,7 @@ flags.DEFINE_string('check', 'ALL', 'the item should be check. one of ALL/CONF/L
 flags.DEFINE_string('exclude', '', 'one of CONF/LOG/SQL/VERSION')
 flags.DEFINE_string('env', '', 'startup environment. set onebox if started with start-all.sh')
 flags.DEFINE_string('log_level', 'INFO', 'the level of log')
-flags.DEFINE_bool('sdk_log', False, 'print cxx sdk log, default is False. Only support zk log now')
+# flags.DEFINE_bool('sdk_log', False, 'print cxx sdk log, default is False. Only support zk log now')
 
 LOG_FORMAT = '%(levelname)s: %(message)s'
 
@@ -83,7 +83,7 @@ class ConfOption:
             self.check_items.append(check)
         if exclude != '':
             self.check_items = list(filter(lambda x : x != exclude, self.check_items))
-        self.env = FLAGS.env;
+        self.env = FLAGS.env
 
 
         return True

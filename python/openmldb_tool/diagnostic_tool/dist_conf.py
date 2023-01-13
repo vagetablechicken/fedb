@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-
+import configparser as cfg
 import yaml
 
 log = logging.getLogger(__name__)
@@ -112,11 +112,27 @@ class DistConf:
         return result
 
 
-class DistConfReader:
+class YamlConfReader:
     def __init__(self, config_path):
         with open(config_path, "r") as stream:
             self.dist_conf = DistConf(yaml.safe_load(stream))
 
+    def conf(self):
+        return self.dist_conf
+
+class HostsConfReader:
+    def __init__(self, config_path):
+        with open(config_path, "r") as stream:
+            # hosts style to dict
+            cf = cfg.ConfigParser(strict=False, delimiters=" ",allow_no_value=True)
+            cf.read_file(stream)
+            d = {} 
+            for sec in cf.sections():
+                # k is endpoint, v is path or empty, multi kv means multi servers
+                d[sec] = [ {'endpoint': k, 'path': v} for k,v in cf[sec].items()]
+
+            d['mode'] = 'cluster'
+            self.dist_conf = DistConf(d)
     def conf(self):
         return self.dist_conf
 

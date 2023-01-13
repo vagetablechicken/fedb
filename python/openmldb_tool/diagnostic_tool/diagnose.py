@@ -14,18 +14,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from diagnostic_tool.connector import Connector
 from diagnostic_tool.collector import Collector, LocalCollector
-from diagnostic_tool.dist_conf import DistConfReader, ConfParser, DistConf
+from diagnostic_tool.dist_conf import YamlConfReader, ConfParser, DistConf
 from diagnostic_tool.conf_validator import YamlConfValidator, StandaloneConfValidator, ClusterConfValidator, TaskManagerConfValidator
 from diagnostic_tool.log_analysis import LogAnalysis
 from diagnostic_tool.server_checker import ServerChecker
+import diagnostic_tool.server_checker as checker
 import diagnostic_tool.util as util
 import sys
-import logging
+
 from absl import app
 from diagnostic_tool.conf_option import ConfOption
+from absl import flags
+from absl.flags import argparse_flags
+from absl import logging # --logger_levels --log_dir
 
-log = logging.getLogger(__name__)
+# only some sub cmd needs dist file
+flags.DEFINE_string(
+    'conf_file', '', 'Cluster config file, supports two styles: yaml and hosts. ',
+    short_name='f')
 
 def check_version(version_map : dict):
     f_version = ''
@@ -39,7 +47,7 @@ def check_version(version_map : dict):
                 f_endpoint = endpoint
                 f_role = k
             if cur_version != f_version:
-                log.warn(f'version mismatch. {k} {endpoint} version {cur_version}, {f_role} {f_endpoint} version {f_version}')
+                logging.warn(f'version mismatch. {k} {endpoint} version {cur_version}, {f_role} {f_endpoint} version {f_version}')
                 flag = False
     return flag, f_version
 
@@ -55,7 +63,7 @@ def check_conf(yaml_conf_dict, conf_map):
                 if yaml_conf_dict['mode'] == 'cluster' and role == 'taskmanager':
                     taskmanager_validator = TaskManagerConfValidator(cur_conf)
                     if not taskmanager_validator.validate():
-                        log.warn(f'taskmanager {endpoint} conf check failed')
+                        logging.warn(f'taskmanager {endpoint} conf check failed')
                         flag = False
 
     if yaml_conf_dict['mode'] == 'standalone':
@@ -63,9 +71,9 @@ def check_conf(yaml_conf_dict, conf_map):
     else:
         conf_validator = ClusterConfValidator(yaml_conf_dict, detail_conf_map)
     if conf_validator.validate() and flag:
-        log.info('check conf ok')
+        logging.info('check conf ok')
     else:
-        log.warn('check conf failed')
+        logging.warn('check conf failed')
 
 def check_log(yaml_conf_dict, log_map):
     flag = True
@@ -74,26 +82,26 @@ def check_log(yaml_conf_dict, log_map):
             log_analysis = LogAnalysis(role, endpoint, values)
             if not log_analysis.analysis_log() : flag = False
     if flag:
-        log.info('check log ok')
+        logging.info('check logging ok')
 
 def run_test_sql(dist_conf : DistConf, print_sdk_log):
     checker = ServerChecker(dist_conf.full_conf, print_sdk_log)
     if checker.run_test_sql():
-        log.info('test sql execute ok.')
+        logging.info('test sql execute ok.')
 
 def main(argv):
     conf_opt = ConfOption()
     if not conf_opt.init():
         return
     util.clean_dir(conf_opt.data_dir)
-    dist_conf = DistConfReader(conf_opt.dist_conf).conf()
+    dist_conf = YamlConfReader(conf_opt.dist_conf).conf()
     yaml_validator = YamlConfValidator(dist_conf.full_conf)
     if not yaml_validator.validate():
-        log.warning("check yaml conf failed")
+        logging.warning("check yaml conf failed")
         sys.exit()
-    log.info("check yaml conf ok")
+    logging.info("check yaml conf ok")
 
-    log.info("mode is {}".format(dist_conf.mode))
+    logging.info("mode is {}".format(dist_conf.mode))
     if dist_conf.mode == 'cluster' and conf_opt.env != 'onebox':
         collector = Collector(dist_conf)
         if conf_opt.check_version():
@@ -101,35 +109,67 @@ def main(argv):
         if conf_opt.check_conf():
             collector.pull_config_files(f'{conf_opt.data_dir}/conf')
         if conf_opt.check_log():
-            collector.pull_log_files(f'{conf_opt.data_dir}/log')
+            collector.pull_log_files(f'{conf_opt.data_dir}/logging')
         if conf_opt.check_conf() or conf_opt.check_log():
             file_map = util.get_files(conf_opt.data_dir)
-            log.debug("file_map: %s", file_map)
+            logging.debug("file_map: %s", file_map)
     else:
         collector = LocalCollector(dist_conf)
         if conf_opt.check_version():
             version_map = collector.collect_version()
         if conf_opt.check_conf() or conf_opt.check_log():
             file_map = collector.collect_files()
-            log.debug("file_map: %s", file_map)
+            logging.debug("file_map: %s", file_map)
 
     if conf_opt.check_version():
         flag, version = check_version(version_map)
         if flag:
-            log.info(f'openmldb version is {version}')
-            log.info('check version ok')
+            logging.info(f'openmldb version is {version}')
+            logging.info('check version ok')
         else:
-            log.warn('check version failed')
+            logging.warn('check version failed')
 
     if conf_opt.check_conf():
         check_conf(dist_conf.full_conf, file_map['conf'])
     if conf_opt.check_log():
-        check_log(dist_conf.full_conf, file_map['log'])
+        check_log(dist_conf.full_conf, file_map['logging'])
     if conf_opt.check_sql():
         run_test_sql(dist_conf, conf_opt.print_sdk_log())
 
+def status(args):
+    """use OpenMLDB Python SDK to connect OpenMLDB"""
+    assert flags.FLAGS.cluster
+    conn = Connector()
+    res = conn.execute("SHOW COMPONENTS")
+    # check components
+    c_map = checker.parse_component(res)
+    checker.check_status(c_map)
+
+    # --diff with dist conf file, conf_file is required
+    if args.diff:
+        assert flags.FLAGS.conf_file
+        checker.check_startup('')
+
+
+def main1():
+    parser = argparse_flags.ArgumentParser()
+    # use args.header returned by parser.parse_args
+    parser.add_argument('--header', help='Header message to print.')
+    subparsers = parser.add_subparsers(help='The command to execute.')
+
+    status_parser = subparsers.add_parser(
+        'status', help='check the OpenMLDB server status')
+    status_parser.add_argument('--diff', default=False, type=lambda x: (str(x).lower() == 'true'), help='Sub command flag.')
+
+    status_parser.set_defaults(command=status)
+
+    args = parser.parse_args(['status', '--cluster=127.0.0.1:8181/hw', '--logger_levels=:WARN', '--diff=true', '--conf_file=hosts'])#, '--sdk_log'])
+    args.command(args)
+    logging.warning("hw_test")
+    # print(parser.parse_args(['status', '-h'])) # raise SystemExit
+
 def run():
-    app.run(main)
+    app.run(main1)
 
 if __name__ == '__main__':
-    app.run(main)
+    app.run(main1)

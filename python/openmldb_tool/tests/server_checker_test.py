@@ -14,10 +14,10 @@
 
 import os
 from diagnostic_tool.server_checker import ServerChecker
-from diagnostic_tool.dist_conf import DistConfReader
+from diagnostic_tool.dist_conf import YamlConfReader
 
 
 def test_sql_check():
-    conf = DistConfReader(os.path.dirname(__file__) + "/cluster_dist.yml").conf()
+    conf = YamlConfReader(os.path.dirname(__file__) + "/cluster_dist.yml").conf()
     checker = ServerChecker(conf.full_conf, True)
     assert checker.run_test_sql()

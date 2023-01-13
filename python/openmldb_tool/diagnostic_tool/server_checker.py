@@ -20,6 +20,39 @@ import openmldb.dbapi
 
 log = logging.getLogger(__name__)
 
+# rename to checker?
+
+def parse_component(component_list):
+    component_map = {}
+    for (endpoint, component, _, status, role) in component_list:
+        component_map.setdefault(component, [])
+        component_map[component].append((endpoint, status))
+    return component_map
+
+def check_status(component_map):
+    for component, value_list in component_map.items():
+        for endpoint, status in value_list:
+            if status != "online":
+                log.warning(f"{component} endpoint {endpoint} is offline")
+
+def check_startup(component_map):
+    pass
+    # for component in ["nameserver", "tablet", "taskmanager"]:
+    #     if self.conf_dict["mode"] != "cluster":
+    #         if component == "taskmanager":
+    #             continue
+    #         if len(self.conf_dict[component]) > 1:
+    #             log.warning(f"{component} number is greater than 1")
+
+    #     for item in self.conf_dict[component]:
+    #         endpoint = item["endpoint"]
+    #         has_found = False
+    #         for cur_endpoint, _ in component_map[component]:
+    #             if endpoint == cur_endpoint:
+    #                 has_found = True
+    #                 break
+    #         if not has_found:
+    #             log.warning(f"{component} endpoint {endpoint} has not startup")
 
 class ServerChecker:
     def __init__(self, conf_dict, print_sdk_log):
@@ -43,42 +76,11 @@ class ServerChecker:
         self.db = openmldb.dbapi.connect(**connect_args)
         self.cursor = self.db.cursor()
 
-    def parse_component(self, component_list):
-        component_map = {}
-        for (endpoint, component, _, status, role) in component_list:
-            component_map.setdefault(component, [])
-            component_map[component].append((endpoint, status))
-        return component_map
-
-    def check_status(self, component_map):
-        for component, value_list in component_map.items():
-            for endpoint, status in value_list:
-                if status != "online":
-                    log.warning(f"{component} endpoint {endpoint} is offline")
-
-    def check_startup(self, component_map):
-        for component in ["nameserver", "tablet", "taskmanager"]:
-            if self.conf_dict["mode"] != "cluster":
-                if component == "taskmanager":
-                    continue
-                if len(self.conf_dict[component]) > 1:
-                    log.warning(f"{component} number is greater than 1")
-
-            for item in self.conf_dict[component]:
-                endpoint = item["endpoint"]
-                has_found = False
-                for cur_endpoint, _ in component_map[component]:
-                    if endpoint == cur_endpoint:
-                        has_found = True
-                        break
-                if not has_found:
-                    log.warning(f"{component} endpoint {endpoint} has not startup")
-
     def check_component(self):
         result = self.cursor.execute("SHOW COMPONENTS;").fetchall()
-        component_map = self.parse_component(result)
-        self.check_status(component_map)
-        self.check_startup(component_map)
+        component_map = parse_component(result)
+        check_status(component_map)
+        check_startup(component_map)
 
     def is_exist(self, data, name):
         for item in data:

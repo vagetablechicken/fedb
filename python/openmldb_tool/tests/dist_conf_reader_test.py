@@ -12,13 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from diagnostic_tool.dist_conf import DistConfReader
+from diagnostic_tool.dist_conf import YamlConfReader, HostsConfReader
 import os
 
 
-def test_read():
+def test_read_yaml():
     current_path = os.path.dirname(__file__)
-    dist = DistConfReader(current_path + "/cluster_dist.yml").conf()
+    dist = YamlConfReader(current_path + "/cluster_dist.yml").conf()
     assert dist.mode == "cluster"
     assert len(dist.server_info_map.map["nameserver"]) == 1
     assert len(dist.server_info_map.map["tablet"]) == 2
+    assert dist.server_info_map.map["nameserver"][0].endpoint == "127.0.0.1:6527"
+    assert dist.server_info_map.map["nameserver"][0].path == "/work/ns1"
+
+def test_read_hosts():
+    current_path = os.path.dirname(__file__)
+    dist = HostsConfReader(current_path + "/hosts").conf()
+    assert dist.mode == "cluster"
+    assert len(dist.server_info_map.map["nameserver"]) == 1
+    assert len(dist.server_info_map.map["tablet"]) == 2
+    assert dist.server_info_map.map["nameserver"][0].endpoint == "localhost:7527"
+    assert dist.server_info_map.map["nameserver"][0].path == None

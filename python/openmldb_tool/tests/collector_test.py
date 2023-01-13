@@ -18,7 +18,7 @@ import unittest
 from unittest.mock import patch
 
 from diagnostic_tool.collector import Collector
-from diagnostic_tool.dist_conf import DistConfReader, ServerInfoMap, ALL_SERVER_ROLES, ServerInfo
+from diagnostic_tool.dist_conf import YamlConfReader, ServerInfoMap, ALL_SERVER_ROLES, ServerInfo
 
 logging.basicConfig(level=logging.DEBUG,
                     format='{%(filename)s:%(lineno)d} %(levelname)s - %(message)s', )
@@ -32,7 +32,7 @@ class TestCollector(unittest.TestCase):
 
     def setUp(self) -> None:
         self.current_path = os.path.dirname(__file__)
-        dist_conf = DistConfReader(self.current_path + '/cluster_dist.yml').conf()
+        dist_conf = YamlConfReader(self.current_path + '/cluster_dist.yml').conf()
         # zk log path is missing
         self.conns = Collector(dist_conf)
 
