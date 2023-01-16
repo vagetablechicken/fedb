@@ -13,8 +13,8 @@ read distribution yaml/hosts by dist_conf.py
 core commands:
 status
 inspect [online] do sql test or check all table status
-        offline offline jobs status
-        no sub means all
+        [offline] offline jobs status
+        no sub means all?
 remote needs config file(dist.yml or hosts)
 
 openmldb_tool status --cluster=127.0.0.1:2181/openmldb

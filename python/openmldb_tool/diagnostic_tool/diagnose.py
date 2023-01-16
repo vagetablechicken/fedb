@@ -19,7 +19,6 @@ from diagnostic_tool.collector import Collector, LocalCollector
 from diagnostic_tool.dist_conf import YamlConfReader, ConfParser, DistConf
 from diagnostic_tool.conf_validator import YamlConfValidator, StandaloneConfValidator, ClusterConfValidator, TaskManagerConfValidator
 from diagnostic_tool.log_analysis import LogAnalysis
-from diagnostic_tool.server_checker import ServerChecker
 import diagnostic_tool.server_checker as checker
 import diagnostic_tool.util as util
 import sys
@@ -84,11 +83,6 @@ def check_log(yaml_conf_dict, log_map):
     if flag:
         logging.info('check logging ok')
 
-def run_test_sql(dist_conf : DistConf, print_sdk_log):
-    checker = ServerChecker(dist_conf.full_conf, print_sdk_log)
-    if checker.run_test_sql():
-        logging.info('test sql execute ok.')
-
 def main(argv):
     conf_opt = ConfOption()
     if not conf_opt.init():
@@ -133,31 +127,44 @@ def main(argv):
         check_conf(dist_conf.full_conf, file_map['conf'])
     if conf_opt.check_log():
         check_log(dist_conf.full_conf, file_map['logging'])
-    if conf_opt.check_sql():
-        run_test_sql(dist_conf, conf_opt.print_sdk_log())
 
 def status(args):
     """use OpenMLDB Python SDK to connect OpenMLDB"""
-    assert flags.FLAGS.cluster
-    assert not args.diff or flags.FLAGS.conf_file, 'if diff, need conf_file'
     conn = Connector()
-    res = conn.execute("SHOW COMPONENTS")
-    # check components
-    c_map = checker.parse_component(res)
-    checker.check_status(c_map)
+    status_checker = checker.StatusChecker(conn)
+    assert status_checker.check_components()
 
     # --diff with dist conf file, conf_file is required
     if args.diff:
         assert flags.FLAGS.conf_file
-        checker.check_startup('')
+        status_checker.check_startup('') # TODO
 
 def inspect(args):
-    print(args)
     insepct_online(args)
-    pass
+    inspect_offline(args)
 
 def insepct_online(args):
-    pass
+    """insert is not a good idea? show table status?"""
+    # TODO(hw)
+
+def inspect_offline(args):
+    """"""
+    assert checker.StatusChecker(Connector()).offline_support()
+
+
+def test_sql(args):
+    conn = Connector()
+    status_checker = checker.StatusChecker(conn)
+    if not status_checker.check_components():
+        logging.warning("some server is offline, be careful")
+    tester = checker.SQLTester(conn)
+    tester.setup()
+    tester.online()
+    if status_checker.offline_support():
+        tester.offline()
+    else:
+        print("no taskmanager, can't test offline")
+    tester.teardown()
 
 def main1(argv):
     parser = argparse_flags.ArgumentParser()
@@ -169,16 +176,17 @@ def main1(argv):
     status_parser.add_argument('--diff', default=False, type=lambda x: (str(x).lower() == 'true'), 
         help='check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`')
     status_parser.set_defaults(command=status)
-
+    test_parser = subparsers.add_parser('test', help='do simple create&insert test, what about offline?')
+    test_parser.set_defaults(command=test_sql)
     inspect_parser = subparsers.add_parser(
-        'inspect', help='inspect online storage, do simple create&insert test. Support table status later')
+        'inspect', help='inspect online storage. Support table status later')
     inspect_parser.set_defaults(command=inspect)
     inspect_sub = inspect_parser.add_subparsers()
     online = inspect_sub.add_parser('online', help='123')
     online.set_defaults(command=insepct_online)
     offline = inspect_sub.add_parser('offline', help='123')
     args = parser.parse_args(argv)
-    print(args)
+
     args.command(args)
 
 

@@ -34,6 +34,7 @@ class Singleton(type):
 class Connector(metaclass=Singleton):
     """OpenMLDB Python SDK wrapper, how about standalone?"""
     def __init__(self):
+        assert FLAGS.cluster
         zk, zk_path = FLAGS.cluster.split('/')
         url = f'openmldb:///?zk={zk}&zkPath=/{zk_path}'
         # other options
@@ -45,7 +46,11 @@ class Connector(metaclass=Singleton):
     def get_conn(self):
         return self.conn
 
-    def execute(self, sql, show=True):
+    def execute(self, sql):
+        """ddl won't return resultset, can not fetchall"""
+        return self.conn.execute(sql)
+
+    def execfetch(self, sql, show=False):
         cr = self.conn.execute(sql)
         res = cr.fetchall()
         if show:
