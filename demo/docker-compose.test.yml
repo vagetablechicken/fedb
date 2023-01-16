@@ -16,7 +16,7 @@ services:
       - /bin/bash
       - -cx
       - |
-        rm /work/openmldb/spark-3.2.1-bin-openmldbspark/jars/curator-* # curator NoSuchMethodError error
+        #rm /work/openmldb/spark-3.2.1-bin-openmldbspark/jars/curator-* # curator NoSuchMethodError error
         ./init.sh
         sleep 5
         # quickstart test
@@ -53,4 +53,4 @@ services:
         python3 /work/job_checker.py
 
         cd /work
-        openmldb_tool --env=onebox --dist_conf=cluster_dist.yml
+        # openmldb_tool inspect offline # open it after 

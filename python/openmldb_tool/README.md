@@ -12,21 +12,24 @@ read distribution yaml/hosts by dist_conf.py
 
 core commands:
 status
-inspect [online] do sql test or check all table status
-        [offline] offline jobs status
-        no sub means all?
+inspect   [online] check all table status
+          [offline] offline jobs status
+          no sub means all?
+test   test online insert&select, test offline select if taskmanager
 remote needs config file(dist.yml or hosts)
 
 openmldb_tool status --cluster=127.0.0.1:2181/openmldb
-
+```
 status [-h] [--helpfull] [--diff DIFF]
 
 optional arguments:
   -h, --help   show this help message and exit
   --helpfull   show full help message and exit
   --diff DIFF  check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`
+```
 
-
+show table status, get just one table? and check the hidden db tables status
+  show table status can detect the problem? `Fail to get tablet from cache` 
 
 ## Collector
 
