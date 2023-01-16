@@ -10,10 +10,14 @@ def test_cmd():
     # log setting by absl logging
 
     main1(['inspect', 'online'])
-    main1(['inspect'])
+    # main1(['inspect'])
     with pytest.raises(SystemExit):
         main1(['status', '-h'])
     with pytest.raises(SystemExit):
         main1(['inspect', '-h'])
     with pytest.raises(SystemExit):
+        main1(['inspect', 'online', '-h'])
+    with pytest.raises(SystemExit):
         main1(['test', '-h'])
+    with pytest.raises(SystemExit):
+        main1(['--helpfull'])

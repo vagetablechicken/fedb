@@ -179,12 +179,13 @@ def main1(argv):
     test_parser = subparsers.add_parser('test', help='do simple create&insert test, what about offline?')
     test_parser.set_defaults(command=test_sql)
     inspect_parser = subparsers.add_parser(
-        'inspect', help='inspect online storage. Support table status later')
+        'inspect', help='Inspect online and offline. Use `inspect [online/offline]` to inspect one. Support table status later')
     inspect_parser.set_defaults(command=inspect)
     inspect_sub = inspect_parser.add_subparsers()
-    online = inspect_sub.add_parser('online', help='123')
+    online = inspect_sub.add_parser('online', help='only inspect online table')
     online.set_defaults(command=insepct_online)
-    offline = inspect_sub.add_parser('offline', help='123')
+    offline = inspect_sub.add_parser('offline', help='only inspect offline jobs, check the job log')
+    offline.set_defaults(command=inspect_offline)
     args = parser.parse_args(argv)
 
     args.command(args)
