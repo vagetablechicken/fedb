@@ -14,14 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
+from absl import logging
 import os
 
 log = logging.getLogger(__name__)
 
-class YamlConfValidator:
-    def __init__(self, conf_dict):
-        self.conf_dict = conf_dict
+class ConfValidator:
+    def __init__(self, conf):
+        self.conf_dict = conf
         self.standalone_role = ['nameserver', 'tablet']
         self.cluster_role = ['nameserver', 'tablet', 'taskmanager', 'zookeeper']
 
@@ -31,7 +31,7 @@ class YamlConfValidator:
             if item == 'taskmanager':
                 continue
             if item not in desc_dict:
-                log.warning(f'no {item} in yaml conf')
+                log.warning(f'no {item} in conf')
                 flag = False
         return flag
 
@@ -55,7 +55,7 @@ class YamlConfValidator:
 
     def validate(self) -> bool:
         if 'mode' not in self.conf_dict:
-            log.warning('no mode in yaml conf')
+            log.warning('no mode in conf')
             return False
         if self.conf_dict['mode'] == 'standalone':
             if not self.check_exist(self.standalone_role, self.conf_dict):
@@ -80,7 +80,7 @@ class YamlConfValidator:
             if not self.check_exist(self.cluster_role, self.conf_dict):
                 return False
         else:
-            log.warning('invalid mode %s in yaml conf. mode should be standalone/cluster', self.conf_dict['mode'])
+            log.warning('invalid mode %s in conf. mode should be standalone/cluster', self.conf_dict['mode'])
             return False
         return True
 

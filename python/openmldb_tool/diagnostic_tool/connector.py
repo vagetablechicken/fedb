@@ -15,12 +15,13 @@
 import sqlalchemy as db
 from absl import flags
 from prettytable import PrettyTable
+import logging
 
 # most sub cmds only need cluster addr
 flags.DEFINE_string(
     'cluster', '127.0.0.1:2181/openmldb', 'Cluster addr, format: <zk>/<zkPath>.',
     short_name='c')
-flags.DEFINE_bool('sdk_log', False, 'print cxx sdk log, default is False. Only support zk log now')
+flags.DEFINE_bool('sdk_log', False, 'print sdk log(pysdk&zk&glog), default is False.')
 
 FLAGS = flags.FLAGS
 
@@ -40,6 +41,7 @@ class Connector(metaclass=Singleton):
         # other options
         if not FLAGS.sdk_log:
             url += '&zkLogLevel=0&glogLevel=2'
+            logging.getLogger('OpenMLDB_sdk').setLevel(logging.WARNING)
         self.engine = db.create_engine(url)
         self.conn = self.engine.connect()
 

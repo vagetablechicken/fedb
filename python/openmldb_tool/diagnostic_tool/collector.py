@@ -48,6 +48,8 @@ def buf2str(buf: BufferedFile) -> str:
 class Collector:
     def __init__(self, dist_conf: DistConf):
         self.dist_conf = dist_conf
+
+    def init(self):
         # use one ssh client to connect all servers, ssh connections won't keep alive
         self.ssh_client = paramiko.SSHClient()
         self.ssh_client.load_system_host_keys()

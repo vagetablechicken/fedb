@@ -11,13 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
+from absl import logging
 import configparser as cfg
 import yaml
 
-log = logging.getLogger(__name__)
-
-ALL_SERVER_ROLES = ['nameserver', 'tablet', 'taskmanager']
+ALL_SERVER_ROLES = ["nameserver", "tablet", "taskmanager"]
 
 CXX_SERVER_ROLES = ALL_SERVER_ROLES[:2]
 
@@ -29,36 +27,42 @@ class ServerInfo:
         self.role = role
         self.endpoint = endpoint
         self.path = path
-        self.host = endpoint.split(':')[0]
+        self.host = endpoint.split(":")[0]
         self.is_local = is_local
 
     def __str__(self):
-        return f'Server[{self.role}, {self.endpoint}, {self.path}]'
+        return f"Server[{self.role}, {self.endpoint}, {self.path}]"
 
     def is_taskmanager(self):
-        return self.role == 'taskmanager'
+        return self.role == "taskmanager"
 
     def conf_path(self):
-        return f'{self.path}/conf'
+        return f"{self.path}/conf"
 
     def bin_path(self):
-        return f'{self.path}/bin'
+        return f"{self.path}/bin"
 
     def taskmanager_path(self):
-        return f'{self.path}/taskmanager'
+        return f"{self.path}/taskmanager"
 
     def conf_path_pair(self, local_root):
-        config_name = f'{self.role}.flags' if self.role != 'taskmanager' \
-            else f'{self.role}.properties'
-        local_prefix = f'{self.endpoint}-{self.role}'
-        return f'{self.path}/conf/{config_name}', f'{local_root}/{local_prefix}/{config_name}'
+        config_name = (
+            f"{self.role}.flags"
+            if self.role != "taskmanager"
+            else f"{self.role}.properties"
+        )
+        local_prefix = f"{self.endpoint}-{self.role}"
+        return (
+            f"{self.path}/conf/{config_name}",
+            f"{local_root}/{local_prefix}/{config_name}",
+        )
 
     def remote_log4j_path(self):
-        return f'{self.path}/taskmanager/conf/log4j.properties'
+        return f"{self.path}/taskmanager/conf/log4j.properties"
 
     # TODO(hw): openmldb glog config? will it get a too large log file? fix the settings
     def remote_local_pairs(self, remote_dir, file, dest):
-        return f'{remote_dir}/{file}', f'{dest}/{self.endpoint}-{self.role}/{file}'
+        return f"{remote_dir}/{file}", f"{dest}/{self.endpoint}-{self.role}/{file}"
 
 
 class ServerInfoMap:
@@ -78,7 +82,7 @@ class ServerInfoMap:
         ok = True
         for role in roles:
             if role not in self.map:
-                log.warning("role %s is not in map", role)
+                logging.warning("role %s is not in map", role)
                 ok = False
                 continue
             for server_info in self.map[role]:
@@ -91,10 +95,18 @@ class ServerInfoMap:
 class DistConf:
     def __init__(self, conf_dict):
         self.full_conf = conf_dict
-        self.mode = self.full_conf['mode']
+        self.mode = self.full_conf["mode"]
         self.server_info_map = ServerInfoMap(
-            self.map(ALL_SERVER_ROLES, lambda role, s: ServerInfo(role, s['endpoint'], s['path'],
-                s['is_local'] if 'is_local' in s else False)))
+            self.map(
+                ALL_SERVER_ROLES,
+                lambda role, s: ServerInfo(
+                    role,
+                    s["endpoint"],
+                    s["path"],
+                    s["is_local"] if "is_local" in s else False,
+                ),
+            )
+        )
 
     def __str__(self):
         return str(self.full_conf)
@@ -120,21 +132,24 @@ class YamlConfReader:
     def conf(self):
         return self.dist_conf
 
+
 class HostsConfReader:
     def __init__(self, config_path):
         with open(config_path, "r") as stream:
             # hosts style to dict
-            cf = cfg.ConfigParser(strict=False, delimiters=" ",allow_no_value=True)
+            cf = cfg.ConfigParser(strict=False, delimiters=" ", allow_no_value=True)
             cf.read_file(stream)
-            d = {} 
+            d = {}
             for sec in cf.sections():
                 # k is endpoint, v is path or empty, multi kv means multi servers
-                d[sec] = [ {'endpoint': k, 'path': v} for k,v in cf[sec].items()]
+                d[sec] = [{"endpoint": k, "path": v} for k, v in cf[sec].items()]
 
-            d['mode'] = 'cluster'
+            d["mode"] = "cluster"
             self.dist_conf = DistConf(d)
+
     def conf(self):
         return self.dist_conf
+
 
 class ConfParser:
     def __init__(self, config_path):
@@ -142,12 +157,12 @@ class ConfParser:
         with open(config_path, "r") as stream:
             for line in stream:
                 item = line.strip()
-                if item == '' or item.startswith('#'):
+                if item == "" or item.startswith("#"):
                     continue
                 arr = item.split("=")
                 if len(arr) != 2:
                     continue
-                if arr[0].startswith('--'):
+                if arr[0].startswith("--"):
                     # for gflag
                     self.conf_map[arr[0][2:]] = arr[1]
                 else:
@@ -155,3 +170,13 @@ class ConfParser:
 
     def conf(self):
         return self.conf_map
+
+
+def read_conf(conf_file):
+    """if not yaml style, hosts style"""
+    try:
+        conf = YamlConfReader(conf_file).conf()
+    except Exception as e:
+        logging.info(f"yaml read failed on {e}, read in hosts style")
+        conf = HostsConfReader(conf_file).conf()
+    return conf

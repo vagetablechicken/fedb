@@ -16,7 +16,7 @@ inspect   [online] check all table status
           [offline] offline jobs status
           no sub means all?
 test   test online insert&select, test offline select if taskmanager
-remote needs config file(dist.yml or hosts)
+static-check needs config file(dist.yml or hosts)
 
 openmldb_tool status --cluster=127.0.0.1:2181/openmldb
 ```
@@ -31,7 +31,12 @@ optional arguments:
 show table status, get just one table? and check the hidden db tables status
   show table status can detect the problem? `Fail to get tablet from cache` 
 
-## Collector
+## Static Check
+
+Check the onebox/distribute cluster.
+
+1. version: local/ssh run `openmldb --version`
+2. conf: local 
 
 collector.py collects config, log and version
 

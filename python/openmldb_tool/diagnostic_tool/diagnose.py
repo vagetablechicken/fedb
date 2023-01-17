@@ -15,24 +15,21 @@
 # limitations under the License.
 
 from diagnostic_tool.connector import Connector
-from diagnostic_tool.collector import Collector, LocalCollector
-from diagnostic_tool.dist_conf import YamlConfReader, ConfParser, DistConf
+from diagnostic_tool.dist_conf import ConfParser, read_conf
 from diagnostic_tool.conf_validator import (
-    YamlConfValidator,
+    ConfValidator,
     StandaloneConfValidator,
     ClusterConfValidator,
     TaskManagerConfValidator,
 )
 from diagnostic_tool.log_analysis import LogAnalysis
+from diagnostic_tool.collector import Collector
 import diagnostic_tool.server_checker as checker
-import diagnostic_tool.util as util
-import sys
 
 from absl import app
-from diagnostic_tool.conf_option import ConfOption
 from absl import flags
 from absl.flags import argparse_flags
-from absl import logging  # --logger_levels --log_dir
+from absl import logging  # --verbosity --log_dir
 
 # only some sub cmd needs dist file
 flags.DEFINE_string(
@@ -100,50 +97,20 @@ def check_log(yaml_conf_dict, log_map):
         logging.info("check logging ok")
 
 
-def main(argv):
-    conf_opt = ConfOption()
-    if not conf_opt.init():
-        return
-    util.clean_dir(conf_opt.data_dir)
-    dist_conf = YamlConfReader(conf_opt.dist_conf).conf()
-    yaml_validator = YamlConfValidator(dist_conf.full_conf)
-    if not yaml_validator.validate():
-        logging.warning("check yaml conf failed")
-        sys.exit()
-    logging.info("check yaml conf ok")
+# def main(argv):
+#     conf_opt = ConfOption()
+#     if not conf_opt.init():
+#         return
+#     util.clean_dir(conf_opt.data_dir)
+#     dist_conf = YamlConfReader(conf_opt.dist_conf).conf()
+#     yaml_validator = YamlConfValidator(dist_conf.full_conf)
+#     if not yaml_validator.validate():
+#         logging.warning("check yaml conf failed")
+#         sys.exit()
+#     logging.info("check yaml conf ok")
 
-    logging.info("mode is {}".format(dist_conf.mode))
-    if dist_conf.mode == "cluster" and conf_opt.env != "onebox":
-        collector = Collector(dist_conf)
-        if conf_opt.check_version():
-            version_map = collector.collect_version()
-        if conf_opt.check_conf():
-            collector.pull_config_files(f"{conf_opt.data_dir}/conf")
-        if conf_opt.check_log():
-            collector.pull_log_files(f"{conf_opt.data_dir}/logging")
-        if conf_opt.check_conf() or conf_opt.check_log():
-            file_map = util.get_files(conf_opt.data_dir)
-            logging.debug("file_map: %s", file_map)
-    else:
-        collector = LocalCollector(dist_conf)
-        if conf_opt.check_version():
-            version_map = collector.collect_version()
-        if conf_opt.check_conf() or conf_opt.check_log():
-            file_map = collector.collect_files()
-            logging.debug("file_map: %s", file_map)
+#     logging.info("mode is {}".format(dist_conf.mode))
 
-    if conf_opt.check_version():
-        flag, version = check_version(version_map)
-        if flag:
-            logging.info(f"openmldb version is {version}")
-            logging.info("check version ok")
-        else:
-            logging.warn("check version failed")
-
-    if conf_opt.check_conf():
-        check_conf(dist_conf.full_conf, file_map["conf"])
-    if conf_opt.check_log():
-        check_log(dist_conf.full_conf, file_map["logging"])
 
 
 def status(args):
@@ -164,7 +131,7 @@ def inspect(args):
 
 
 def insepct_online(args):
-    """insert is not a good idea? show table status?"""
+    """show table status"""
     conn = Connector()
     # scan all db include system db
     # INTERNAL_DB
@@ -179,19 +146,31 @@ def insepct_online(args):
         for t in rs:
             if t[13]:
                 print(f"unhealthy table {t[2]}.{t[1]}:\n {t[:13]}")
-                print(f"full warnings:\n{t[13]}") # TODO sqlalchemy truncated ref https://github.com/sqlalchemy/sqlalchemy/commit/591e0cf08a798fb16e0ee9b56df5c3141aa48959
+                print(
+                    f"full warnings:\n{t[13]}"
+                )  # sqlalchemy truncated ref https://github.com/sqlalchemy/sqlalchemy/commit/591e0cf08a798fb16e0ee9b56df5c3141aa48959
 
 
 def inspect_offline(args):
     """"""
     assert checker.StatusChecker(Connector()).offline_support()
+    conn = Connector()
+    jobs = conn.execfetch("SHOW JOBS")
+    print(f"inspect {len(jobs)} jobs")
+    has_failed = False
+    for row in jobs:
+        if row[2] != "FINISHED":
+            has_failed = True
+            std_output = conn.execfetch(f"SHOW JOBLOG {row[0]}")
+            print(f"{row[0]}-{row[1]} failed, job log:\n{std_output}")
+    assert not has_failed
 
 
 def test_sql(args):
     conn = Connector()
     status_checker = checker.StatusChecker(conn)
     if not status_checker.check_components():
-        logging.warning("some server is offline, be careful")
+        logging.warning("some server is unalive, be careful")
     tester = checker.SQLTester(conn)
     tester.setup()
     tester.online()
@@ -202,39 +181,117 @@ def test_sql(args):
     tester.teardown()
 
 
-def main1(argv):
+def static_check(args):
+    assert flags.FLAGS.conf_file, "static check needs dist conf file"
+    conf = read_conf(flags.FLAGS.conf_file)
+    assert ConfValidator(conf.full_conf).validate(), "conf file is invalid"
+    collector = Collector(conf)
+    if args.version:
+        pass
+    if args.conf:
+        pass
+    if args.log:
+        pass
+#     if dist_conf.mode == "cluster" and conf_opt.env != "onebox":
+#         collector = Collector(dist_conf)
+#         if conf_opt.check_version():
+#             version_map = collector.collect_version()
+#         if conf_opt.check_conf():
+#             collector.pull_config_files(f"{conf_opt.data_dir}/conf")
+#         if conf_opt.check_log():
+#             collector.pull_log_files(f"{conf_opt.data_dir}/logging")
+#         if conf_opt.check_conf() or conf_opt.check_log():
+#             file_map = util.get_files(conf_opt.data_dir)
+#             logging.debug("file_map: %s", file_map)
+#     else:
+#         collector = LocalCollector(dist_conf)
+#         if conf_opt.check_version():
+#             version_map = collector.collect_version()
+#         if conf_opt.check_conf() or conf_opt.check_log():
+#             file_map = collector.collect_files()
+#             logging.debug("file_map: %s", file_map)
+
+#     if conf_opt.check_version():
+#         flag, version = check_version(version_map)
+#         if flag:
+#             logging.info(f"openmldb version is {version}")
+#             logging.info("check version ok")
+#         else:
+#             logging.warn("check version failed")
+
+#     if conf_opt.check_conf():
+#         check_conf(dist_conf.full_conf, file_map["conf"])
+#     if conf_opt.check_log():
+#         check_log(dist_conf.full_conf, file_map["logging"])
+
+def parse_arg(argv):
+    """parser definition"""
     parser = argparse_flags.ArgumentParser()
     # use args.header returned by parser.parse_args
-    subparsers = parser.add_subparsers(help="The command to execute.")
-
+    subparsers = parser.add_subparsers(help="OpenMLDB Tool")
+    # sub status
     status_parser = subparsers.add_parser(
         "status", help="check the OpenMLDB server status"
     )
     status_parser.add_argument(
         "--diff",
-        default=False,
-        type=lambda x: (str(x).lower() == "true"),
+        action="store_true",
         help="check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`",
-    )
+    )  # TODO action support version?
     status_parser.set_defaults(command=status)
+
+    # sub test
     test_parser = subparsers.add_parser(
         "test", help="do simple create&insert test, what about offline?"
     )
     test_parser.set_defaults(command=test_sql)
+
+    # sub inspect
     inspect_parser = subparsers.add_parser(
         "inspect",
         help="Inspect online and offline. Use `inspect [online/offline]` to inspect one. Support table status later",
     )
+    # inspect online & offline
     inspect_parser.set_defaults(command=inspect)
     inspect_sub = inspect_parser.add_subparsers()
+    # inspect online
     online = inspect_sub.add_parser("online", help="only inspect online table")
     online.set_defaults(command=insepct_online)
+    # inspect offline
     offline = inspect_sub.add_parser(
         "offline", help="only inspect offline jobs, check the job log"
     )
     offline.set_defaults(command=inspect_offline)
-    args = parser.parse_args(argv)
 
+    # sub remote
+    static_check_parser = subparsers.add_parser(
+        "static-check",
+        help="static check on remote host, version/conf/log, need --conf_file, and if remote, need Passwordless SSH Login",
+    )
+    static_check_parser.add_argument(
+        "-V", "--version", action="store_true", help="check version"
+    )
+    static_check_parser.add_argument(
+        "-C", "--conf", action="store_true", help="check conf"
+    )
+    static_check_parser.add_argument(
+        "-L", "--log", action="store_true", help="check log"
+    )
+    static_check_parser.set_defaults(command=static_check)
+
+    args = parser.parse_args(argv)
+    tool_flags = {
+        k: [flag.serialize() for flag in v]
+        for k, v in flags.FLAGS.flags_by_module_dict().items()
+        if "diagnostic_tool" in k
+    }
+    logging.info(f"args:{args}, flags: {tool_flags}")
+    return args
+
+
+def main1(argv):
+    args = parse_arg(argv)
+    # run the command
     args.command(args)
 
 
