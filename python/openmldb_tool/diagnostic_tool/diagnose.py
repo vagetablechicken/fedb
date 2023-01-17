@@ -35,10 +35,14 @@ from absl import logging  # --verbosity --log_dir
 flags.DEFINE_string(
     "conf_file",
     "",
-    "Cluster config file, supports two styles: yaml and hosts. ",
+    "Cluster config file, supports two styles: yaml and hosts.",
     short_name="f",
 )
-
+flags.DEFINE_bool(
+    "local",
+    False,
+    "If set, all server in config file will be treated as local server, skip ssh.",
+)
 
 def check_version(version_map: dict):
     f_version = ""
@@ -95,22 +99,6 @@ def check_log(yaml_conf_dict, log_map):
                 flag = False
     if flag:
         logging.info("check logging ok")
-
-
-# def main(argv):
-#     conf_opt = ConfOption()
-#     if not conf_opt.init():
-#         return
-#     util.clean_dir(conf_opt.data_dir)
-#     dist_conf = YamlConfReader(conf_opt.dist_conf).conf()
-#     yaml_validator = YamlConfValidator(dist_conf.full_conf)
-#     if not yaml_validator.validate():
-#         logging.warning("check yaml conf failed")
-#         sys.exit()
-#     logging.info("check yaml conf ok")
-
-#     logging.info("mode is {}".format(dist_conf.mode))
-
 
 
 def status(args):
@@ -184,10 +172,12 @@ def test_sql(args):
 def static_check(args):
     assert flags.FLAGS.conf_file, "static check needs dist conf file"
     conf = read_conf(flags.FLAGS.conf_file)
-    assert ConfValidator(conf.full_conf).validate(), "conf file is invalid"
+    # if we want to check conf or log files, we should know deploy path of servers
+    require_dir = args.conf or args.log
+    assert ConfValidator(conf).validate(require_dir), "conf file is invalid"
     collector = Collector(conf)
     if args.version:
-        pass
+        collector.collect_version()
     if args.conf:
         pass
     if args.log:
@@ -289,15 +279,16 @@ def parse_arg(argv):
     return args
 
 
-def main1(argv):
+def main(argv):
     args = parse_arg(argv)
+    # TODO: adjust args, e.g. if conf_file, we can get zk addr from conf file, no need to --cluster
     # run the command
     args.command(args)
 
 
 def run():
-    app.run(main1)
+    app.run(main)
 
 
 if __name__ == "__main__":
-    app.run(main1)
+    app.run(main)

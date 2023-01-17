@@ -16,21 +16,16 @@ import sqlalchemy as db
 from absl import flags
 from prettytable import PrettyTable
 import logging
+from .util import Singleton
 
 # most sub cmds only need cluster addr
 flags.DEFINE_string(
-    'cluster', '127.0.0.1:2181/openmldb', 'Cluster addr, format: <zk>/<zkPath>.',
+    'cluster', '127.0.0.1:2181/openmldb', 'Cluster addr, format: <zk_endpoint>[,<zk_endpoint>]/<zkPath>.',
     short_name='c')
 flags.DEFINE_bool('sdk_log', False, 'print sdk log(pysdk&zk&glog), default is False.')
 
 FLAGS = flags.FLAGS
 
-class Singleton(type):
-    _instances = {}
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
-        return cls._instances[cls]
 
 class Connector(metaclass=Singleton):
     """OpenMLDB Python SDK wrapper, how about standalone?"""

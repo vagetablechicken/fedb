@@ -14,32 +14,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from absl import logging
+import logging
+from .dist_conf import DistConf
 import os
 
 log = logging.getLogger(__name__)
 
 class ConfValidator:
-    def __init__(self, conf):
-        self.conf_dict = conf
-        self.standalone_role = ['nameserver', 'tablet']
-        self.cluster_role = ['nameserver', 'tablet', 'taskmanager', 'zookeeper']
-
-    def check_exist(self, item_list : list, desc_dict : dict) -> bool:
-        flag = True
-        for item in item_list:
-            if item == 'taskmanager':
-                continue
-            if item not in desc_dict:
-                log.warning(f'no {item} in conf')
-                flag = False
-        return flag
+    def __init__(self, conf: DistConf):
+        self.conf = conf
 
     def check_path(self, path):
         if not path.startswith('/'):
             return False
         return True
 
+    # it's task of collector
     def check_path_exist(self, path):
         if not os.path.exists(path):
             return False
@@ -53,35 +43,28 @@ class ConfValidator:
             return False
         return True
 
-    def validate(self) -> bool:
-        if 'mode' not in self.conf_dict:
-            log.warning('no mode in conf')
-            return False
-        if self.conf_dict['mode'] == 'standalone':
-            if not self.check_exist(self.standalone_role, self.conf_dict):
-                return False
-            for role in self.standalone_role:
-                if len(self.conf_dict[role]) != 1:
-                    log.warning(f'number of {role} should be 1')
-                    return False
-                for component in self.conf_dict[role]:
-                    if not self.check_exist(['endpoint', 'path'], component):
-                        return False
-                    if not self.check_endpoint(component['endpoint']):
-                        log.warning('invalid endpoint ' + component['endpoint'])
-                        return False
-                    if not self.check_path(component['path']):
-                        log.warning('{} should be absolute path'.format(component['path']))
-                        return False
-                    if not self.check_path_exist(component['path']):
-                        log.warning('{} path is not exist'.format(component['path']))
-                        return False
-        elif self.conf_dict['mode'] == 'cluster':
-            if not self.check_exist(self.cluster_role, self.conf_dict):
-                return False
+    def validate(self, require_dir = False) -> bool:
+        """
+        server required: endpoint(ip:port), optional: path, is_local
+        """
+        d = self.conf.count_dict()
+        if self.conf.is_cluster():
+            # no taskmanager or apiserver is ok
+            assert d['tablet'] >= 2 and d['nameserver'] >= 1 and d['zookeeper'] >= 1
         else:
-            log.warning('invalid mode %s in conf. mode should be standalone/cluster', self.conf_dict['mode'])
-            return False
+            # standalone just two servers   
+            assert d['tablet'] == 1 and d['nameserver'] == 1
+
+        # if require_dir, all servers must have field `path`
+        # zk is skipped, 
+        for r,v in self.conf.server_info_map.items():
+            if r is "zookeeper":
+                continue
+            for server in v:
+                endpoint = server.endpoint
+                assert self.check_endpoint(endpoint), endpoint
+                if require_dir:
+                    assert server.path, server
         return True
 
 class StandaloneConfValidator:

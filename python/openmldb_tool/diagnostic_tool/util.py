@@ -3,16 +3,17 @@ import logging
 
 log = logging.getLogger(__name__)
 
-def get_openmldb_version(path) -> str:
-    openmldb_file = path + '/openmldb'
-    if not os.path.exists(openmldb_file):
-        log.warning(f"{openmldb_file} is not exists")
-        return ""
-    cmd= openmldb_file + ' --version'
+class Singleton(type):
+    _instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+def local_cmd(cmd) -> str:
     result = os.popen(cmd)
-    tmp = result.read()
-    version=tmp.split('\n')[0].split(' ')[2][:5]
-    return version
+    return result.read()
+
 
 def get_local_logs(root_path, role):
     def role_filter(role, file_name):

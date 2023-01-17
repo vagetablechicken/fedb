@@ -14,53 +14,52 @@
 
 import logging
 import os.path
-import unittest
-from unittest.mock import patch
+import pytest
 
 from diagnostic_tool.collector import Collector
-from diagnostic_tool.dist_conf import YamlConfReader, ServerInfoMap, ALL_SERVER_ROLES, ServerInfo
+from diagnostic_tool.dist_conf import read_conf
+from absl import flags
 
-logging.basicConfig(level=logging.DEBUG,
-                    format='{%(filename)s:%(lineno)d} %(levelname)s - %(message)s', )
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="{%(filename)s:%(lineno)d} %(levelname)s - %(message)s",
+)
 
-class TestCollector(unittest.TestCase):
-    def mock_path(self):
-        self.conns.dist_conf.server_info_map = ServerInfoMap(
-            self.conns.dist_conf.map(ALL_SERVER_ROLES,
-                                     lambda role, s: ServerInfo(role, s['endpoint'],
-                                                                self.current_path + '/' + s['path'], s['is_local'] if 'is_local' in s else False)))
+current_path = os.path.dirname(__file__)
 
-    def setUp(self) -> None:
-        self.current_path = os.path.dirname(__file__)
-        dist_conf = YamlConfReader(self.current_path + '/cluster_dist.yml').conf()
-        # zk log path is missing
-        self.conns = Collector(dist_conf)
-
-        # for test
-        self.mock_path()
-
-    def test_ping(self):
-        logging.debug('hw test')
-        self.assertTrue(self.conns.ping_all())
-
-    def test_pull_config(self):
-        self.assertTrue(self.conns.pull_config_files('/tmp/conf_copy_to'))
-
-    def test_pull_logs(self):
-        # no logs in tablet1
-        with self.assertLogs() as cm:
-            self.assertFalse(self.conns.pull_log_files('/tmp/log_copy_to'))
-        for log_str in cm.output:
-            logging.info(log_str)
-        self.assertTrue(any(['no file in' in log_str for log_str in cm.output]))
-
-    @unittest.skip
-    @patch('diagnostic_tool.collector.parse_config_from_properties')
-    def test_version(self, mock_conf):
-        mock_conf.return_value = os.path.dirname(__file__) + '/work/spark_home'
-        self.assertTrue(self.conns.collect_version())
+def mock_path(dist_conf):
+    for k,v in dist_conf.server_info_map.items():
+        for server in v:
+            if server.path:
+                server.path = current_path + server.path
 
 
-if __name__ == '__main__':
+# Remote test require ssh config, skip now. Only test local collector
+def test_local_collector():
+    flags.FLAGS['local'].parse('True') # only test local
+    dist_conf = read_conf(current_path + "/cluster_dist.yml")
+    mock_path(dist_conf)
+    local_collector = Collector(dist_conf)
+    with pytest.raises(AssertionError):
+        local_collector.ping_all()
 
-    unittest.main()
+    # no bin in tests/work/<server>, so it's a empty map
+    version_map = local_collector.collect_version()
+    print(version_map)
+
+    # TODO
+    # local_collector.pull_config_files("/tmp/conf_copy_dest")
+    # local_collector.pull_log_files("/tmp/log_copy_dest")
+#     def test_pull_logs(self):
+#         # no logs in tablet1
+#         with self.assertLogs() as cm:
+#             self.assertFalse(self.conns.pull_log_files("/tmp/log_copy_to"))
+#         for log_str in cm.output:
+#             logging.info(log_str)
+#         self.assertTrue(any(["no file in" in log_str for log_str in cm.output]))
+
+#     @pytest.skip
+#     @patch("diagnostic_tool.collector.parse_config_from_properties")
+#     def test_version(self, mock_conf):
+#         mock_conf.return_value = os.path.dirname(__file__) + "/work/spark_home"
+#         self.assertTrue(self.conns.collect_version())

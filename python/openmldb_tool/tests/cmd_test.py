@@ -1,5 +1,5 @@
 import pytest
-from diagnostic_tool.diagnose import parse_arg, main1
+from diagnostic_tool.diagnose import parse_arg, main
 from absl import flags
 from .case_conf import OpenMLDB_ZK_CLUSTER
 
@@ -44,5 +44,5 @@ def test_argparse():
 def test_cmd():
     # singleton connection
     cluster_arg = f'--cluster={OpenMLDB_ZK_CLUSTER}'
-    main1(['status', cluster_arg,])
-    main1(['status', '--cluster=foo/bar',]) # still connect to OpenMLDB_ZK_CLUSTER
+    main(['status', cluster_arg,])
+    main(['status', '--cluster=foo/bar',]) # still connect to OpenMLDB_ZK_CLUSTER

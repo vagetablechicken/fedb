@@ -12,14 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from absl import logging
+from absl import flags
 import configparser as cfg
 import yaml
 
-ALL_SERVER_ROLES = ["nameserver", "tablet", "taskmanager"]
+ALL_SERVER_ROLES = ["nameserver", "tablet", "apiserver", "taskmanager"]
 
-CXX_SERVER_ROLES = ALL_SERVER_ROLES[:2]
+CXX_SERVER_ROLES = ALL_SERVER_ROLES[:3]
 
-JAVA_SERVER_ROLES = [ALL_SERVER_ROLES[2]]
+JAVA_SERVER_ROLES = [ALL_SERVER_ROLES[3]]
 
 
 class ServerInfo:
@@ -67,7 +68,11 @@ class ServerInfo:
 
 class ServerInfoMap:
     def __init__(self, server_info_map):
+        # map struct: <role,[server_list]>
         self.map = server_info_map
+    
+    def items(self):
+        return self.map.items()
 
     def for_each(self, func, roles=None, check_result=True):
         """
@@ -93,25 +98,33 @@ class ServerInfoMap:
 
 
 class DistConf:
-    def __init__(self, conf_dict):
+    def __init__(self, conf_dict: dict):
         self.full_conf = conf_dict
         self.mode = self.full_conf["mode"]
         self.server_info_map = ServerInfoMap(
-            self.map(
-                ALL_SERVER_ROLES,
+            self._map(
+                ALL_SERVER_ROLES+["zookeeper"],
                 lambda role, s: ServerInfo(
                     role,
                     s["endpoint"],
-                    s["path"],
-                    s["is_local"] if "is_local" in s else False,
+                    s["path"] if "path" in s else None,
+                    True if flags.FLAGS.local else s["is_local"] if "is_local" in s else False,
                 ),
             )
         )
 
+        # if "zookeeper":
+        # endpoint = server.endpoint.split('/')[0]
+        # # host:port:zk_peer_port:zk_election_port
+        # endpoint = ':'.join(endpoint.split(':')[:2])
+
+    def is_cluster(self):
+        return self.mode == "cluster"
+
     def __str__(self):
         return str(self.full_conf)
 
-    def map(self, role_list, trans):
+    def _map(self, role_list, trans):
         result = {}
         for role in role_list:
             if role not in self.full_conf:
@@ -122,6 +135,11 @@ class DistConf:
                 for s in ss:
                     result[role].append(trans(role, s) if trans is not None else s)
         return result
+
+    def count_dict(self):
+        d = {r: len(s)  for r, s in self.server_info_map.items()}
+        assert not self.is_cluster() or d['zookeeper'] >= 1
+        return d
 
 
 class YamlConfReader:

@@ -33,6 +33,8 @@ def hosts_asssert(dist):
     assert len(dist.server_info_map.map["tablet"]) == 2
     assert dist.server_info_map.map["nameserver"][0].endpoint == "localhost:7527"
     assert dist.server_info_map.map["nameserver"][0].path == None
+    d = dist.count_dict()
+    assert d['zookeeper'] == 1
 
 def test_read_hosts():
     current_path = os.path.dirname(__file__)
