@@ -69,6 +69,7 @@ def buf2str(buf: BufferedFile) -> str:
 
 
 class Collector:
+    """For each server, if is_local, run cmd in localhost, else use ssh"""
     def __init__(self, dist_conf: DistConf):
         self.dist_conf = dist_conf
 
