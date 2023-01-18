@@ -15,9 +15,6 @@ import logging
 import os
 import re
 
-import paramiko
-from paramiko.file import BufferedFile
-
 from diagnostic_tool.dist_conf import (
     DistConf,
     CXX_SERVER_ROLES,
@@ -26,23 +23,10 @@ from diagnostic_tool.dist_conf import (
     ConfParser,
 )
 import diagnostic_tool.util as util
-
-from .util import Singleton
+from .util import SSH
 from absl import flags
 
 log = logging.getLogger(__name__)
-
-
-class SSH(metaclass=Singleton):
-    def __init__(self) -> None:
-        logging.getLogger("paramiko").setLevel(logging.WARNING)
-        self.ssh_client = paramiko.SSHClient()
-        self.ssh_client.load_system_host_keys()
-        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    def exec(self, host, cmd):
-        self.ssh_client.connect(hostname=host)
-        return self.ssh_client.exec_command(cmd)
 
 
 def parse_config_from_properties(props_str, config_name) -> str:
@@ -64,12 +48,12 @@ def parse_config_from_properties(props_str, config_name) -> str:
     return conf_line.split("=")[1]
 
 
-def buf2str(buf: BufferedFile) -> str:
-    return buf.read().decode("utf-8")
-
-
 class Collector:
-    """For each server, if is_local, run cmd in localhost, else use ssh"""
+    """
+    For each server, if is_local, run cmd in localhost, else use ssh
+    We should get job logs by `SHOW JOBLOG`
+    """
+
     def __init__(self, dist_conf: DistConf):
         self.dist_conf = dist_conf
 
@@ -83,11 +67,10 @@ class Collector:
         assert not flags.FLAGS.local, "local servers don't need to test ping"
 
         def ping(server_info: ServerInfo) -> bool:
-            _, stdout, stderr = SSH().exec(server_info.host, "whoami && pwd")
-            log.debug(buf2str(stdout))
-            err = buf2str(stderr)
-            if len(err) != 0:
-                log.warning(f"failed to ping {server_info}, err: {err}")
+            res = server_info.cmd_on_host("whoami && pwd")
+            log.debug(res)
+            if not res:
+                log.warning(f"failed to ping {server_info}")
                 return False
             return True
 
@@ -105,18 +88,38 @@ class Collector:
         return self.dist_conf.server_info_map.for_each(pull_one)
 
     def pull_log_files(self, dest) -> bool:
-        def pull_cxx(server_info: ServerInfo) -> bool:
-            return self.pull_cxx_server_logs(server_info, dest, 2)
+        def pull_log(server_info: ServerInfo) -> bool:
+            """
+            After 0.7.0, onebox cluster started by sbin won't use the same root dir
+            No need to check tablet2.flags
+            """
+            # get log path
+            def get_config_value(server_info: ServerInfo, conf_path, config_name, default_v):
+                log.debug("get %s from %s", config_name, conf_path)
+                grep_str = server_info.cmd_on_host(f"grep {config_name} {conf_path}")
+                tmp = parse_config_from_properties(grep_str, config_name)
+                return tmp if tmp else default_v
 
-        def pull_taskmanager(server_info: ServerInfo) -> bool:
-            res = self.pull_job_logs(server_info, dest, 2)
-            return self.pull_tm_server_logs(server_info, dest, 2) and res
+            if server_info.is_taskmanager():
+                log4j_conf_path = server_info.remote_log4j_path()
+                log_path = get_config_value(
+                    server_info, log4j_conf_path, "log4j.appender.file.file=", "./logs/taskmanager.log"
+                )
+            else:
+                conf_path = server_info.conf_path_pair("")[0]
+                log_path = get_config_value(server_info, conf_path, "openmldb_log_dir=", "./logs")
+            log_path_pair = server_info.remote_local_pairs(server_info.path, log_path, dest)
+            log.warning(f"cp pair: {log_path_pair}")
+            # if server_info.is_local:
+            #     #cp
+            #     log.debug(f"get from local {server_info.host}")
+            #     return self.copy_local_file(config_paths)
+            # else:
+            #     #scp
+            return True
 
-        ok = self.dist_conf.server_info_map.for_each(pull_cxx, CXX_SERVER_ROLES)
-        return (
-            self.dist_conf.server_info_map.for_each(pull_taskmanager, JAVA_SERVER_ROLES)
-            and ok
-        )
+        return self.dist_conf.server_info_map.for_each(pull_log)
+        
 
     def collect_version(self):
         """
@@ -136,13 +139,9 @@ class Collector:
 
         def run_version(server_info: ServerInfo) -> bool:
             version_map.setdefault(server_info.role, [])
-            if server_info.is_local:
-                version = util.local_cmd(f"{server_info.path}/bin/openmldb --version")
-            else:
-                _, stdout, _ = SSH().exec(
-                    server_info.host, f"{server_info.path}/bin/openmldb --version"
-                )
-                version = buf2str(stdout)
+            version = server_info.cmd_on_host(
+                f"{server_info.path}/bin/openmldb --version"
+            )
             if not version:
                 log.warning("failed at get version from %s", server_info)
             else:
@@ -154,102 +153,73 @@ class Collector:
         self.dist_conf.server_info_map.for_each(run_version, CXX_SERVER_ROLES)
 
         def jar_version(server_info: ServerInfo) -> bool:
-            if server_info.is_local:
-                # TODO
-                pass
+            def get_spark_home(server_info: ServerInfo):
+                """
+                https://openmldb.ai/docs/zh/main/deploy/install_deploy.html#taskmanager use env, but won't store it
+                :param remote_config_file:
+                :return: abs path
+                """
+                tm_conf_path = server_info.conf_path_pair("")[0]
+                config_name = "spark.home="
+                log.debug("get %s from %s", config_name, tm_conf_path)
+                grep_str = server_info.cmd_on_host(f"grep {config_name} {tm_conf_path}")
+
+                if not grep_str:
+                    # TODO(hw):no config in file, get env SPARK_HOME?
+                    #  what if ssh user is different with server user or it's a temp env?
+                    # or force to set spark home in config?
+                    # _, stdout, _ = self.ssh_client.exec_command(f'env | grep SPARK_HOME')
+                    # env = stdout.read()
+                    # if not env:
+                    #     raise RuntimeError('no env SPARK_HOME')
+                    return ""
+
+                # may have spark home in config(discard if it's in comment)
+                return parse_config_from_properties(grep_str, config_name)
+
+            def get_batch_version(server_info: ServerInfo):
+                # TODO(hw): check if multi batch jars
+                spark_home = get_spark_home(server_info)
+                log.debug("spark_home %s", spark_home)
+                if not spark_home:
+                    return ""
+                batch_jar_path = f"{spark_home}/jars/openmldb-batch-*"
+                return server_info.cmd_on_host(
+                    f"java -cp {batch_jar_path} com._4paradigm.openmldb.batch.utils.VersionCli"
+                ).strip()
+
+            bv = get_batch_version(server_info)
+            if bv:
+                version = extract_java_version(bv)
+                if version != "":
+                    version_map.setdefault("openmldb-batch", [])
+                    version_map["openmldb-batch"].append((server_info.host, version))
+                else:
+                    log.warning(f"{bv}")
             else:
-                remote_config_file = server_info.conf_path_pair("")[0]
-                bv = self.get_batch_version(
-                    self.get_spark_home(server_info.host, remote_config_file)
-                )
-                if bv:
-                    version = extract_java_version(bv)
-                    if version != "":
-                        version_map.setdefault("openmldb-batch", [])
-                        version_map["openmldb-batch"].append(
-                            (server_info.host, version)
-                        )
-                    else:
-                        log.warning(f"{bv}")
+                log.warning("failed at get batch version from %s", server_info)
+
+            def get_taskmanager_version(server_info: ServerInfo):
+                tm_root_path = server_info.taskmanager_path()
+                # TODO(hw): check if multi taskmanager jars
+                return server_info.cmd_on_host(
+                    f"java -cp {tm_root_path}/lib/openmldb-taskmanager-* com._4paradigm.openmldb.taskmanager.utils.VersionCli",
+                ).strip()
+
+            tv = get_taskmanager_version(server_info)
+            if tv:
+                version = extract_java_version(tv)
+                if version != "":
+                    version_map.setdefault("taskmanager", [])
+                    version_map["taskmanager"].append((server_info.host, version))
                 else:
-                    log.warning("failed at get batch version from %s", server_info)
-                tv = self.get_taskmanager_version(server_info.taskmanager_path())
-                if tv:
-                    version = extract_java_version(tv)
-                    if version != "":
-                        version_map.setdefault("taskmanager", [])
-                        version_map["taskmanager"].append((server_info.host, version))
-                    else:
-                        log.warning(f"{tv}")
-                else:
-                    log.warning(
-                        "failed at get taskmanager version from %s", server_info
-                    )
+                    log.warning(f"{tv}")
+            else:
+                log.warning("failed at get taskmanager version from %s", server_info)
             return True
 
         self.dist_conf.server_info_map.for_each(jar_version, JAVA_SERVER_ROLES)
         return version_map
-
-    def get_spark_home(self, host, remote_config_file):
-        """
-
-        :param remote_config_file:
-        :return: abs path
-        """
-        config_name = "spark.home="
-        log.debug("get %s from %s", config_name, remote_config_file)
-        _, stdout, _ = SSH().exec(host, f"grep {config_name} {remote_config_file}")
-        grep_str = buf2str(stdout)
-
-        value = ""
-        if not grep_str:
-            # TODO(hw):no config in file, get env SPARK_HOME?
-            #  what if ssh user is different with server user or it's a temp env?
-            # or force to set spark home in config?
-            # _, stdout, _ = self.ssh_client.exec_command(f'env | grep SPARK_HOME')
-            # env = stdout.read()
-            # if not env:
-            #     raise RuntimeError('no env SPARK_HOME')
-            return value
-
-        # may have spark home in config(discard if it's in comment)
-        return parse_config_from_properties(grep_str, config_name)
-
-    def get_batch_version(self, host, spark_home):
-        # TODO(hw): check if multi batch jars
-        log.debug("spark_home %s", spark_home)
-        batch_jar_path = f"{spark_home}/jars/openmldb-batch-*"
-        _, stdout, _ = SSH().exec(
-            host,
-            f"java -cp {batch_jar_path} com._4paradigm.openmldb.batch.utils.VersionCli",
-        )
-        return buf2str(stdout).strip()
-
-    def get_taskmanager_version(self, host, root_path):
-        # TODO(hw): check if multi taskmanager jars
-        _, stdout, err = SSH().exec(
-            host,
-            f"java -cp {root_path}/lib/openmldb-taskmanager-* "
-            f"com._4paradigm.openmldb.taskmanager.utils.VersionCli",
-        )
-        return buf2str(stdout).strip()
-
-    def pull_job_logs(self, server_info, dest, last_n) -> bool:
-        # job log path is in config
-        remote_conf_path = server_info.conf_path_pair("")[0]
-        job_log_dir = self.get_config_value(
-            server_info, remote_conf_path, "job.log.path=", "../log"
-        )
-        # job_log_dir is start from taskmanager/bin
-        # TODO(hw): what if abs path?
-        job_log_dir = f"{server_info.taskmanager_path()}/bin/{job_log_dir}"
-
-        # only log names job_x_error.log
-        log_list = self.get_log_files(server_info, job_log_dir)
-        log_list = self.filter_file_list(
-            log_list, lambda di: "error" in di["filename"], last_n
-        )
-        return self.pull_files(server_info, job_log_dir, log_list, dest)
 
     def pull_cxx_server_logs(self, server_info, dest, last_n) -> bool:
         """
@@ -259,8 +229,10 @@ class Collector:
         :param last_n:
         :return:
         """
-        remote_conf_path = server_info.conf_path_pair("")[0]
-        server_log_dir = self.get_config_value(
+        def get_config_value(server_info: ServerInfo):
+            conf_path = server_info.conf_path_pair("")[0]
+
+        server_log_dir = get_config_value(
             server_info, remote_conf_path, "openmldb_log_dir=", "./logs"
         )
         # TODO(hw): what if `openmldb_log_dir` is abs path
@@ -302,27 +274,6 @@ class Collector:
         )
         return self.pull_files(server_info, server_log_dir, log_list, dest)
 
-    def get_config_value(self, server_info, conf_path, config_name, default_v):
-        v = default_v
-        log.debug("get %s from %s", config_name, conf_path)
-        if server_info.is_local:
-            conf_map = ConfParser(conf_path).conf()
-            key = config_name[:-1]
-            if key in conf_map:
-                v = conf_map[key]
-        else:
-            self.ssh_client.connect(hostname=server_info.host)
-            _, stdout, _ = self.ssh_client.exec_command(
-                f"grep {config_name} {conf_path}"
-            )
-            grep_str = buf2str(stdout)
-            if grep_str:
-                # may set config in config file
-                tmp = parse_config_from_properties(grep_str, config_name)
-                if tmp:
-                    v = tmp
-        return v
-
     def copy_local_file(self, paths) -> bool:
         src_path, local_path = paths[0], paths[1]
         try:
@@ -337,8 +288,8 @@ class Collector:
     def pull_file(self, remote_host, paths) -> bool:
         remote_path, local_path = paths[0], paths[1]
         log.debug(f"remote {remote_path}, local: {local_path}")
-        self.ssh_client.connect(hostname=remote_host)
-        sftp = self.ssh_client.open_sftp()
+        SSH().connect(hostname=remote_host)
+        sftp = SSH().open_sftp()
         try:
             # ensure local path is exists
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
@@ -513,15 +464,3 @@ class LocalCollector:
                         full_log_dir, role
                     )
         return file_map
-
-    def collect_version(self):
-        version_map = {}
-        for role, value in self.dist_conf.server_info_map.map.items():
-            version_map.setdefault(role, [])
-            if self.dist_conf.mode == "cluster" and role == "taskmanager":
-                pass
-            else:
-                for item in value:
-                    version = util.get_local_openmldb_version(item.bin_path())
-                    version_map[role].append((item.host, version))
-        return version_map

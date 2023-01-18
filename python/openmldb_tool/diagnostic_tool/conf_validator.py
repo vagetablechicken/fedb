@@ -58,7 +58,7 @@ class ConfValidator:
         # if require_dir, all servers must have field `path`
         # zk is skipped, 
         for r,v in self.conf.server_info_map.items():
-            if r is "zookeeper":
+            if r == "zookeeper":
                 continue
             for server in v:
                 endpoint = server.endpoint

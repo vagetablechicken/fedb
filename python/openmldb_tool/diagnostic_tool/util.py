@@ -1,5 +1,7 @@
 import os
 import logging
+import paramiko
+from paramiko.file import BufferedFile
 
 log = logging.getLogger(__name__)
 
@@ -65,3 +67,17 @@ def clean_dir(path):
 
     if os.path.exists(path):
         rm_dirs(path)
+
+class SSH(metaclass=Singleton):
+    def __init__(self) -> None:
+        logging.getLogger("paramiko").setLevel(logging.WARNING)
+        self.ssh_client = paramiko.SSHClient()
+        self.ssh_client.load_system_host_keys()
+        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    def exec(self, host, cmd):
+        self.ssh_client.connect(hostname=host)
+        return self.ssh_client.exec_command(cmd)
+
+def buf2str(buf: BufferedFile) -> str:
+    return buf.read().decode("utf-8")

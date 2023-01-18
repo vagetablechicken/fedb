@@ -15,12 +15,15 @@ from absl import logging
 from absl import flags
 import configparser as cfg
 import yaml
+from . import util
 
 ALL_SERVER_ROLES = ["nameserver", "tablet", "apiserver", "taskmanager"]
 
 CXX_SERVER_ROLES = ALL_SERVER_ROLES[:3]
 
 JAVA_SERVER_ROLES = [ALL_SERVER_ROLES[3]]
+
+flags.DEFINE_string("default_dir", "/work/openmldb", "OPENMLDB_HOME")
 
 
 class ServerInfo:
@@ -65,12 +68,19 @@ class ServerInfo:
     def remote_local_pairs(self, remote_dir, file, dest):
         return f"{remote_dir}/{file}", f"{dest}/{self.endpoint}-{self.role}/{file}"
 
+    def cmd_on_host(self, cmd):
+        if self.is_local:
+            return util.local_cmd(cmd)
+        else:
+            _, stdout, _ = util.SSH().exec(self.host, cmd)
+            return util.buf2str(stdout)
+
 
 class ServerInfoMap:
     def __init__(self, server_info_map):
         # map struct: <role,[server_list]>
         self.map = server_info_map
-    
+
     def items(self):
         return self.map.items()
 
@@ -103,12 +113,12 @@ class DistConf:
         self.mode = self.full_conf["mode"]
         self.server_info_map = ServerInfoMap(
             self._map(
-                ALL_SERVER_ROLES+["zookeeper"],
+                ALL_SERVER_ROLES + ["zookeeper"],
                 lambda role, s: ServerInfo(
                     role,
                     s["endpoint"],
-                    s["path"] if "path" in s else None,
-                    True if flags.FLAGS.local else s["is_local"] if "is_local" in s else False,
+                    s["path"] if "path" in s and s["path"] else flags.FLAGS.default_dir,
+                    flags.FLAGS.local or (s["is_local"] if "is_local" in s else False),
                 ),
             )
         )
@@ -137,8 +147,8 @@ class DistConf:
         return result
 
     def count_dict(self):
-        d = {r: len(s)  for r, s in self.server_info_map.items()}
-        assert not self.is_cluster() or d['zookeeper'] >= 1
+        d = {r: len(s) for r, s in self.server_info_map.items()}
+        assert not self.is_cluster() or d["zookeeper"] >= 1
         return d
 
 
