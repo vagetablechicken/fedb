@@ -25,7 +25,7 @@ def test_argparse():
     parse_arg(['inspect', 'online', cluster_arg])
     assert flags.FLAGS.cluster == new_addr
 
-    parse_arg(['remote', '-VCL', '-v=0'])
+    parse_arg(['static-check', '-VCL', '-v=0'])
     flags.FLAGS['verbosity'].unparse()
 
     # with pytest.raises(SystemExit):
@@ -37,7 +37,7 @@ def test_argparse():
     # with pytest.raises(SystemExit):
     #     parse_arg(['test', '-h'])
     # with pytest.raises(SystemExit):
-    #     parse_arg(['remote', '-h'])
+    #     parse_arg(['static-check', '-h'])
     # with pytest.raises(SystemExit):
     #     parse_arg(['--helpfull'])
 

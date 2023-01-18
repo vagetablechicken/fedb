@@ -44,6 +44,12 @@ flags.DEFINE_bool(
     "If set, all server in config file will be treated as local server, skip ssh.",
 )
 
+flags.DEFINE_string(
+    "collect_dir",
+    "/tmp/diag_collect",
+    "..."
+)
+
 def check_version(version_map: dict):
     f_version = ""
     f_endpoint = ""
@@ -171,17 +177,22 @@ def test_sql(args):
 
 def static_check(args):
     assert flags.FLAGS.conf_file, "static check needs dist conf file"
+    if not (args.version or args.conf or args.log):
+        print("at least one arg, check `static-check -h`")
+        return
     conf = read_conf(flags.FLAGS.conf_file)
     # if we want to check conf or log files, we should know deploy path of servers
     require_dir = args.conf or args.log
     assert ConfValidator(conf).validate(require_dir), "conf file is invalid"
     collector = Collector(conf)
     if args.version:
-        collector.collect_version()
+        print(f"version:\n{collector.collect_version()}") # TODO pretty print
     if args.conf:
-        pass
+        collector.pull_config_files(flags.FLAGS.collect_dir)
+        # TODO check
     if args.log:
-        pass
+        collector.pull_log_files(flags.FLAGS.collect_dir)
+        # log check
 #     if dist_conf.mode == "cluster" and conf_opt.env != "onebox":
 #         collector = Collector(dist_conf)
 #         if conf_opt.check_version():
@@ -215,10 +226,11 @@ def static_check(args):
 #         check_log(dist_conf.full_conf, file_map["logging"])
 
 def parse_arg(argv):
-    """parser definition"""
+    """parser definition absl.flags + argparse"""
     parser = argparse_flags.ArgumentParser()
     # use args.header returned by parser.parse_args
     subparsers = parser.add_subparsers(help="OpenMLDB Tool")
+
     # sub status
     status_parser = subparsers.add_parser(
         "status", help="check the OpenMLDB server status"
@@ -269,26 +281,30 @@ def parse_arg(argv):
     )
     static_check_parser.set_defaults(command=static_check)
 
-    args = parser.parse_args(argv)
+    def help(args):
+        parser.print_help()
+    parser.set_defaults(command=help)
+
+    args = parser.parse_args(argv[1:])
     tool_flags = {
         k: [flag.serialize() for flag in v]
         for k, v in flags.FLAGS.flags_by_module_dict().items()
         if "diagnostic_tool" in k
     }
-    logging.info(f"args:{args}, flags: {tool_flags}")
+    logging.debug(f"args:{args}, flags: {tool_flags}")
+
     return args
 
 
-def main(argv):
-    args = parse_arg(argv)
+def main(args):
     # TODO: adjust args, e.g. if conf_file, we can get zk addr from conf file, no need to --cluster
     # run the command
     args.command(args)
 
 
 def run():
-    app.run(main)
+    app.run(main, flags_parser=parse_arg)
 
 
 if __name__ == "__main__":
-    app.run(main)
+    app.run(main, flags_parser=parse_arg)

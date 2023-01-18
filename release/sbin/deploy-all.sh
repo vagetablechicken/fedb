@@ -127,7 +127,7 @@ else
     if [[ -e "${spark_tar}" ]]; then
       echo "Skip downloading openmldbspark as ${spark_tar} already exists"
     else
-      curl -SLo ${spark_tar} "https://github.com/4paradigm/spark/releases/download/v3.2.1-openmldb0.6.6/${spark_tar}"
+      curl -SLo ${spark_tar} "https://github.com/4paradigm/spark/releases/download/v3.2.1-openmldb0.7.1/${spark_tar}"
     fi
     tar -xzf ${spark_tar}
     ln -s "$(pwd)"/"${spark_name}" "${SPARK_HOME}"

@@ -80,8 +80,8 @@ class Collector:
         def pull_one(server_info: ServerInfo) -> bool:
             # if taskmanager, pull taskmanager.properties, no log4j
             config_paths = server_info.conf_path_pair(dest)
+            log.debug(f"pull config file from {server_info}: {config_paths}")
             if server_info.is_local:
-                log.debug(f"get from local {server_info.host}")
                 return self.copy_local_file(config_paths)
             return self.pull_file(server_info.host, config_paths)
 
@@ -109,7 +109,9 @@ class Collector:
                 conf_path = server_info.conf_path_pair("")[0]
                 log_path = get_config_value(server_info, conf_path, "openmldb_log_dir=", "./logs")
             log_path_pair = server_info.remote_local_pairs(server_info.path, log_path, dest)
-            log.warning(f"cp pair: {log_path_pair}")
+            log.debug(f"cp pair: {log_path_pair}")
+            # def serverinfo.smart_cp()
+            
             # if server_info.is_local:
             #     #cp
             #     log.debug(f"get from local {server_info.host}")
@@ -182,7 +184,8 @@ class Collector:
                 spark_home = get_spark_home(server_info)
                 log.debug("spark_home %s", spark_home)
                 if not spark_home:
-                    return ""
+                    spark_home = server_info.path + '/spark'
+                    log.debug(f"try local spark in server deploy path: {spark_home}")
                 batch_jar_path = f"{spark_home}/jars/openmldb-batch-*"
                 return server_info.cmd_on_host(
                     f"java -cp {batch_jar_path} com._4paradigm.openmldb.batch.utils.VersionCli"

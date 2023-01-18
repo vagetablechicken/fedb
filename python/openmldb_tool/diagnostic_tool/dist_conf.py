@@ -205,6 +205,6 @@ def read_conf(conf_file):
     try:
         conf = YamlConfReader(conf_file).conf()
     except Exception as e:
-        logging.info(f"yaml read failed on {e}, read in hosts style")
+        logging.debug(f"yaml read failed on {e}, read in hosts style")
         conf = HostsConfReader(conf_file).conf()
     return conf
