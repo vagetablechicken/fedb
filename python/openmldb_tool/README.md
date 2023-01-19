@@ -4,43 +4,73 @@ In `diagnostic_tool/`:
 
 main: diagnose.py
 
-ssh/scp by connections.py
+collect version/config/logs by collector.py (local or remote ssh/scp)
 
 read distribution yaml/hosts by dist_conf.py
 
-## Usage
+## Subcommands
 
 core commands:
+```
 status
-inspect   [online] check all table status
+          [connect] # TODO http ping all servers
+inspect   no sub means inspect all
+          [online] check all table status
           [offline] offline jobs status
-          no sub means all?
-test   test online insert&select, test offline select if taskmanager
+test   test online insert&select, test offline select if taskmanager exists
 static-check needs config file(dist.yml or hosts)
+              [-V,--version/-C,--conf/-L,--log/-VCL]
+```
 
+For example:
+```
 openmldb_tool status --cluster=127.0.0.1:2181/openmldb
+```
+
+`--cluster=127.0.0.1:2181/openmldb` is the default cluster config, so `openmldb_tool status` is ok.
+
+## Status
 ```
 status [-h] [--helpfull] [--diff DIFF]
 
 optional arguments:
   -h, --help   show this help message and exit
   --helpfull   show full help message and exit
-  --diff DIFF  check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`
+  --diff       check if all endpoints in conf are in cluster. If set, need to set `--conf_file`
 ```
 
-show table status, get just one table? and check the hidden db tables status
-  show table status can detect the problem? `Fail to get tablet from cache` 
+Use `show components` to show servers(no apiserver now).
+
+## Inspect
+
+Use `show table status` in all dbs, even the hidden db(system db).
+
+If you found some online tables are not behaving properly, do inspect online.
+
+## Test
+
+
 
 ## Static Check
 
 Check the onebox/distribute cluster.
 
 1. version: local/ssh run `openmldb --version`
-2. conf: local 
+2. conf: copy to local, and check
+3. log: read conf in host(local or remote), get the log path, copy logs to local, and check
 
-collector.py collects config, log and version
+collector.py collects version, config and log.
 
 TODO: `<cluster-name>-conf` is better than custom dest name?
+
+### version
+
+exec openmldb
+
+run jar taskmanager and batch
+
+#### find batch jar
+find spark home from remote taskmanager config file.
 
 ### config
 ```
@@ -74,16 +104,7 @@ Get last 2 files.
     ...
 ```
 
-### version
-
-exec openmldb
-
-run jar taskmanager and batch
-
-#### find batch jar
-find spark home from remote taskmanager config file.
-
-## analysis
+### analysis
 
 log_analysis.py read logs from local path `<dest>`. 
 

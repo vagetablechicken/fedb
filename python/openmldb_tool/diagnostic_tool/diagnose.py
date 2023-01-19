@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import argparse
+import textwrap
 from diagnostic_tool.connector import Connector
 from diagnostic_tool.dist_conf import ConfParser, read_conf
 from diagnostic_tool.conf_validator import (
@@ -44,11 +46,8 @@ flags.DEFINE_bool(
     "If set, all server in config file will be treated as local server, skip ssh.",
 )
 
-flags.DEFINE_string(
-    "collect_dir",
-    "/tmp/diag_collect",
-    "..."
-)
+flags.DEFINE_string("collect_dir", "/tmp/diag_collect", "...")
+
 
 def check_version(version_map: dict):
     f_version = ""
@@ -142,7 +141,7 @@ def insepct_online(args):
                 print(f"unhealthy table {t[2]}.{t[1]}:\n {t[:13]}")
                 # sqlalchemy truncated ref https://github.com/sqlalchemy/sqlalchemy/commit/591e0cf08a798fb16e0ee9b56df5c3141aa48959
                 # so we print warnings alone
-                print(f"full warnings:\n{t[13]}")  
+                print(f"full warnings:\n{t[13]}")
 
 
 def inspect_offline(args):
@@ -158,13 +157,13 @@ def inspect_offline(args):
 
     for row in jobs:
         if row[2] != "FINISHED":
-            fails.append(' '.join([str(x) for x in row]))
+            fails.append(" ".join([str(x) for x in row]))
             # DO NOT try to print rs in execfetch, it's too long
             std_output = conn.execfetch(f"SHOW JOBLOG {row[0]}")
-            # log rs schema is FORMAT_STRING_KEY 
+            # log rs schema is FORMAT_STRING_KEY
             assert len(std_output) == 1 and len(std_output[0]) == 1
             print(f"{row[0]}-{row[1]} failed, job log:\n{std_output[0][0]}")
-    fails_total = '\n'.join(fails)
+    fails_total = "\n".join(fails)
     assert not fails, f"failed jobs:\n{fails_total}"
 
 
@@ -194,7 +193,9 @@ def static_check(args):
     assert ConfValidator(conf).validate(require_dir), "conf file is invalid"
     collector = Collector(conf)
     if args.version:
-        print(f"version:\n{collector.collect_version()}") # TODO pretty print
+        versions = collector.collect_version()
+        print(f"version:\n{versions}")  # TODO pretty print
+        # TODO check 
     if args.conf:
         collector.pull_config_files(flags.FLAGS.collect_dir)
         # TODO config validate
@@ -216,9 +217,10 @@ def static_check(args):
 #     if conf_opt.check_log():
 #         check_log(dist_conf.full_conf, file_map["logging"])
 
+
 def parse_arg(argv):
     """parser definition, absl.flags + argparse"""
-    parser = argparse_flags.ArgumentParser()
+    parser = argparse_flags.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
     # use args.header returned by parser.parse_args
     subparsers = parser.add_subparsers(help="OpenMLDB Tool")
 
@@ -229,15 +231,9 @@ def parse_arg(argv):
     status_parser.add_argument(
         "--diff",
         action="store_true",
-        help="check if all endpoints in conf are in cluster, true/false. If true, need to set `--conf_file`",
-    )  # TODO action support version?
+        help="check if all endpoints in conf are in cluster. If set, need to set `--conf_file`",
+    )  # TODO action support in all python 3.x?
     status_parser.set_defaults(command=status)
-
-    # sub test
-    test_parser = subparsers.add_parser(
-        "test", help="do simple create&insert test, what about offline?"
-    )
-    test_parser.set_defaults(command=test_sql)
 
     # sub inspect
     inspect_parser = subparsers.add_parser(
@@ -256,16 +252,27 @@ def parse_arg(argv):
     )
     offline.set_defaults(command=inspect_offline)
 
-    # sub remote
+    # sub test
+    test_parser = subparsers.add_parser(
+        "test", help="Do simple create&insert&select test in online, select in offline(if taskmanager exists)"
+    )
+    test_parser.set_defaults(command=test_sql)
+
+    # sub static-check
     static_check_parser = subparsers.add_parser(
         "static-check",
-        help="static check on remote host, version/conf/log, need --conf_file, and if remote, need Passwordless SSH Login",
+        help=textwrap.dedent(""" \
+        Static check on remote host, version/conf/log, -h to show the arguments, --conf_file is required.
+        Use -VCL to check all.
+        You can check version or config before cluster running.
+        If servers are remote, need Passwordless SSH Login.
+        """),
     )
     static_check_parser.add_argument(
-        "--version","-V",  action="store_true", help="check version"
+        "--version", "-V", action="store_true", help="check version"
     )
     static_check_parser.add_argument(
-        "--conf","-C",  action="store_true", help="check conf"
+        "--conf", "-C", action="store_true", help="check conf"
     )
     static_check_parser.add_argument(
         "--log", "-L", action="store_true", help="check log"
@@ -274,6 +281,7 @@ def parse_arg(argv):
 
     def help(args):
         parser.print_help()
+
     parser.set_defaults(command=help)
 
     args = parser.parse_args(argv[1:])
