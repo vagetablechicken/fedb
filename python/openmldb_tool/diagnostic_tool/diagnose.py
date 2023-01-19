@@ -140,24 +140,32 @@ def insepct_online(args):
         for t in rs:
             if t[13]:
                 print(f"unhealthy table {t[2]}.{t[1]}:\n {t[:13]}")
-                print(
-                    f"full warnings:\n{t[13]}"
-                )  # sqlalchemy truncated ref https://github.com/sqlalchemy/sqlalchemy/commit/591e0cf08a798fb16e0ee9b56df5c3141aa48959
+                # sqlalchemy truncated ref https://github.com/sqlalchemy/sqlalchemy/commit/591e0cf08a798fb16e0ee9b56df5c3141aa48959
+                # so we print warnings alone
+                print(f"full warnings:\n{t[13]}")  
 
 
 def inspect_offline(args):
-    """"""
+    """scan jobs status, show job log if failed"""
     assert checker.StatusChecker(Connector()).offline_support()
     conn = Connector()
     jobs = conn.execfetch("SHOW JOBS")
+    # TODO some failed jobs are known, what if we want skip them?
     print(f"inspect {len(jobs)} jobs")
-    has_failed = False
+    fails = []
+    # jobs sorted by id
+    jobs.sort(key=lambda x: x[0])
+
     for row in jobs:
         if row[2] != "FINISHED":
-            has_failed = True
+            fails.append(' '.join([str(x) for x in row]))
+            # DO NOT try to print rs in execfetch, it's too long
             std_output = conn.execfetch(f"SHOW JOBLOG {row[0]}")
-            print(f"{row[0]}-{row[1]} failed, job log:\n{std_output}")
-    assert not has_failed
+            # log rs schema is FORMAT_STRING_KEY 
+            assert len(std_output) == 1 and len(std_output[0]) == 1
+            print(f"{row[0]}-{row[1]} failed, job log:\n{std_output[0][0]}")
+    fails_total = '\n'.join(fails)
+    assert not fails, f"failed jobs:\n{fails_total}"
 
 
 def test_sql(args):
@@ -189,28 +197,11 @@ def static_check(args):
         print(f"version:\n{collector.collect_version()}") # TODO pretty print
     if args.conf:
         collector.pull_config_files(flags.FLAGS.collect_dir)
-        # TODO check
+        # TODO config validate
     if args.log:
         collector.pull_log_files(flags.FLAGS.collect_dir)
+        # TODO log check
         # log check
-#     if dist_conf.mode == "cluster" and conf_opt.env != "onebox":
-#         collector = Collector(dist_conf)
-#         if conf_opt.check_version():
-#             version_map = collector.collect_version()
-#         if conf_opt.check_conf():
-#             collector.pull_config_files(f"{conf_opt.data_dir}/conf")
-#         if conf_opt.check_log():
-#             collector.pull_log_files(f"{conf_opt.data_dir}/logging")
-#         if conf_opt.check_conf() or conf_opt.check_log():
-#             file_map = util.get_files(conf_opt.data_dir)
-#             logging.debug("file_map: %s", file_map)
-#     else:
-#         collector = LocalCollector(dist_conf)
-#         if conf_opt.check_version():
-#             version_map = collector.collect_version()
-#         if conf_opt.check_conf() or conf_opt.check_log():
-#             file_map = collector.collect_files()
-#             logging.debug("file_map: %s", file_map)
 
 #     if conf_opt.check_version():
 #         flag, version = check_version(version_map)
@@ -226,7 +217,7 @@ def static_check(args):
 #         check_log(dist_conf.full_conf, file_map["logging"])
 
 def parse_arg(argv):
-    """parser definition absl.flags + argparse"""
+    """parser definition, absl.flags + argparse"""
     parser = argparse_flags.ArgumentParser()
     # use args.header returned by parser.parse_args
     subparsers = parser.add_subparsers(help="OpenMLDB Tool")
@@ -251,7 +242,7 @@ def parse_arg(argv):
     # sub inspect
     inspect_parser = subparsers.add_parser(
         "inspect",
-        help="Inspect online and offline. Use `inspect [online/offline]` to inspect one. Support table status later",
+        help="Inspect online and offline. Use `inspect [online/offline]` to inspect one.",
     )
     # inspect online & offline
     inspect_parser.set_defaults(command=inspect)
@@ -271,13 +262,13 @@ def parse_arg(argv):
         help="static check on remote host, version/conf/log, need --conf_file, and if remote, need Passwordless SSH Login",
     )
     static_check_parser.add_argument(
-        "-V", "--version", action="store_true", help="check version"
+        "--version","-V",  action="store_true", help="check version"
     )
     static_check_parser.add_argument(
-        "-C", "--conf", action="store_true", help="check conf"
+        "--conf","-C",  action="store_true", help="check conf"
     )
     static_check_parser.add_argument(
-        "-L", "--log", action="store_true", help="check log"
+        "--log", "-L", action="store_true", help="check log"
     )
     static_check_parser.set_defaults(command=static_check)
 

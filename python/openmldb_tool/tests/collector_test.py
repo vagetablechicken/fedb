@@ -41,16 +41,19 @@ def test_local_collector():
     dist_conf = read_conf(current_path + "/hosts")
     mock_path(dist_conf)
     local_collector = Collector(dist_conf)
+    # no need to ping localhost when flags.FLAGS.local==True
     with pytest.raises(AssertionError):
         local_collector.ping_all()
 
-    # no bin in tests/work/<server>, so it's a empty map
-    # version_map = local_collector.collect_version()
-    # print(version_map)
+    # no bin in tests/sbin_test/, so it's a empty map
+    version_map = local_collector.collect_version()
+    assert not version_map
 
-    # TODO
-    local_collector.pull_config_files("/tmp/conf_copy_dest")
-    local_collector.pull_log_files("/tmp/log_copy_dest")
+    # tablet-* no conf file
+    assert not local_collector.pull_config_files("/tmp/conf_copy_dest")
+
+    # all no logs
+    assert not local_collector.pull_log_files("/tmp/log_copy_dest")
 #     def test_pull_logs(self):
 #         # no logs in tablet1
 #         with self.assertLogs() as cm:

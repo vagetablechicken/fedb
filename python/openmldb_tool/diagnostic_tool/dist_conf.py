@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import os
+import re
 from absl import logging
 from absl import flags
 import configparser as cfg
@@ -30,6 +33,8 @@ class ServerInfo:
     def __init__(self, role, endpoint, path, is_local):
         self.role = role
         self.endpoint = endpoint
+        # path shouldn't have `:`, replace it in endpoint
+        self.endpoint_str = endpoint.replace(":","-")
         self.path = path
         self.host = endpoint.split(":")[0]
         self.is_local = is_local
@@ -46,6 +51,9 @@ class ServerInfo:
     def bin_path(self):
         return f"{self.path}/bin"
 
+    def root_path(self):
+        return f"{self.path}/taskmanager/bin" if self.is_taskmanager() else self.path
+
     def taskmanager_path(self):
         return f"{self.path}/taskmanager"
 
@@ -55,26 +63,81 @@ class ServerInfo:
             if self.role != "taskmanager"
             else f"{self.role}.properties"
         )
-        local_prefix = f"{self.endpoint}-{self.role}"
-        return (
-            f"{self.path}/conf/{config_name}",
-            f"{local_root}/{local_prefix}/{config_name}",
-        )
+        local_prefix = f"{self.endpoint_str}-{self.role}"
+        return f"{self.path}/conf/{config_name}", f"{local_root}/{local_prefix}/conf/"
 
     def remote_log4j_path(self):
         return f"{self.path}/taskmanager/conf/log4j.properties"
 
     # TODO(hw): openmldb glog config? will it get a too large log file? fix the settings
-    def remote_local_pairs(self, remote_dir, file, dest):
-        return f"{remote_dir}/{file}", f"{dest}/{self.endpoint}-{self.role}/{file}"
+    def remote_local_pairs(self, rel_dir, dest, dest_suffix):
+        """
+        log path may be changed, so we use this general func to gen copy path pairs
+        rel_dir is relative to the root path, cxx server is <path>, taskmanager is <path>/taskmanager/bin
+        """
+        return f"{self.root_path()}/{rel_dir}", f"{dest}/{self.endpoint_str}-{self.role}/{dest_suffix}"
 
     def cmd_on_host(self, cmd):
         if self.is_local:
-            return util.local_cmd(cmd)
+            out, rc = util.local_cmd(cmd)
+            if rc:
+                logging.warning(f"run cmd in local failed, cmd {cmd}, rc {rc}, out {out}")
+            return out, rc
         else:
-            _, stdout, _ = util.SSH().exec(self.host, cmd)
-            return util.buf2str(stdout)
-
+            _, stdout, stderr = util.SSH().exec(self.host, cmd)
+            rc = 0
+            if stderr:
+                rc = -1
+                logging.warning(f"run cmd in remote failed, cmd{cmd}, err {util.buf2str(stderr)}")
+            return util.buf2str(stdout), rc
+    
+    def smart_cp(self, src, dest, src_is_dir=False, filter="") -> bool:
+        """
+        src file or src dir(not recursive) to dest dir, filter only works when src_is_dir==True
+        If need cp recursively, try pysftp
+        """
+        # ensure dest path is exists
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if self.is_local:
+            cmd = f"cp {src} {dest}"
+            if src_is_dir:
+                filter_cmd = f"ls {src} | grep -E '{filter}' -q"
+                res, rc = util.local_cmd(filter_cmd)
+                if rc:
+                    logging.warning("no match files")
+                    return False
+                cmd = f"ls {src} | grep -E '{filter}' | xargs -I {{}} cp {src}/{{}} {dest}"
+            logging.debug(f"cp dir cmd: {cmd}")
+            res, rc = util.local_cmd(cmd)
+            if rc:
+                logging.warning(f"cp failed on {self}: {src}->{dest}(cmd:{cmd}), return code {rc}, err: {res}")
+                return False
+        else:
+            sftp = util.SSH().get_sftp()
+            try:
+                # src path must be a file, not a dir
+                file_list = src
+                if src_is_dir:
+                    rx = re.compile(filter)
+                    src_dir = os.path.normpath(src)
+                    # if src dir doesn't exist, let it crash
+                    files = [attr.__dict__ for attr in sftp.listdir_attr(src_dir)]
+                    file_list = [f"{src}/{f}" for f in files if rx.match(f["filename"])]
+                    # TODO get last n
+                    # sort by modify time
+                    # logs.sort(key=lambda x: x["st_mtime"], reverse=True)
+                    # log.debug("all_logs(sorted): %s", logs)
+                    # logs = [log_attr["filename"] for log_attr in logs[:last_n]]
+                    # log.debug("get last %d: %s", last_n, logs)
+                logging.debug(f"cp files: {file_list}")
+                for f in file_list:
+                    sftp.get(f, dest)
+            except Exception as e:
+                logging.warning(f"cp failed on {self}: {src}->{dest}, err: {e}")
+                return False
+            finally:
+                sftp.close()
+        return True
 
 class ServerInfoMap:
     def __init__(self, server_info_map):
