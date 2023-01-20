@@ -49,7 +49,8 @@ If you found some online tables are not behaving properly, do inspect online.
 
 ## Test
 
-
+1. online: create table, insert and select
+2. offline: if taskmanager exists, select
 
 ## Static Check
 
@@ -65,9 +66,8 @@ TODO: `<cluster-name>-conf` is better than custom dest name?
 
 ### version
 
-exec openmldb
-
-run jar taskmanager and batch
+1. exec `openmldb --version` to get cxx servers version
+2. run jar to get taskmanager and batch
 
 #### find batch jar
 find spark home from remote taskmanager config file.

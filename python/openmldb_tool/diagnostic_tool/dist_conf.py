@@ -57,13 +57,15 @@ class ServerInfo:
     def taskmanager_path(self):
         return f"{self.path}/taskmanager"
 
+    def server_dirname(self):
+        return f"{self.endpoint_str}-{self.role}"
+    
+    def conf_filename(self):
+        return f"{self.role}.flags" if self.role != "taskmanager" else f"{self.role}.properties"
+
     def conf_path_pair(self, local_root):
-        config_name = (
-            f"{self.role}.flags"
-            if self.role != "taskmanager"
-            else f"{self.role}.properties"
-        )
-        local_prefix = f"{self.endpoint_str}-{self.role}"
+        config_name = self.conf_filename()
+        local_prefix = self.server_dirname()
         return f"{self.path}/conf/{config_name}", f"{local_root}/{local_prefix}/conf/"
 
     def remote_log4j_path(self):
@@ -113,7 +115,7 @@ class ServerInfo:
                 logging.warning(f"cp failed on {self}: {src}->{dest}(cmd:{cmd}), return code {rc}, err: {res}")
                 return False
         else:
-            sftp = util.SSH().get_sftp()
+            sftp = util.SSH().get_sftp(self.host)
             try:
                 # src path must be a file, not a dir
                 file_list = src
@@ -240,27 +242,6 @@ class HostsConfReader:
 
     def conf(self):
         return self.dist_conf
-
-
-class ConfParser:
-    def __init__(self, config_path):
-        self.conf_map = {}
-        with open(config_path, "r") as stream:
-            for line in stream:
-                item = line.strip()
-                if item == "" or item.startswith("#"):
-                    continue
-                arr = item.split("=")
-                if len(arr) != 2:
-                    continue
-                if arr[0].startswith("--"):
-                    # for gflag
-                    self.conf_map[arr[0][2:]] = arr[1]
-                else:
-                    self.conf_map[arr[0]] = arr[1]
-
-    def conf(self):
-        return self.conf_map
 
 
 def read_conf(conf_file):

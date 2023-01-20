@@ -17,9 +17,9 @@
 import argparse
 import textwrap
 from diagnostic_tool.connector import Connector
-from diagnostic_tool.dist_conf import ConfParser, read_conf
+from diagnostic_tool.dist_conf import read_conf
 from diagnostic_tool.conf_validator import (
-    ConfValidator,
+    DistConfValidator,
     StandaloneConfValidator,
     ClusterConfValidator,
     TaskManagerConfValidator,
@@ -50,49 +50,17 @@ flags.DEFINE_string("collect_dir", "/tmp/diag_collect", "...")
 
 
 def check_version(version_map: dict):
-    f_version = ""
-    f_endpoint = ""
-    f_role = ""
+    # cluster must have nameserver, so we use nameserver version to be the right version
+    version = version_map["nameserver"][0][1]
     flag = True
-    for k, v in version_map.items():
-        for endpoint, cur_version in v:
-            if f_version == "":
-                f_version = cur_version
-                f_endpoint = endpoint
-                f_role = k
-            if cur_version != f_version:
-                logging.warn(
-                    f"version mismatch. {k} {endpoint} version {cur_version}, {f_role} {f_endpoint} version {f_version}"
+    for role, servers in version_map.items():
+        for endpoint, cur_version in servers:
+            if cur_version != version:
+                logging.warning(
+                    f"version mismatch. {role} {endpoint} version {cur_version} != {version}"
                 )
                 flag = False
-    return flag, f_version
-
-
-def check_conf(yaml_conf_dict, conf_map):
-    detail_conf_map = {}
-    flag = True
-    for role, v in conf_map.items():
-        for endpoint, values in v.items():
-            for _, path in values:
-                detail_conf_map.setdefault(role, [])
-                cur_conf = ConfParser(path).conf()
-                detail_conf_map[role].append(cur_conf)
-                if yaml_conf_dict["mode"] == "cluster" and role == "taskmanager":
-                    taskmanager_validator = TaskManagerConfValidator(cur_conf)
-                    if not taskmanager_validator.validate():
-                        logging.warn(f"taskmanager {endpoint} conf check failed")
-                        flag = False
-
-    if yaml_conf_dict["mode"] == "standalone":
-        conf_validator = StandaloneConfValidator(
-            detail_conf_map["nameserver"][0], detail_conf_map["tablet"][0]
-        )
-    else:
-        conf_validator = ClusterConfValidator(yaml_conf_dict, detail_conf_map)
-    if conf_validator.validate() and flag:
-        logging.info("check conf ok")
-    else:
-        logging.warn("check conf failed")
+    return version, flag
 
 
 def check_log(yaml_conf_dict, log_map):
@@ -185,42 +153,38 @@ def test_sql(args):
 def static_check(args):
     assert flags.FLAGS.conf_file, "static check needs dist conf file"
     if not (args.version or args.conf or args.log):
-        print("at least one arg, check `static-check -h`")
+        print("at least one arg to check, check `openmldb_tool static-check -h`")
         return
-    conf = read_conf(flags.FLAGS.conf_file)
+    dist_conf = read_conf(flags.FLAGS.conf_file)
     # if we want to check conf or log files, we should know deploy path of servers
     require_dir = args.conf or args.log
-    assert ConfValidator(conf).validate(require_dir), "conf file is invalid"
-    collector = Collector(conf)
+    assert DistConfValidator(dist_conf).validate(require_dir), "conf file is invalid"
+    collector = Collector(dist_conf)
     if args.version:
         versions = collector.collect_version()
         print(f"version:\n{versions}")  # TODO pretty print
-        # TODO check 
+        version, ok = check_version(versions)
+        assert ok, f"all servers version should be {version}"
+        print(f"version check passed, all {version}")
     if args.conf:
         collector.pull_config_files(flags.FLAGS.collect_dir)
-        # TODO config validate
+        # TODO config validate, read flags.FLAGS.collect_dir/<server-name>/conf
+        if dist_conf.is_cluster():
+            assert ClusterConfValidator(dist_conf, flags.FLAGS.collect_dir).validate()
+        else:
+            assert StandaloneConfValidator(dist_conf, flags.FLAGS.collect_dir).validate()
     if args.log:
         collector.pull_log_files(flags.FLAGS.collect_dir)
-        # TODO log check
-        # log check
-
-#     if conf_opt.check_version():
-#         flag, version = check_version(version_map)
-#         if flag:
-#             logging.info(f"openmldb version is {version}")
-#             logging.info("check version ok")
-#         else:
-#             logging.warn("check version failed")
-
-#     if conf_opt.check_conf():
-#         check_conf(dist_conf.full_conf, file_map["conf"])
-#     if conf_opt.check_log():
-#         check_log(dist_conf.full_conf, file_map["logging"])
+        # log check, read flags.FLAGS.collect_dir/logs
+        # glog parse
+        # java log parse
 
 
 def parse_arg(argv):
     """parser definition, absl.flags + argparse"""
-    parser = argparse_flags.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse_flags.ArgumentParser(
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     # use args.header returned by parser.parse_args
     subparsers = parser.add_subparsers(help="OpenMLDB Tool")
 
@@ -254,19 +218,22 @@ def parse_arg(argv):
 
     # sub test
     test_parser = subparsers.add_parser(
-        "test", help="Do simple create&insert&select test in online, select in offline(if taskmanager exists)"
+        "test",
+        help="Do simple create&insert&select test in online, select in offline(if taskmanager exists)",
     )
     test_parser.set_defaults(command=test_sql)
 
     # sub static-check
     static_check_parser = subparsers.add_parser(
         "static-check",
-        help=textwrap.dedent(""" \
+        help=textwrap.dedent(
+            """ \
         Static check on remote host, version/conf/log, -h to show the arguments, --conf_file is required.
         Use -VCL to check all.
         You can check version or config before cluster running.
         If servers are remote, need Passwordless SSH Login.
-        """),
+        """
+        ),
     )
     static_check_parser.add_argument(
         "--version", "-V", action="store_true", help="check version"

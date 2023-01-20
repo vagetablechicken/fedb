@@ -76,7 +76,7 @@ class Collector:
     def collect_version(self):
         """
         get the version of components before starts
-        :return:
+        :return: {role: [(endpoint, version), ...]}
         """
         version_map = {}
 

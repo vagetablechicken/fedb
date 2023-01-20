@@ -1,5 +1,9 @@
 # This file is generated automatically from conf/nameserver.flags.template
 
+# test read config file in diag ConfParser
+# --nobig_menus # --no<bool_flag> is unsupported
+# --nobig_menus # can't add comments after flag
+
 # nameserver.conf 
 # --endpoint=127.0.0.1:7527
 --role=nameserver

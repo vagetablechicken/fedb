@@ -2,6 +2,7 @@ import pytest
 from diagnostic_tool.diagnose import parse_arg, main
 from absl import flags
 from .case_conf import OpenMLDB_ZK_CLUSTER
+import os
 
 
 def test_helpmsg():
@@ -22,10 +23,10 @@ def test_helpmsg():
 
 def test_argparse():
     cluster_arg = f"--cluster={OpenMLDB_ZK_CLUSTER}"
-    # -1 (warning),0 (info), 1 (debug), app default is -1
+    # -1 (warning),0 (info), 1 (debug), app default is -1->0
     # parse_arg parses argv[1:], so add foo in the head
     args = parse_arg(
-        ["foo", "status", cluster_arg, "--diff", "--conf_file=hosts", "-v=0"]
+        ["foo", "status", cluster_arg, "--diff", "--conf_file=hosts", "-v=1"]
     )
     assert flags.FLAGS.cluster == OpenMLDB_ZK_CLUSTER
     assert args.diff == True
@@ -59,16 +60,17 @@ def test_argparse():
 def test_cmd():
     # singleton connection
     cluster_arg = f"--cluster={OpenMLDB_ZK_CLUSTER}"
-    main(
+    args = parse_arg(
         [
+            "foo",
             "status",
             cluster_arg,
         ]
     )
+    main(args)
     # still connect to OpenMLDB_ZK_CLUSTER
-    main(
-        [
-            "status",
-            "--cluster=foo/bar",
-        ]
-    )
+    args = parse_arg("foo status --cluster=foo/bar".split(" "))
+    main(args)
+    # skip ssh
+    args = parse_arg(f"foo static-check -f={os.path.dirname(__file__)}/hosts -C --local".split(" "))
+    main(args)

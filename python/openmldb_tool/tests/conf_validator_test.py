@@ -14,7 +14,7 @@
 
 import os
 import pytest
-from diagnostic_tool.conf_validator import ConfValidator
+from diagnostic_tool.conf_validator import DistConfValidator
 from diagnostic_tool.dist_conf import read_conf
 
 from absl import flags
@@ -23,12 +23,12 @@ def test_validate_dist_conf():
     flags.FLAGS['local'].parse('False')
     dist = read_conf(os.path.dirname(__file__) + "/hosts")
     print(dist)
-    assert ConfValidator(dist).validate()
+    assert DistConfValidator(dist).validate()
     # some servers in hosts don't have field `path``
     with pytest.raises(AssertionError):
-        assert ConfValidator(dist).validate(require_dir=True)
+        assert DistConfValidator(dist).validate(require_dir=True)
     
     dist = read_conf(os.path.dirname(__file__) + "/cluster_dist.yml")
     print(dist)
     # zk has no path but we don't check it
-    assert ConfValidator(dist).validate(require_dir=True)
+    assert DistConfValidator(dist).validate(require_dir=True)
