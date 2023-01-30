@@ -14,6 +14,7 @@
 
 from diagnostic_tool.dist_conf import YamlConfReader, HostsConfReader, read_conf
 import os
+from absl import flags
 
 def yaml_asserts(dist):
     assert dist.mode == "cluster"
@@ -32,7 +33,7 @@ def hosts_asssert(dist):
     assert len(dist.server_info_map.map["nameserver"]) == 1
     assert len(dist.server_info_map.map["tablet"]) == 2
     assert dist.server_info_map.map["nameserver"][0].endpoint == "localhost:7527"
-    assert dist.server_info_map.map["nameserver"][0].path == None
+    assert dist.server_info_map.map["nameserver"][0].path == flags.FLAGS.default_dir
     d = dist.count_dict()
     assert d['zookeeper'] == 1
 

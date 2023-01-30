@@ -21,14 +21,14 @@ from absl import flags
 
 def test_validate_dist_conf():
     flags.FLAGS['local'].parse('False')
+    flags.FLAGS['default_dir'].parse('/foo/bar')
     dist = read_conf(os.path.dirname(__file__) + "/hosts")
     print(dist)
+    # some servers in hosts don't have field `path`, but we use flags.default_dir
     assert DistConfValidator(dist).validate()
-    # some servers in hosts don't have field `path``
-    with pytest.raises(AssertionError):
-        assert DistConfValidator(dist).validate(require_dir=True)
     
     dist = read_conf(os.path.dirname(__file__) + "/cluster_dist.yml")
     print(dist)
     # zk has no path but we don't check it
-    assert DistConfValidator(dist).validate(require_dir=True)
+    assert DistConfValidator(dist).validate()
+    flags.FLAGS['default_dir'].unparse()

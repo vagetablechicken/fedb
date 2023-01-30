@@ -144,9 +144,8 @@ def static_check(args):
         print("at least one arg to check, check `openmldb_tool static-check -h`")
         return
     dist_conf = read_conf(flags.FLAGS.conf_file)
-    # if we want to check conf or log files, we should know deploy path of servers
-    require_dir = args.conf or args.log
-    assert DistConfValidator(dist_conf).validate(require_dir), "conf file is invalid"
+    # the deploy path of servers may be flags.default_dir, we won't check if it's valid here.
+    assert DistConfValidator(dist_conf).validate(), "conf file is invalid"
     collector = Collector(dist_conf)
     if args.version:
         versions = collector.collect_version()

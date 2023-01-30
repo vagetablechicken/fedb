@@ -52,6 +52,8 @@ def test_in_demo_docker():
     assert local_collector.pull_log_files("/tmp/log_copy_dest")
     LogAnalyzer(dist_conf, "/tmp/log_copy_dest").run()
 
+    flags.FLAGS['local'].unparse()
+
 # Remote test require ssh config, skip now. Only test local collector
 def test_local_collector():
     flags.FLAGS['local'].parse('True') # only test local
@@ -59,9 +61,9 @@ def test_local_collector():
     dist_conf = read_conf(current_path + "/hosts")
     mock_path(dist_conf) # test the cluster in sbin_test/
     local_collector = Collector(dist_conf)
-    # # no need to ping localhost when flags.FLAGS.local==True
-    # with pytest.raises(AssertionError):
-    #     local_collector.ping_all()
+    # no need to ping localhost when flags.FLAGS.local==True
+    with pytest.raises(AssertionError):
+        local_collector.ping_all()
 
     # no bin in tests/sbin_test/, so it's a empty map
     version_map = local_collector.collect_version()
@@ -73,3 +75,5 @@ def test_local_collector():
 
     # all no logs in sbin_test/
     assert not local_collector.pull_log_files("/tmp/log_copy_dest")
+
+    flags.FLAGS['local'].unparse()

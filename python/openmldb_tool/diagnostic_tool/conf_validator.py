@@ -45,7 +45,7 @@ class DistConfValidator:
             return False
         return True
 
-    def validate(self, require_dir=False) -> bool:
+    def validate(self) -> bool:
         """
         server required: endpoint(ip:port), optional: path, is_local
         """
@@ -65,8 +65,7 @@ class DistConfValidator:
             for server in v:
                 endpoint = server.endpoint
                 assert self.check_endpoint(endpoint), endpoint
-                if require_dir:
-                    assert server.path, server
+                assert server.path, server
         return True
 
 
@@ -208,31 +207,7 @@ class ClusterConfValidator:
                 flag = False
             if not zk_root_path_check(tm_conf, name="zookeeper.root_path"):
                 flag = False
-        return flag
-
-    def check_task_manager_zk_conf(self, conf_dict) -> bool:
-        flag = True
-        if (
-            conf_dict["zookeeper.cluster"]
-            != self.yaml_conf_dict["zookeeper"]["zk_cluster"]
-        ):
-            if conf_dict["zookeeper.cluster"].split(":")[0] != "0.0.0.0":
-                log.warning(
-                    "zk_cluster of taskmanager {} and yam conf do not match".format(
-                        conf_dict["server.host"]
-                    )
-                )
-                flag = False
-        if (
-            conf_dict["zookeeper.root_path"]
-            != self.yaml_conf_dict["zookeeper"]["zk_root_path"]
-        ):
-            log.warning(
-                "zk_root_path of taskmanager {} and yam conf do not match".format(
-                    conf_dict["server.host"]
-                )
-            )
-            flag = False
+            # TODO: ref TaskManagerConfValidator
         return flag
 
 
