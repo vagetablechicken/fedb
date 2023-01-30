@@ -22,9 +22,8 @@ from diagnostic_tool.conf_validator import (
     DistConfValidator,
     StandaloneConfValidator,
     ClusterConfValidator,
-    TaskManagerConfValidator,
 )
-from diagnostic_tool.log_analysis import LogAnalysis
+from diagnostic_tool.log_analyzer import LogAnalyzer
 from diagnostic_tool.collector import Collector
 import diagnostic_tool.server_checker as checker
 
@@ -61,17 +60,6 @@ def check_version(version_map: dict):
                 )
                 flag = False
     return version, flag
-
-
-def check_log(yaml_conf_dict, log_map):
-    flag = True
-    for role, v in log_map.items():
-        for endpoint, values in v.items():
-            log_analysis = LogAnalysis(role, endpoint, values)
-            if not log_analysis.analysis_log():
-                flag = False
-    if flag:
-        logging.info("check logging ok")
 
 
 def status(args):
@@ -178,6 +166,7 @@ def static_check(args):
         # log check, read flags.FLAGS.collect_dir/logs
         # glog parse
         # java log parse
+        LogAnalyzer(dist_conf, flags.FLAGS.collect_dir).run()
 
 
 def parse_arg(argv):

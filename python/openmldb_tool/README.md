@@ -41,6 +41,10 @@ optional arguments:
 
 Use `show components` to show servers(no apiserver now).
 
+TODO: online servers version, we can get from brpc http://<endpoint>/version. (ns,tablet, apiserver set_version in brpc server)
+brpc /health to check ok
+brpc /flags to get all gflags(including openmldb), `--enable_flags_service=true` required
+
 ## Inspect
 
 Use `show table status` in all dbs, even the hidden db(system db).

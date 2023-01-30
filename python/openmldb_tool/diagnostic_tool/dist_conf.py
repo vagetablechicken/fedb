@@ -26,7 +26,12 @@ CXX_SERVER_ROLES = ALL_SERVER_ROLES[:3]
 
 JAVA_SERVER_ROLES = [ALL_SERVER_ROLES[3]]
 
-flags.DEFINE_string("default_dir", "/work/openmldb", "OPENMLDB_HOME")
+# dest conf path is <collect_dir>/<server-name>/<confdir>/
+CONFDIR = "conf/"
+# dest log path is <collect_dir>/<server-name>/<logdir>/
+LOGDIR = "logs/"
+
+flags.DEFINE_string("default_dir", "/work/openmldb", "OPENMLDB_HOME, if no path field in dist conf file, use this path")
 
 
 class ServerInfo:
@@ -66,7 +71,7 @@ class ServerInfo:
     def conf_path_pair(self, local_root):
         config_name = self.conf_filename()
         local_prefix = self.server_dirname()
-        return f"{self.path}/conf/{config_name}", f"{local_root}/{local_prefix}/conf/"
+        return f"{self.path}/conf/{config_name}", f"{local_root}/{local_prefix}/{CONFDIR}"
 
     def remote_log4j_path(self):
         return f"{self.path}/taskmanager/conf/log4j.properties"

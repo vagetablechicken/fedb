@@ -16,6 +16,7 @@ import os
 import re
 
 from diagnostic_tool.dist_conf import (
+    LOGDIR,
     DistConf,
     CXX_SERVER_ROLES,
     ServerInfo,
@@ -208,18 +209,21 @@ class Collector:
                     logging.warning("taskmanager log4j.properties should have conf `log4j.appender.file.file`")
                     return False
                 log_path, file_prefix = os.path.split(log_file_name)
-                src, dest_path = server_info.remote_local_pairs(log_path, dest, "logs/")
+                src, dest_path = server_info.remote_local_pairs(log_path, dest, LOGDIR)
                 log.debug(f"pull logs from {server_info} by dir: {src}->{dest_path}")
                 # old log files have suffix `log4j.appender.file.DatePattern`
+                # e.g. taskmanager.log, taskmanager.log.2023-01-19, ...
+                # TODO custom filter
                 return server_info.smart_cp(src, dest_path, src_is_dir=True, filter=f"{file_prefix}.*")
             else:
                 conf_path = server_info.conf_path_pair("")[0]
                 log_path = get_config_value(server_info, conf_path, "openmldb_log_dir=", "./logs") # a dir
                 # glog file pattern {role}.info.log*, current log file has suffix too
                 # zk sdk log is in {role}.log
-                src, dest_path = server_info.remote_local_pairs(log_path, dest, "logs/")
+                src, dest_path = server_info.remote_local_pairs(log_path, dest, LOGDIR)
                 log.debug(f"pull logs from {server_info} by dir: {src}->{dest_path}")
                 # skip soft link e.g. tablet.INFO(uppercase)
+                # TODO custom filter
                 return server_info.smart_cp(src, dest_path, src_is_dir=True, filter=server_info.role + "\\.[a-z]{1}.*")
 
         return self.dist_conf.server_info_map.for_each(pull_log)

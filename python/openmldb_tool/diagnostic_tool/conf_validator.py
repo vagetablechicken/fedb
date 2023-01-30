@@ -16,9 +16,8 @@
 
 import configparser
 import logging
-from diagnostic_tool.dist_conf import DistConf
+from diagnostic_tool.dist_conf import CONFDIR, DistConf
 import os
-from absl import flags
 
 log = logging.getLogger(__name__)
 
@@ -176,7 +175,7 @@ class ClusterConfValidator:
         for ns in dist_conf_map["nameserver"]:
             # read conf
             ns_conf = GflagsConfParser(
-                f"{self.confs_root_dir}/{ns.server_dirname()}/conf/{ns.conf_filename()}"
+                f"{self.confs_root_dir}/{ns.server_dirname()}/{CONFDIR}/{ns.conf_filename()}"
             ).conf()
             logging.debug(f"{ns} flags: {ns_conf}")
             if not zks_check(ns_conf):
@@ -193,7 +192,7 @@ class ClusterConfValidator:
         for tablet in dist_conf_map["tablet"]:
             # read conf
             tablet_conf = GflagsConfParser(
-                f"{self.confs_root_dir}/{tablet.server_dirname()}/conf/{tablet.conf_filename()}"
+                f"{self.confs_root_dir}/{tablet.server_dirname()}/{CONFDIR}/{tablet.conf_filename()}"
             ).conf()
             logging.debug(f"{tablet} flags: {tablet_conf}")
             if not zks_check(tablet_conf):
@@ -202,7 +201,7 @@ class ClusterConfValidator:
                 flag = False
         for tm in dist_conf_map["taskmanager"]:
             tm_conf = JavaPropertiesConfParser(
-                f"{self.confs_root_dir}/{tm.server_dirname()}/conf/{tm.conf_filename()}"
+                f"{self.confs_root_dir}/{tm.server_dirname()}/{CONFDIR}/{tm.conf_filename()}"
             ).conf()
             logging.debug(f"{tm} flags: {tm_conf}")
             if not zks_check(tm_conf, name="zookeeper.cluster"):
