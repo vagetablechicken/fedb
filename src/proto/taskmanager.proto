@@ -178,5 +178,5 @@ service TaskManagerServer {
 
     // Other APIs
     rpc GetVersion(EmptyMessage) returns (GetVersionResponse);
-    rpc SaveJobResult(JobResutRequest) return (JobResultResponse)
+    rpc SaveJobResult(JobResutRequest) returns (JobResultResponse);
 };

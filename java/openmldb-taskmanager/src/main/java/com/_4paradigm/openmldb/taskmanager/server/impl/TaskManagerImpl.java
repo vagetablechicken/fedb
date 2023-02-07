@@ -356,4 +356,12 @@ public class TaskManagerImpl implements TaskManagerInterface {
         return TaskManager.DropFunctionResponse.newBuilder().setCode(StatusCode.SUCCESS).setMsg("ok").build();
     }
 
+    @Override
+    TaskManager.JobResultResponse SaveJobResult(TaskManager.JobResultRequest request) {
+        // TODO(hw): multi thread, json string
+        request.getJsonData();
+        // gson
+        return TaskManager.JobResutResponse.newBuilder().setCode(StatusCode.SUCCESS).setMsg("ok").build();
+    }
+
 }
