@@ -148,6 +148,15 @@ message GetVersionResponse {
 
 message EmptyMessage {};
 
+message JobResutRequest {
+    required string json_data = 1;
+}
+
+message JobResultResponse {
+    required int32 code = 1;
+    optional string msg = 2; 
+}
+
 service TaskManagerServer {
     // Job management
     rpc ShowJobs(ShowJobsRequest) returns (ShowJobsResponse);
@@ -169,4 +178,5 @@ service TaskManagerServer {
 
     // Other APIs
     rpc GetVersion(EmptyMessage) returns (GetVersionResponse);
+    rpc SaveJobResult(JobResutRequest) return (JobResultResponse)
 };

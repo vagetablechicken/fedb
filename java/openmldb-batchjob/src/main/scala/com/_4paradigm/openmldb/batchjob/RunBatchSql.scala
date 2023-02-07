@@ -33,6 +33,7 @@ object RunBatchSql {
     val sqlText = OpenmldbJobUtil.getSqlFromFile(spark, sqlFilePath)
 
     val sess = new OpenmldbSession(spark)
+    // offline sync and send result back to taskmanager
     sess.sql(sqlText).show()
     sess.close()
   }

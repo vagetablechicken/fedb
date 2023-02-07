@@ -164,6 +164,9 @@ class OpenmldbBatchConfig extends Serializable {
   @ConfigOption(name = "openmldb.taskmanager.external.function.dir", doc = "The absolute path of TaskManager external" +
     " function dir")
   var taskmanagerExternalFunctionDir = "/tmp/udf/"
+
+  @ConfigOption(name = "openmldb.taskmanager.http", doc = "The http url of taskmanager, send df to it")
+  var taskmanagerHttpServer = ""
 }
 
 object OpenmldbBatchConfig {
