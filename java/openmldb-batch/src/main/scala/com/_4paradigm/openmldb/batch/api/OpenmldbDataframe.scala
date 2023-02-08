@@ -18,7 +18,12 @@ package com._4paradigm.openmldb.batch.api
 
 import com._4paradigm.openmldb.batch.{OpenmldbBatchConfig, SchemaUtil}
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
-
+import org.apache.http.client.methods.HttpPost
+import org.apache.http.impl.client.HttpClientBuilder
+import org.apache.http.HttpHeaders
+import org.apache.http.entity.StringEntity
+import org.apache.commons.io.IOUtils
+import scala.collection.mutable.ArrayBuffer
 
 case class OpenmldbDataframe(openmldbSession: OpenmldbSession, sparkDf: DataFrame) {
 
@@ -216,25 +221,25 @@ case class OpenmldbDataframe(openmldbSession: OpenmldbSession, sparkDf: DataFram
   }
 
   /**
-   * Send df to taskmanager http
+   * Send df parts to taskmanager http
    */
   def sendResult(): Unit = {
       sparkDf.foreachPartition { (partition: Iterator[Row]) =>
       {
         val client = HttpClientBuilder.create().build()
-        val post = new HttpPost(OpenmldbBatchConfig.saveJobResultHttp)
-        while (partition.hasNext()) {
+        val post = new HttpPost(openmldbSession.config.saveJobResultHttp)
+        while (partition.hasNext) {
           val arr = new ArrayBuffer[String]()
           var i = 0
-          while (i < 100 && partition.hasNext()) {
+          while (i < 100 && partition.hasNext) {
             // print, no need to do convert, but taskmanager should know it, one row is?
             arr.append(partition.next().toSeq.mkString("[", ",", "]"))
             i += 1
           }
           // use json load to rebuild two dim array?
           // just send a raw file stream? "<schema>\m<row1>\n<row2>..."
-          val json_str = """{"json_data": """ + arr.mkString("[", ",", "]") + """"result_id": """ 
-            + OpenmldbBatchConfig.saveJobResultId +"}"
+          val data = arr.mkString("[", ",", "]")
+          val json_str = s"""{"json_data": ${data}, "result_id": ${openmldbSession.config.saveJobResultId}}"""
           post.setEntity(new StringEntity(json_str))
           val response = client.execute(post)
           val entity = response.getEntity()
@@ -243,6 +248,16 @@ case class OpenmldbDataframe(openmldbSession: OpenmldbSession, sparkDf: DataFram
         }
       }
     }
+
+    // send an empty data to finish all jobs
+    val client = HttpClientBuilder.create().build()
+    val post = new HttpPost(openmldbSession.config.saveJobResultHttp)
+    val json_str = s"""{"json_data": "", "result_id": ${openmldbSession.config.saveJobResultId}}"""
+    post.setEntity(new StringEntity(json_str))
+    val response = client.execute(post)
+    val entity = response.getEntity()
+    println(Seq(response.getStatusLine.getStatusCode(), response.getStatusLine.getReasonPhrase()))
+    println(IOUtils.toString(entity.getContent()))
   }
 
 }

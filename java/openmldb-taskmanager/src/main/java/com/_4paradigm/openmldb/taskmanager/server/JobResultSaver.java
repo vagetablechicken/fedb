@@ -124,7 +124,8 @@ public class JobResultSaver {
         return true;
     }
 
-    public String readResult(int resultId) throws InterruptedException {
+    // if exception, how to recover?
+    public String readResult(int resultId) throws InterruptedException, IOException {
         // wait for idStatus[resultId] == 2
         synchronized (idStatus) {
             while (idStatus.get(resultId) != 2) {
@@ -146,7 +147,8 @@ public class JobResultSaver {
         return output;
     }
 
-    private String printFilesTostr(String fileDir) {
+    // if exception, how to recover?
+    private String printFilesTostr(String fileDir) throws IOException {
         StringWriter stringWriter = new StringWriter();
         try (Stream<Path> paths = Files.walk(Paths.get(fileDir))) {
             List<String> csvFiles = paths.filter(Files::isRegularFile).map(f -> f.toString()).filter(f -> f.endsWith(".csv"))
@@ -166,7 +168,7 @@ public class JobResultSaver {
                     csvPrinter.printRecord(iter.next());
                 }
             }
-        } 
+        }
         return stringWriter.toString();
     }
 }

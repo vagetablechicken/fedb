@@ -26,8 +26,6 @@ import org.apache.http.impl.client.HttpClientBuilder
 import org.apache.http.HttpHeaders
 import org.apache.http.entity.StringEntity
 import org.apache.commons.io.IOUtils
-import org.apache.spark.api.java.function.ForeachPartitionFunction;
-import java.util.Iterator;
 import scala.collection.mutable.ArrayBuffer
 
 class TestSendDf extends SparkTestSuite {
@@ -49,7 +47,7 @@ class TestSendDf extends SparkTestSuite {
     var config = new OpenmldbBatchConfig
     config.saveJobResultHttp = "http://0.0.0.0:4455/"
 
-    // http
+    // rewrite later by sendResult
     // df.collect().foreach(x => println(x))
     println(df.rdd.getNumPartitions)
     df.foreachPartition { (partition: Iterator[Row]) =>
@@ -66,7 +64,8 @@ class TestSendDf extends SparkTestSuite {
           }
           // use json load to rebuild two dim array?
           // just send a raw file stream? "<schema>\m<row1>\n<row2>..."
-          val json_str = """{"json_data": """ + arr.mkString("[", ",", "]") + "}"
+          val json_str = """{"json_data": """ + arr.mkString("[", ",", "]") + """"result_id": """
+            + OpenmldbBatchConfig.saveJobResultId + "}"
           post.setEntity(new StringEntity(json_str))
           val response = client.execute(post)
           val entity = response.getEntity()
