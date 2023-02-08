@@ -66,5 +66,5 @@ public interface TaskManagerInterface {
     TaskManager.GetVersionResponse GetVersion(TaskManager.EmptyMessage request);
 
     @BrpcMeta(serviceName = "openmldb.taskmanager.TaskManagerServer", methodName = "SaveJobResult")
-    TaskManager.JobResultResponse SaveJobResult(TaskManager.JobResultRequest request);
+    TaskManager.SaveJobResultResponse SaveJobResult(TaskManager.SaveJobResultRequest request);
 }

@@ -25,6 +25,7 @@ import com._4paradigm.openmldb.taskmanager.LogManager;
 import com._4paradigm.openmldb.taskmanager.OpenmldbBatchjobManager;
 import com._4paradigm.openmldb.taskmanager.config.TaskManagerConfig;
 import com._4paradigm.openmldb.taskmanager.dao.JobInfo;
+import com._4paradigm.openmldb.taskmanager.server.JobResultSaver;
 import com._4paradigm.openmldb.taskmanager.server.StatusCode;
 import com._4paradigm.openmldb.taskmanager.server.TaskManagerInterface;
 import com._4paradigm.openmldb.taskmanager.udf.ExternalFunctionManager;
@@ -35,12 +36,14 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import scala.Option;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 public class TaskManagerImpl implements TaskManagerInterface {
     private static final Log logger = LogFactory.getLog(TaskManagerImpl.class);
 
     private volatile static ZKClient zkClient;
+    private volatile static JobResultSaver jobResultSaver;
 
     static {
         try {
@@ -58,6 +61,7 @@ public class TaskManagerImpl implements TaskManagerInterface {
             zkClient = null;
             e.printStackTrace();
         }
+        jobResultSaver = new JobResultSaver();
     }
 
     public TaskManagerImpl() {
@@ -195,8 +199,18 @@ public class TaskManagerImpl implements TaskManagerInterface {
     @Override
     public TaskManager.RunBatchSqlResponse RunBatchSql(TaskManager.RunBatchSqlRequest request) {
         try {
-            String output = OpenmldbBatchjobManager.runBatchSql(request.getSql(), request.getConfMap(),
+            Map<String, String> confMap = request.getConfMap();
+            // add conf about SaveJobResult
+            // HOST can't be 0.0.0.0 if distributed or spark is not local
+            confMap.put("spark.openmldb.savejobresult.http", String.format("http://%s:%d/TaskManagerServer/SaveJobResult", TaskManagerConfig.HOST, TaskManagerConfig.PORT));
+            // we can't get spark job id here, so we use JobResultSaver id, != spark job id
+            // if too much running jobs to save result, throw exception
+            int resultId = jobResultSaver.genResultId();
+            confMap.put("spark.openmldb.savejobresult.resultid", String.valueOf(resultId));
+            JobInfo jobInfo = OpenmldbBatchjobManager.runBatchSql(request.getSql(), confMap,
                     request.getDefaultDb());
+            // wait for all files of result saved and read them
+            String output = jobResultSaver.readResult(resultId);
             return TaskManager.RunBatchSqlResponse.newBuilder().setCode(StatusCode.SUCCESS).setOutput(output).build();
         } catch (Exception e) {
             e.printStackTrace();
@@ -230,7 +244,6 @@ public class TaskManagerImpl implements TaskManagerInterface {
     @Override
     public TaskManager.ShowJobResponse RunBatchAndShow(TaskManager.RunBatchAndShowRequest request) {
         try {
-
             JobInfo jobInfo = OpenmldbBatchjobManager.runBatchAndShow(request.getSql(), request.getConfMap(), request.getDefaultDb());
             if (request.getSyncJob()) {
                 // wait for final state
@@ -357,11 +370,13 @@ public class TaskManagerImpl implements TaskManagerInterface {
     }
 
     @Override
-    TaskManager.JobResultResponse SaveJobResult(TaskManager.JobResultRequest request) {
+    public TaskManager.SaveJobResultResponse SaveJobResult(TaskManager.SaveJobResultRequest request) {
         // TODO(hw): multi thread, json string
+        request.getResultId();
         request.getJsonData();
         // gson
-        return TaskManager.JobResutResponse.newBuilder().setCode(StatusCode.SUCCESS).setMsg("ok").build();
+        jobResultSaver.saveFile(request.getResultId(), request.getJsonData());
+        return TaskManager.SaveJobResultResponse.newBuilder().setCode(StatusCode.SUCCESS).setMsg("ok").build();
     }
 
 }

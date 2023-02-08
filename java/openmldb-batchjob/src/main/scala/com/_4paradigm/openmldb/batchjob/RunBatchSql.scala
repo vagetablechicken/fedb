@@ -34,7 +34,8 @@ object RunBatchSql {
 
     val sess = new OpenmldbSession(spark)
     // offline sync and send result back to taskmanager
-    sess.sql(sqlText).show()
+    // no show to print, save result by http in all modes?
+    sess.sql(sqlText).sendResult()
     sess.close()
   }
 

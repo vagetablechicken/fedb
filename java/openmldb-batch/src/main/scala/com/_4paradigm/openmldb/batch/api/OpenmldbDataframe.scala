@@ -16,7 +16,7 @@
 
 package com._4paradigm.openmldb.batch.api
 
-import com._4paradigm.openmldb.batch.SchemaUtil
+import com._4paradigm.openmldb.batch.{OpenmldbBatchConfig, SchemaUtil}
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
 
@@ -213,6 +213,36 @@ case class OpenmldbDataframe(openmldbSession: OpenmldbSession, sparkDf: DataFram
    */
   def printCodegen(): Unit = {
     sparkDf.queryExecution.debug.codegen
+  }
+
+  /**
+   * Send df to taskmanager http
+   */
+  def sendResult(): Unit = {
+      sparkDf.foreachPartition { (partition: Iterator[Row]) =>
+      {
+        val client = HttpClientBuilder.create().build()
+        val post = new HttpPost(OpenmldbBatchConfig.saveJobResultHttp)
+        while (partition.hasNext()) {
+          val arr = new ArrayBuffer[String]()
+          var i = 0
+          while (i < 100 && partition.hasNext()) {
+            // print, no need to do convert, but taskmanager should know it, one row is?
+            arr.append(partition.next().toSeq.mkString("[", ",", "]"))
+            i += 1
+          }
+          // use json load to rebuild two dim array?
+          // just send a raw file stream? "<schema>\m<row1>\n<row2>..."
+          val json_str = """{"json_data": """ + arr.mkString("[", ",", "]") + """"result_id": """ 
+            + OpenmldbBatchConfig.saveJobResultId +"}"
+          post.setEntity(new StringEntity(json_str))
+          val response = client.execute(post)
+          val entity = response.getEntity()
+          println(Seq(response.getStatusLine.getStatusCode(), response.getStatusLine.getReasonPhrase()))
+          println(IOUtils.toString(entity.getContent()))
+        }
+      }
+    }
   }
 
 }

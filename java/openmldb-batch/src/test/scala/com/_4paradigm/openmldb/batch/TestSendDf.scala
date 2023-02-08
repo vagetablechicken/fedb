@@ -47,7 +47,7 @@ class TestSendDf extends SparkTestSuite {
     val df = sess.createDataFrame(data.map(Row.fromTuple(_)).asJava, schema)
     df.show()
     var config = new OpenmldbBatchConfig
-    config.taskmanagerHttpServer = "http://0.0.0.0:4455/"
+    config.saveJobResultHttp = "http://0.0.0.0:4455/"
 
     // http
     // df.collect().foreach(x => println(x))
@@ -56,8 +56,6 @@ class TestSendDf extends SparkTestSuite {
       {
         val client = HttpClientBuilder.create().build()
         val post = new HttpPost("http://0.0.0.0:4455/")
-        //     println(partition.size)
-        //     println(partition.next().getAs[String]("json").mkString(","))
         while (partition.hasNext()) {
           val arr = new ArrayBuffer[String]()
           var i = 0
@@ -67,6 +65,7 @@ class TestSendDf extends SparkTestSuite {
             i += 1
           }
           // use json load to rebuild two dim array?
+          // just send a raw file stream? "<schema>\m<row1>\n<row2>..."
           val json_str = """{"json_data": """ + arr.mkString("[", ",", "]") + "}"
           post.setEntity(new StringEntity(json_str))
           val response = client.execute(post)
