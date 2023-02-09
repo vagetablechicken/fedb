@@ -35,6 +35,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import scala.Option;
+
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -199,18 +201,19 @@ public class TaskManagerImpl implements TaskManagerInterface {
     @Override
     public TaskManager.RunBatchSqlResponse RunBatchSql(TaskManager.RunBatchSqlRequest request) {
         try {
-            Map<String, String> confMap = request.getConfMap();
+            Map<String, String> confMap = new HashMap<>(request.getConfMap());
             // add conf about SaveJobResult
             // HOST can't be 0.0.0.0 if distributed or spark is not local
-            confMap.put("spark.openmldb.savejobresult.http", String.format("http://%s:%d/TaskManagerServer/SaveJobResult", TaskManagerConfig.HOST, TaskManagerConfig.PORT));
+            confMap.put("spark.openmldb.savejobresult.http", String.format("http://%s:%d/openmldb.taskmanager.TaskManagerServer/SaveJobResult",
+                TaskManagerConfig.HOST, TaskManagerConfig.PORT));
             // we can't get spark job id here, so we use JobResultSaver id, != spark job id
             // if too much running jobs to save result, throw exception
             int resultId = jobResultSaver.genResultId();
             confMap.put("spark.openmldb.savejobresult.resultid", String.valueOf(resultId));
             JobInfo jobInfo = OpenmldbBatchjobManager.runBatchSql(request.getSql(), confMap,
                     request.getDefaultDb());
-            // wait for all files of result saved and read them
-            String output = jobResultSaver.readResult(resultId);
+            // wait for all files of result saved and read them, large timeout
+            String output = jobResultSaver.readResult(resultId, TaskManagerConfig.BATCH_JOB_RESULT_MAX_WAIT_TIME);
             return TaskManager.RunBatchSqlResponse.newBuilder().setCode(StatusCode.SUCCESS).setOutput(output).build();
         } catch (Exception e) {
             e.printStackTrace();
@@ -372,9 +375,8 @@ public class TaskManagerImpl implements TaskManagerInterface {
     @Override
     public TaskManager.SaveJobResultResponse SaveJobResult(TaskManager.SaveJobResultRequest request) {
         // TODO(hw): multi thread, json string
-        request.getResultId();
-        request.getJsonData();
         // gson
+        // log if save failed
         jobResultSaver.saveFile(request.getResultId(), request.getJsonData());
         return TaskManager.SaveJobResultResponse.newBuilder().setCode(StatusCode.SUCCESS).setMsg("ok").build();
     }

@@ -171,6 +171,12 @@ class OpenmldbBatchConfig extends Serializable {
 
   @ConfigOption(name = "openmldb.savejobresult.resultid", doc = "The savejobresult id")
   var saveJobResultId = ""
+
+  // If a post req is too large, > brpc max_body_size, it'll be reject, default is 64M.
+  @ConfigOption(name = "openmldb.savejobresult.rowperpost", doc = "The max row count of a http post request to " +
+    "savejobresult, default is 16000, if the row count is larger than this, will split it into multiple http request" +
+    " with same resultid and different row")
+  var saveJobResultRowPerPost = 16000
 }
 
 object OpenmldbBatchConfig {

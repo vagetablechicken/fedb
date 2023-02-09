@@ -23,8 +23,11 @@ import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.csv.QuoteMode;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringWriter;
@@ -84,6 +87,7 @@ public class JobResultSaver {
     public boolean saveFile(int resultId, String jsonData) {
         // No need to wait, cuz id status must have been changed by genResultId before.
         // It's a check.
+        log.info("save result " + resultId + ", data " + jsonData);
         int status = idStatus.get(resultId);
         if (status != 1) {
             throw new RuntimeException(
@@ -95,6 +99,7 @@ public class JobResultSaver {
                 idStatus.notifyAll();
             }
             log.info("saved all result of result " + resultId);
+            return true;
         }
         // save to <log path>/tmp_result/<result_id>/<unique file name>
         try {
@@ -125,20 +130,31 @@ public class JobResultSaver {
     }
 
     // if exception, how to recover?
-    public String readResult(int resultId) throws InterruptedException, IOException {
+    public String readResult(int resultId, long timeoutMs) throws InterruptedException, IOException {
+        long timeoutExpiredMs = System.currentTimeMillis() + timeoutMs;
         // wait for idStatus[resultId] == 2
         synchronized (idStatus) {
-            while (idStatus.get(resultId) != 2) {
+            while (System.currentTimeMillis() < timeoutExpiredMs && idStatus.get(resultId) != 2) {
                 idStatus.wait();
             }
         }
+        if (idStatus.get(resultId) != 2) {
+            log.warn("read result timeout, result saving may be still running, try read anyway, id " + resultId);
+        }
+        String output = "";
         // all finished, read csv from savePath
         String savePath = String.format("%s/tmp_result/%d", TaskManagerConfig.JOB_LOG_PATH, resultId);
-        String output = printFilesTostr(savePath);
-
-        // cleanup dir
-        new File(savePath).delete();
-
+        File saveP = new File(savePath);
+        // If saveP not exists, means no real result saved. But it may use a uncleaned path, 
+        // whether read result succeed or not, we should delete it.
+        if (saveP.exists()) {
+            output = printFilesTostr(savePath);
+            if(!saveP.delete()){
+                log.warn("delete tmp result dir failed, plz remove it manually, path " + savePath);
+            }
+        } else {
+            log.info("empty result for " + resultId + ", show empty string");
+        }
         // reset id
         synchronized (idStatus) {
             idStatus.set(resultId, 0);
@@ -148,27 +164,49 @@ public class JobResultSaver {
     }
 
     // if exception, how to recover?
-    private String printFilesTostr(String fileDir) throws IOException {
-        StringWriter stringWriter = new StringWriter();
-        try (Stream<Path> paths = Files.walk(Paths.get(fileDir))) {
-            List<String> csvFiles = paths.filter(Files::isRegularFile).map(f -> f.toString()).filter(f -> f.endsWith(".csv"))
-                .collect(Collectors.toList());
-            if(csvFiles.isEmpty()) {
-                log.warn("no result file saved");
-                return "";
+    public String printFilesTostr(String fileDir) {
+        try (StringWriter stringWriter = new StringWriter();
+            Stream<Path> paths = Files.walk(Paths.get(fileDir))) {
+            List<String> csvFiles = paths.filter(Files::isRegularFile).map(f -> f.toString())
+                    .filter(f -> f.endsWith(".csv"))
+                    .collect(Collectors.toList());
+            if (csvFiles.isEmpty()) {
+                return "no valid result file, may use the uncleaned result path, clean it by me";
             }
-            CSVFormat format = CSVFormat.Builder.create().setHeader().build();
-            // get the header by peek the first file
-            CSVPrinter csvPrinter = new CSVPrinter(stringWriter, CSVFormat.DEFAULT.withHeader(
-                CSVParser.parse(csvFiles.get(0), format).getHeaderNames().stream().toArray(String[]::new)));
-            for(String f: csvFiles) {
-                CSVParser parser = CSVParser.parse(f, format);
-                Iterator<CSVRecord> iter = parser.iterator();
-                while(iter.hasNext()) {
-                    csvPrinter.printRecord(iter.next());
-                }
+            // print the header the first file
+            printFile(csvFiles.get(0), stringWriter, true);
+            for (int i = 1; i < csvFiles.size(); i++) {
+                printFile(csvFiles.get(i), stringWriter, false);
             }
+            return stringWriter.toString();
+        } catch (Exception e) {
+            log.warn("read result met exception when read " + fileDir + ", " + e.getMessage());
+            e.printStackTrace();
+            return "read met exception, check the taskmanager log";
         }
-        return stringWriter.toString();
+    }
+
+    // CSVPrinter can't do pretty print
+    private void printFile(String file, StringWriter stringWriter, boolean printHeader) {
+        // QuoteMode.MINIMAL is more simillary to spark dataframe output? or None?
+        CSVFormat.Builder formatBuilder = CSVFormat.Builder.create(CSVFormat.DEFAULT).setEscape('\\')
+                .setQuoteMode(QuoteMode.MINIMAL).setNullString("null");
+        try (BufferedReader br = new BufferedReader(new FileReader(file));
+                CSVParser parser = new CSVParser(br, formatBuilder.build());
+                CSVPrinter csvPrinter = new CSVPrinter(stringWriter,
+                        formatBuilder.setHeader(parser.getHeaderNames().stream().toArray(String[]::new))
+                                .setSkipHeaderRecord(!printHeader).build())) {
+            Iterator<CSVRecord> iter = parser.iterator();
+            while (iter.hasNext()) {
+                csvPrinter.printRecord(iter.next());
+            }
+        } catch (Exception e) {
+            log.warn("error when print result file " + file + ", ignore it");
+            e.printStackTrace();
+        }
+    }
+
+    public void reset() {
+        // a back door
     }
 }
