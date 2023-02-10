@@ -18,6 +18,7 @@ package com._4paradigm.openmldb.batch.api
 
 import com._4paradigm.openmldb.batch.{OpenmldbBatchConfig, SchemaUtil}
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.http.client.config.RequestConfig
 import org.apache.http.client.methods.HttpPost
 import org.apache.http.impl.client.HttpClientBuilder
 import org.apache.http.HttpHeaders
@@ -230,11 +231,16 @@ case class OpenmldbDataframe(openmldbSession: OpenmldbSession, sparkDf: DataFram
     val url = openmldbSession.config.saveJobResultHttp
     val resultId = openmldbSession.config.saveJobResultId
     val rowPerPost = openmldbSession.config.saveJobResultRowPerPost
+    val postTimeouts = openmldbSession.config.saveJobResultPostTimeouts.split(",").map(_.toInt)
+    val requestConfig = RequestConfig.custom().setConnectionRequestTimeout(postTimeouts(0))
+      .setConnectTimeout(postTimeouts(1)).setSocketTimeout(postTimeouts(2)).build()
     val schemaLine = sparkDf.schema.map(structField => { structField.name }).mkString(",")
     println(s"send result to ${url}, result id ${resultId}")
     sparkDf.foreachPartition { (partition: Iterator[Row]) => {
       val client = HttpClientBuilder.create().build()
       val post = new HttpPost(url)
+      post.setHeader("Content-type", "application/json");
+      post.setConfig(requestConfig);
       while (partition.hasNext) {
         val arr = new ArrayBuffer[String]()
         var i = 0
@@ -261,7 +267,6 @@ case class OpenmldbDataframe(openmldbSession: OpenmldbSession, sparkDf: DataFram
         val data = StringEscapeUtils.escapeJson(arr.mkString("\n"))
         val json_str = s"""{"json_data": "${schemaLine}\\n${data}", "result_id": ${resultId}}"""
         post.setEntity(new StringEntity(json_str))
-        post.setHeader("Content-type", "application/json");
         val response = client.execute(post)
         val entity = response.getEntity()
         if( response.getStatusLine.getStatusCode() != 200) {
@@ -277,9 +282,9 @@ case class OpenmldbDataframe(openmldbSession: OpenmldbSession, sparkDf: DataFram
     // send an empty data to let the result reader know that it can read now
     val client = HttpClientBuilder.create().build()
     val post = new HttpPost(url)
+    post.setHeader("Content-type", "application/json");
     val json_str = s"""{"json_data": "", "result_id": ${resultId}}"""
     post.setEntity(new StringEntity(json_str))
-    post.setHeader("Content-type", "application/json");
     val response = client.execute(post)
     val entity = response.getEntity()
     if( response.getStatusLine.getStatusCode() != 200) {

@@ -177,6 +177,10 @@ class OpenmldbBatchConfig extends Serializable {
     "savejobresult, default is 16000, if the row count is larger than this, will split it into multiple http request" +
     " with same resultid and different row")
   var saveJobResultRowPerPost = 16000
+
+  @ConfigOption(name = "openmldb.savejobresult.posttimeouts", doc = "ConnectionRequestTimeout,ConnectTimeout," +
+    "SocketTimeout for http post request to savejobresult, default is '10000,10000,10000', unit is ms")
+  var saveJobResultPostTimeouts = "10000,10000,10000"
 }
 
 object OpenmldbBatchConfig {
