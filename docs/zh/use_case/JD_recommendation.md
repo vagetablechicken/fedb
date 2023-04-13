@@ -382,12 +382,12 @@ model/
     ├── 1
     │   └── model
     └── config.pbtxt
- ```   
+```
 1. 修改`config.pbtxt`中的`one_embedding_persistent_table_path`配置。请填入正确的persistent绝对路径（`$demodir/oneflow_process/persistent/0-1`），不是使用环境变量。
  
- #### 3.3.2 启动OneFLow推理服务
+#### 3.3.2 启动OneFLow推理服务
 
- 使用以下命令启动OneFlow推理服务：
+使用以下命令启动OneFlow推理服务：
 ```bash
 docker run --runtime=nvidia --name triton-serving -d --network=host \
   -v $demodir/oneflow_process/model:/models \
