@@ -102,9 +102,7 @@ class NsClient : public Client {
     bool AddTableField(const std::string& table_name, const ::openmldb::common::ColumnDesc& column_desc,
                        std::string& msg);  // NOLINT
 
-    bool CreateTable(const ::openmldb::nameserver::TableInfo& table_info,
-                     const bool create_if_not_exist,
-                     std::string& msg);  // NOLINT
+    base::Status CreateTable(const ::openmldb::nameserver::TableInfo& table_info, const bool create_if_not_exist);
 
     bool DropTable(const std::string& name, std::string& msg);  // NOLINT
 
@@ -215,14 +213,12 @@ class NsClient : public Client {
                   std::vector<openmldb::common::ColumnDesc>* cols,
                   std::string& msg);  // NOLINT
 
-    bool AddIndex(const std::string& db_name,
-                  const std::string& table_name,
-                  const ::openmldb::common::ColumnKey& column_key,
-                  std::vector<openmldb::common::ColumnDesc>* cols,
+    bool AddIndex(const std::string& db_name, const std::string& table_name,
+                  const ::openmldb::common::ColumnKey& column_key, std::vector<openmldb::common::ColumnDesc>* cols,
                   std::string& msg);  // NOLINT
 
     base::Status AddMultiIndex(const std::string& db, const std::string& table_name,
-            const std::vector<::openmldb::common::ColumnKey>& column_keys);
+                               const std::vector<::openmldb::common::ColumnKey>& column_keys);
 
     bool DeleteIndex(const std::string& table_name, const std::string& idx_name,
                      std::string& msg);  // NOLINT

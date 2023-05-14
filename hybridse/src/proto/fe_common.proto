@@ -145,6 +145,8 @@ enum StatusCode {
     kCmdError = 2000;
     // error is set by server, use code openmldb::base::ReturnCode
     kServerError = 2001;
+    // error find in client side, but still use code openmldb::base::ReturnCode
+    kClientError = 2002;
 }
 
 message Status {

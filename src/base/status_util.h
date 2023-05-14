@@ -125,23 +125,23 @@
 
 /// @brief Set sdk::Status to server error, msg is openmldb::base::ReturnCode+msg. Must be not ok, skip check code and
 /// warn it
-#define APPEND_FROM_BASE_AND_WARN(s, base_s, msg)                  \
-    do {                                                           \
-        ::hybridse::sdk::Status* _s = (s);                         \
-        _s->SetCode(::hybridse::common::StatusCode::kServerError); \
-        _s->SetMsg((msg));                                         \
-        _s->Append((base_s.GetCode()));                            \
-        _s->Append((base_s.GetMsg()));                             \
-        LOG(WARNING) << "Status: " << _s->ToString();              \
+#define APPEND_FROM_BASE_AND_WARN(s, base_s, msg)      \
+    do {                                               \
+        APPEND_FROM_BASE(s, base_s, msg);              \
+        LOG(WARNING) << "Status: " << (s)->ToString(); \
     } while (0)
 
-#define APPEND_FROM_BASE(s, base_s, msg)                           \
-    do {                                                           \
-        ::hybridse::sdk::Status* _s = (s);                         \
-        _s->SetCode(::hybridse::common::StatusCode::kServerError); \
-        _s->SetMsg((msg));                                         \
-        _s->Append((base_s.GetCode()));                            \
-        _s->Append((base_s.GetMsg()));                             \
+#define APPEND_FROM_BASE(s, base_s, msg)                               \
+    do {                                                               \
+        ::hybridse::sdk::Status* _s = (s);                             \
+        if (absl::EndsWith(base_s.GetMsg(), "{server}")) {             \
+            _s->SetCode(::hybridse::common::StatusCode::kServerError); \
+        } else {                                                       \
+            _s->SetCode(::hybridse::common::StatusCode::kClientError); \
+        }                                                              \
+        _s->SetMsg((msg));                                             \
+        _s->Append((base_s.GetCode()));                                \
+        _s->Append((base_s.GetMsg()));                                 \
     } while (0)
 
 /// @brief s.msg = s.msg + prepend_str, and warn it
@@ -237,6 +237,26 @@
             return (ret_code);                                              \
         }                                                                   \
     } while (0)
+
+/// openmldb::base::Status
+
+// #define BASE_LOG_AND_RET(st)        \
+//     do {                            \
+//         const auto _s = (st);      \
+//         if (!_s.OK()) {             \
+//             LOG(WARNING) << _s.msg; \
+//         }                           \
+//         return (_s);                \
+//     } while (0);
+/// @brief add the server mark in status msg if not ok and return immediately.
+#define SERVER_SIDE_RETURN(st)    \
+    do {                          \
+        auto _s = (st);           \
+        if (!_s.OK()) {           \
+            _s.msg += "{server}"; \
+        }                         \
+        return (_s);              \
+    } while (0);
 
 namespace openmldb::base {}  // namespace openmldb::base
 
