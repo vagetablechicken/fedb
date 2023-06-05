@@ -18,7 +18,7 @@ env:
 
 jobs:
   centos6: # glibc version is 2.12, glibcxx version is 3.4.13
-    if: ${{ vars.OS == 'centos6' }}
+    if: ${{ github.event.inputs.OS == 'centos6' }}
     runs-on: [self-hosted,generic]
     container:
       image: ghcr.io/4paradigm/centos6_gcc7_hybridsql
@@ -83,7 +83,7 @@ jobs:
           name: release-artifacts
 
   macos-11:
-    if: ${{ vars.OS == 'macos11' }}
+    if: ${{ github.event.inputs.OS == 'macos11' }}
     runs-on: macos-11
     env:
       OS: darwin
