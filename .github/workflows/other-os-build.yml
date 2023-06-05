@@ -4,13 +4,17 @@ name: other os build
 
 on:
   workflow_dispatch:
+    inputs:
+        os:
+            description: 'os name: centos6, macos11'
+            required: true
+            default: 'centos6'
 
 env:
   GIT_SUBMODULE_STRATEGY: recursive
   NPROC: 2 # default Parallel build number for GitHub's Linux runner
   EXAMPLES_ENABLE: OFF # turn off hybridse's example code
   HYBRIDSE_TESTING_ENABLE: OFF # turn off hybridse's test code
-  env_var: ${{ vars.ENV_CONTEXT_VAR }}
 
 jobs:
   centos6: # glibc version is 2.12, glibcxx version is 3.4.13
