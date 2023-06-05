@@ -5,10 +5,10 @@ name: other os build
 on:
   workflow_dispatch:
     inputs:
-        os:
-            description: 'os name: centos6, macos11'
-            required: true
-            default: 'centos6'
+      OS:
+        description: 'os name: centos6, macos11'
+        required: true
+        default: 'centos6'
 
 env:
   GIT_SUBMODULE_STRATEGY: recursive
