@@ -15,13 +15,14 @@ chmod +x bazel
 export PATH=$PATH:`pwd`
 # git clone https://github.com/4paradigm/OpenMLDB.git
 # cd OpenMLDB
-# add patch in fetch cmake
+echo "add patch in fetch cmake"
 sed -i'' '34s/$/ -DWITH_CORE_TOOLS=OFF/' third-party/cmake/FetchRocksDB.cmake
-# modify in .deps needs a make first
+echo  "modify in .deps needs a make first"
 make BUILD_BUNDLED=ON # ignore error
+echo "add patch in zetasql"
 sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
 # skip more -lrt
-sed -i'' '42s/^/#/'  .deps/build/src/zetasql/build_zetasql_parser.sh
+sed -i'' '42s/^/#/' .deps/build/src/zetasql/build_zetasql_parser.sh
 sed -i'' '6a function realpath () { \n[[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"\n}' .deps/build/src/zetasql/pack_zetasql.sh
 # if need faster
 # export NPROC=40
