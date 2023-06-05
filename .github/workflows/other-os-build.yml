@@ -19,7 +19,7 @@ env:
 jobs:
   centos6: # glibc version is 2.12, glibcxx version is 3.4.13
     if: ${{ github.event.inputs.OS == 'centos6' }}
-    runs-on: [self-hosted,generic]
+    runs-on: ubuntu-latest
     container:
       image: ghcr.io/4paradigm/centos6_gcc7_hybridsql
     env:
