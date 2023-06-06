@@ -32,7 +32,6 @@ jobs:
       image: ghcr.io/4paradigm/centos6_gcc7_hybridsql
     env:
       OS: linux
-      BUILD_BUNDLED: ON
       SQL_JAVASDK_ENABLE: ${{ github.event.inputs.JAVA_SDK }}
       SQL_PYSDK_ENABLE: ${{ github.event.inputs.PYTHON_SDK }} # python whl will be built when make, no prerequirement
       TESTING_ENABLE: OFF
@@ -70,16 +69,22 @@ jobs:
 
       # no need configure, to avoid thirdparty build(zetasql always make) when bundle on
       # disk space?
-      - name: build
+      - name: build thirdparty and clean build tmp
         run: |
-          make build CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
+          make thirdparty CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }} BUILD_BUNDLE=ON
           # GitHub runner disk space is limited
-          # delete thirdparty build directory($ROOT/.deps/) to save disk space
-          # make thirdpartybuild-clean
+          # delete thirdparty build directory($ROOT/.deps/build) to save disk space
+          rm -rf .deps/build
+
+      # use raw cmake to avoid thirdparty build again
+      - name: configure & build
+        run: |
+          cmake -S . -B build -DCMAKE_PREFIX_PATH=.deps/usr -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} -DTESTING_ENABLE=OFF
+          cmake --build build --target all -- -j${{ env.NPROC }}
 
       - name: install
         run: |
-          make install
+          cmake --build build --target install -- -j${{ env.NPROC }}
 
       - name: package
         run: |
