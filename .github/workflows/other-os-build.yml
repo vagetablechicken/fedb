@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       OS:
-        description: 'os name: centos6, macos11'
+        description: 'os name: centos6, macos11, macos10'
         required: true
         default: 'centos6'
       JAVA_SDK:
@@ -39,15 +39,6 @@ jobs:
       CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v1 # must v1 for centos6 nodejs
-      # no need to setup? image has java&mvn
-      # - uses: actions/setup-java@v2
-      #   with:
-      #     distribution: "adopt"
-      #     java-version: "8"
-      #     server-id: ossrh
-      #     server-username: MAVEN_USERNAME
-      #     server-password: MAVEN_TOKEN
-      #     gpg-passphrase: GPG_PASSPHRASE # no deploy, skip gpg later
 
       - name: setup tools
         run: |
@@ -119,7 +110,6 @@ jobs:
             python/openmldb_sdk/dist/openmldb*.whl
             python/openmldb_tool/dist/openmldb*.whl
 
-  # TODO macos 10
   # macos no need to build thirdparty, but binary/os needs to be built on each os
   macos-11:
     if: ${{ github.event.inputs.OS == 'macos11' }}
@@ -136,6 +126,75 @@ jobs:
       CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v3
+      # it's ok to prepare version even java sdk disabled
+      - name: prepare release
+        run: |
+          VERSION="snapshot"
+          if [[ ${{ github.ref }} == "refs/tags/v"* ]]; then
+            VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+            VERSION=${VERSION#v}
+            bash steps/prepare_release.sh "$VERSION"
+            bash java/prepare_release.sh "$VERSION"
+          fi
+          echo "OPENMLDB_PREFIX=openmldb-$VERSION-${{ env.OS }}" >> $GITHUB_ENV
+
+      - name: build
+        run: |
+          make build CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
+          # GitHub runner disk space is limited
+          # delete thirdparty build directory($ROOT/.deps/) to save disk space
+          # make thirdpartybuild-clean
+
+      - name: install
+        run: |
+          make install
+
+      - name: package
+        run: |
+          tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          path: openmldb-*.tar.gz
+          name: binary-package
+
+      - name: upload java native
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: native-jar
+          path: java/openmldb-native/target/openmldb-native-*.jar
+
+      - name: upload python whls
+        if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
+        uses: actions/upload-artifact@v2
+        with: 
+          name: python-whls
+          path: |
+            python/openmldb_sdk/dist/openmldb*.whl
+            python/openmldb_tool/dist/openmldb*.whl
+
+  macos-10:
+    if: ${{ github.event.inputs.OS == 'macos10' }}
+    runs-on: macos-11
+    env:
+      OS: darwin
+      # if macos, set VARIANT_TYPE=macos
+      VARIANT_TYPE: macos
+      SQL_JAVASDK_ENABLE: ${{ github.event.inputs.JAVA_SDK }}
+      SQL_PYSDK_ENABLE: ${{ github.event.inputs.PYTHON_SDK }} # python whl will be built when make, no prerequirement
+      TESTING_ENABLE: OFF
+      ARCH: x86_64
+      NPROC: 3
+      CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
+    steps:
+      - uses: actions/checkout@v3
+      # ref https://github.com/actions/runner-images/blob/main/images/macos/macos-11-Readme.md macOS 10.15	macosx10.15	11.7 | macOS 11.1	macosx11.1	12.4
+      - name: xcode select
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '11.7'
       # it's ok to prepare version even java sdk disabled
       - name: prepare release
         run: |
