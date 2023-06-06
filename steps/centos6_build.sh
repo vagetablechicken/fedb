@@ -1,4 +1,5 @@
 #!/bin/bash
+set +x
 # docker run --network=host --name build_docker_os6 -it -v`pwd`:/root/mnt ghcr.io/4paradigm/centos6_gcc7_hybridsql bash
 
 # self build or workflow
@@ -18,8 +19,9 @@ export PATH=$PATH:`pwd`
 echo "add patch in fetch cmake"
 # skip -lrt in rocksdb
 sed -i'' '34s/$/ -DWITH_CORE_TOOLS=OFF/' third-party/cmake/FetchRocksDB.cmake
-echo  "modify in .deps needs a make first, timeout 30min"
-timeout 1800 make thirdparty BUILD_BUNDLED=ON # ignore error
+echo  "modify in .deps needs a make first, download zetasql first(build will fail)"
+sed -i'' '31s/${BUILD_BUNDLED}/ON/' third-party/CMakeLists.txt
+make thirdparty BUILD_BUNDLED=OFF # ignore error # timeout is better? BUILD_BUNDLED=OFF will download pre-built thirdparty, not good
 echo "add patch in zetasql"
 sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
 # skip more target to avoid adding -lrt

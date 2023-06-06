@@ -64,14 +64,10 @@ jobs:
             VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
             VERSION=${VERSION#v}
             bash steps/prepare_release.sh "$VERSION"
+            bash java/prepare_release.sh "$VERSION"
           fi
           echo "OPENMLDB_PREFIX=openmldb-$VERSION-${{ env.OS }}" >> $GITHUB_ENV
-      - name: java prepare release
-        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
-        run: |
-          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
-          VERSION=${VERSION#v}
-          ./java/prepare_release.sh "$VERSION" # if macos, set VARIANT_TYPE=macos
+
       # no need configure, to avoid thirdparty build(zetasql always make) when bundle on
       # disk space?
       - name: build
@@ -125,6 +121,7 @@ jobs:
     runs-on: macos-11
     env:
       OS: darwin
+      # if macos, set VARIANT_TYPE=macos
       VARIANT_TYPE: macos
       SQL_JAVASDK_ENABLE: ${{ github.event.inputs.JAVA_SDK }}
       SQL_PYSDK_ENABLE: ${{ github.event.inputs.PYTHON_SDK }} # python whl will be built when make, no prerequirement
