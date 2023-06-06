@@ -43,8 +43,7 @@ jobs:
       - name: setup tools
         run: |
           bash steps/centos6_build.sh
-          # env setup
-          source /opt/rh/devtoolset-8/enable
+          # bazel bin
           echo `pwd` >> $GITHUB_PATH
 
       - name: prepare release
@@ -62,6 +61,7 @@ jobs:
       # disk space?
       - name: build thirdparty and clean build tmp
         run: |
+          source /opt/rh/devtoolset-8/enable
           make thirdparty CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }} BUILD_BUNDLE=ON
           # GitHub runner disk space is limited
           # delete thirdparty build directory($ROOT/.deps/build) to save disk space
@@ -70,11 +70,15 @@ jobs:
       # use raw cmake to avoid thirdparty build again
       - name: configure & build
         run: |
-          cmake -S . -B build -DCMAKE_PREFIX_PATH=.deps/usr -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} -DTESTING_ENABLE=OFF
+          source /opt/rh/devtoolset-8/enable
+          cmake -S . -B `pwd`/build -DCMAKE_PREFIX_PATH=`pwd`/.deps/usr -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} \
+          -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=openmldb-snapshot-darwin  -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF
           cmake --build build --target all -- -j${{ env.NPROC }}
 
       - name: install
         run: |
+          source /opt/rh/devtoolset-8/enable
           cmake --build build --target install -- -j${{ env.NPROC }}
 
       - name: package
