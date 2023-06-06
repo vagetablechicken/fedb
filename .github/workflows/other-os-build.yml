@@ -9,6 +9,14 @@ on:
         description: 'os name: centos6, macos11'
         required: true
         default: 'centos6'
+      JAVA_SDK:
+        description: 'java sdk enable: ON, OFF'
+        required: true
+        default: 'OFF' # turn on later
+      PYTHON_SDK:
+        description: 'python sdk enable: ON, OFF'
+        required: true
+        default: 'OFF'
 
 env:
   GIT_SUBMODULE_STRATEGY: recursive
@@ -24,12 +32,23 @@ jobs:
       image: ghcr.io/4paradigm/centos6_gcc7_hybridsql
     env:
       OS: linux
-      SQL_PYSDK_ENABLE: OFF
+      BUILD_BUNDLED: ON
+      SQL_JAVASDK_ENABLE: ${{ github.event.inputs.JAVA_SDK }}
+      SQL_PYSDK_ENABLE: ${{ github.event.inputs.PYTHON_SDK }} # python whl will be built when make, no prerequirement
       TESTING_ENABLE: OFF
       NPROC: 8
       CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v1 # must v1 for centos6 nodejs
+      
+      - uses: actions/setup-java@v2
+        with:
+          distribution: "adopt"
+          java-version: "8"
+          server-id: ossrh
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
+          gpg-passphrase: GPG_PASSPHRASE # no deploy, skip gpg later
 
       - name: setup tools
         run: |
@@ -47,40 +66,60 @@ jobs:
             bash steps/prepare_release.sh "$VERSION"
           fi
           echo "OPENMLDB_PREFIX=openmldb-$VERSION-linux" >> $GITHUB_ENV
-
-      - name: enable java on release
-        run: |
-          echo "SQL_JAVASDK_ENABLE=ON" >> $GITHUB_ENV
-
+      
       - name: configure
-        env:
-          SQL_JAVASDK_ENABLE: ${{ env.SQL_JAVASDK_ENABLE }}
         run: |
           make configure CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
 
       - name: build
         run: |
-          make BUILD_BUNDLED=ON
+          make build
           # GitHub runner disk space is limited
           # delete thirdparty build directory($ROOT/.deps/) to save disk space
           # make thirdpartybuild-clean
 
       - name: install
-        if: ${{ github.event_name == 'push' }}
         run: |
           make install
 
       - name: package
-        if: ${{ github.event_name == 'push' }}
         run: |
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
 
       - name: upload artifacts
-        if: ${{ github.event_name == 'push' }}
         uses: actions/upload-artifact@v2
         with:
           path: openmldb-*.tar.gz
-          name: release-artifacts
+          name: binary-package
+
+      - name: java prepare release
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+        run: |
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+          VERSION=${VERSION#v}
+          ./java/prepare_release.sh "$VERSION" # if macos, set VARIANT_TYPE=macos
+
+      - name: java native build
+        working-directory: java
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+        run: |
+          ./mvnw --batch-mode clean install -DskipTests=true -Dscalatest.skip=true -Dgpg.skip # only -pl native is ok?
+
+      - name: upload java native
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: native-jar
+          path: java/openmldb-native/target/openmldb-native-*.jar
+
+      - name: upload python whls
+        if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
+        uses: actions/upload-artifact@v2
+        with: 
+          name: python-whls
+          path: |
+            python/openmldb_sdk/dist/openmldb*.whl
+            python/openmldb_tool/dist/openmldb*.whl
 
   macos-11:
     if: ${{ github.event.inputs.OS == 'macos11' }}
