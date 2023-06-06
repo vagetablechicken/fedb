@@ -18,8 +18,8 @@ export PATH=$PATH:`pwd`
 echo "add patch in fetch cmake"
 # skip -lrt in rocksdb
 sed -i'' '34s/$/ -DWITH_CORE_TOOLS=OFF/' third-party/cmake/FetchRocksDB.cmake
-echo  "modify in .deps needs a make first"
-make thirdparty BUILD_BUNDLED=ON # ignore error
+echo  "modify in .deps needs a make first, timeout 30min"
+timeout 1800 make thirdparty BUILD_BUNDLED=ON # ignore error
 echo "add patch in zetasql"
 sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
 # skip more target to avoid adding -lrt
