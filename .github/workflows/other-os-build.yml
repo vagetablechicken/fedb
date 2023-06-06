@@ -73,7 +73,7 @@ jobs:
           VERSION=${VERSION#v}
           ./java/prepare_release.sh "$VERSION" # if macos, set VARIANT_TYPE=macos
       # no need configure, to avoid thirdparty build(zetasql always make) when bundle on
-
+      # disk space?
       - name: build
         run: |
           make build CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
@@ -134,7 +134,7 @@ jobs:
       CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v3
-
+      # it's ok to prepare version even java sdk disabled
       - name: prepare release
         run: |
           VERSION="snapshot"
@@ -142,14 +142,9 @@ jobs:
             VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
             VERSION=${VERSION#v}
             bash steps/prepare_release.sh "$VERSION"
+            bash java/prepare_release.sh "$VERSION"
           fi
           echo "OPENMLDB_PREFIX=openmldb-$VERSION-${{ env.OS }}" >> $GITHUB_ENV
-      - name: java prepare release
-        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
-        run: |
-          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
-          VERSION=${VERSION#v}
-          ./java/prepare_release.sh "$VERSION"
 
       - name: build
         run: |
@@ -171,12 +166,6 @@ jobs:
         with:
           path: openmldb-*.tar.gz
           name: binary-package
-
-      # - name: java native build
-      #   working-directory: java
-      #   if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
-      #   run: |
-      #     ./mvnw --batch-mode clean install -DskipTests=true -Dscalatest.skip=true -Dgpg.skip # only -pl native is ok?
 
       - name: upload java native
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
