@@ -36,7 +36,7 @@ jobs:
           bash steps/centos6_build.sh
           # env setup
           source /opt/rh/devtoolset-8/enable
-          export PATH=$PATH:`pwd`
+          echo `pwd` >> $GITHUB_PATH
 
       - name: prepare release
         run: |

@@ -18,7 +18,7 @@ export PATH=$PATH:`pwd`
 echo "add patch in fetch cmake"
 sed -i'' '34s/$/ -DWITH_CORE_TOOLS=OFF/' third-party/cmake/FetchRocksDB.cmake
 echo  "modify in .deps needs a make first"
-make BUILD_BUNDLED=ON # ignore error
+make thirdparty BUILD_BUNDLED=ON # ignore error
 echo "add patch in zetasql"
 sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
 # skip more -lrt
