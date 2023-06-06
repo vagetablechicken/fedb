@@ -65,9 +65,15 @@ jobs:
             VERSION=${VERSION#v}
             bash steps/prepare_release.sh "$VERSION"
           fi
-          echo "OPENMLDB_PREFIX=openmldb-$VERSION-linux" >> $GITHUB_ENV
-      
-      - name: configure
+          echo "OPENMLDB_PREFIX=openmldb-$VERSION-${{ env.OS }}" >> $GITHUB_ENV
+      - name: java prepare release
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+        run: |
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+          VERSION=${VERSION#v}
+          ./java/prepare_release.sh "$VERSION" # if macos, set VARIANT_TYPE=macos
+
+      - name: configure install prefix
         run: |
           make configure CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
 
@@ -92,18 +98,12 @@ jobs:
           path: openmldb-*.tar.gz
           name: binary-package
 
-      - name: java prepare release
-        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
-        run: |
-          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
-          VERSION=${VERSION#v}
-          ./java/prepare_release.sh "$VERSION" # if macos, set VARIANT_TYPE=macos
-
-      - name: java native build
-        working-directory: java
-        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
-        run: |
-          ./mvnw --batch-mode clean install -DskipTests=true -Dscalatest.skip=true -Dgpg.skip # only -pl native is ok?
+      # java sdk will be package by make?
+      # - name: java native build
+      #   working-directory: java
+      #   if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+      #   run: |
+      #     ./mvnw --batch-mode clean install -DskipTests=true -Dscalatest.skip=true -Dgpg.skip # only -pl native is ok?
 
       - name: upload java native
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
@@ -121,11 +121,16 @@ jobs:
             python/openmldb_sdk/dist/openmldb*.whl
             python/openmldb_tool/dist/openmldb*.whl
 
+  # TODO macos 10
+  # macos no need to build thirdparty, but binary/os needs to be built on each os
   macos-11:
     if: ${{ github.event.inputs.OS == 'macos11' }}
     runs-on: macos-11
     env:
       OS: darwin
+      SQL_JAVASDK_ENABLE: ${{ github.event.inputs.JAVA_SDK }}
+      SQL_PYSDK_ENABLE: ${{ github.event.inputs.PYTHON_SDK }} # python whl will be built when make, no prerequirement
+      TESTING_ENABLE: OFF
       ARCH: x86_64
       NPROC: 3
       CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
@@ -140,15 +145,15 @@ jobs:
             VERSION=${VERSION#v}
             bash steps/prepare_release.sh "$VERSION"
           fi
-          echo "OPENMLDB_PREFIX=openmldb-$VERSION-darwin" >> $GITHUB_ENV
-
-      - name: enable java on release
+          echo "OPENMLDB_PREFIX=openmldb-$VERSION-${{ env.OS }}" >> $GITHUB_ENV
+      - name: java prepare release
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         run: |
-          echo "SQL_JAVASDK_ENABLE=ON" >> $GITHUB_ENV
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+          VERSION=${VERSION#v}
+          ./java/prepare_release.sh "$VERSION" # if macos, set VARIANT_TYPE=macos
 
-      - name: configure
-        env:
-          SQL_JAVASDK_ENABLE: ${{ env.SQL_JAVASDK_ENABLE }}
+      - name: configure install prefix
         run: |
           make configure CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
 
@@ -160,19 +165,37 @@ jobs:
           # make thirdpartybuild-clean
 
       - name: install
-        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
         run: |
           make install
 
       - name: package
-        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
         run: |
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
 
       - name: upload artifacts
-        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v2
         with:
           path: openmldb-*.tar.gz
-          name: release-artifacts
-# TODO macos 10
+          name: binary-package
+
+      # - name: java native build
+      #   working-directory: java
+      #   if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+      #   run: |
+      #     ./mvnw --batch-mode clean install -DskipTests=true -Dscalatest.skip=true -Dgpg.skip # only -pl native is ok?
+
+      - name: upload java native
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: native-jar
+          path: java/openmldb-native/target/openmldb-native-*.jar
+
+      - name: upload python whls
+        if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
+        uses: actions/upload-artifact@v2
+        with: 
+          name: python-whls
+          path: |
+            python/openmldb_sdk/dist/openmldb*.whl
+            python/openmldb_tool/dist/openmldb*.whl
