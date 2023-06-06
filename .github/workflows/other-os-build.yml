@@ -128,6 +128,7 @@ jobs:
     runs-on: macos-11
     env:
       OS: darwin
+      VARIANT_TYPE: macos
       SQL_JAVASDK_ENABLE: ${{ github.event.inputs.JAVA_SDK }}
       SQL_PYSDK_ENABLE: ${{ github.event.inputs.PYTHON_SDK }} # python whl will be built when make, no prerequirement
       TESTING_ENABLE: OFF
@@ -151,7 +152,7 @@ jobs:
         run: |
           VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
           VERSION=${VERSION#v}
-          ./java/prepare_release.sh "$VERSION" # if macos, set VARIANT_TYPE=macos
+          ./java/prepare_release.sh "$VERSION"
 
       - name: configure install prefix
         run: |
