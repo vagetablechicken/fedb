@@ -45,7 +45,11 @@ jobs:
           IN_WORKFLOW=true bash steps/centos6_build.sh
           # bazel bin
           echo `pwd` >> $GITHUB_PATH
-
+      - name: upload artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          path: bazel
+          name: test
       - name: prepare release
         run: |
           VERSION="snapshot"
@@ -85,28 +89,27 @@ jobs:
       - name: package
         run: |
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
-
+      # upload-artifact v1 for old glibc
       - name: upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v1
         with:
           path: openmldb-*.tar.gz
           name: binary-package
 
       - name: upload java native
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v1
         with:
           name: native-jar
           path: java/openmldb-native/target/openmldb-native-*.jar
       # tool doesn't need to be built on each os
       - name: upload python whls
         if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v1
         with: 
           name: python-whls
           path: |
             python/openmldb_sdk/dist/openmldb*.whl
-            python/openmldb_tool/dist/openmldb*.whl
 
   # macos no need to build thirdparty, but binary/os needs to be built on each os
   macos-11:
@@ -171,7 +174,6 @@ jobs:
           name: python-whls
           path: |
             python/openmldb_sdk/dist/openmldb*.whl
-            python/openmldb_tool/dist/openmldb*.whl
 
   macos-10:
     if: ${{ github.event.inputs.OS == 'macos10' }}
@@ -240,4 +242,3 @@ jobs:
           name: python-whls
           path: |
             python/openmldb_sdk/dist/openmldb*.whl
-            python/openmldb_tool/dist/openmldb*.whl
