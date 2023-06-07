@@ -13,7 +13,7 @@ function tool_install() {
     echo "ID=centos" > /etc/os-release
     if [ "$OPENMLDB_SOURCE" == "true" ]; then
         echo "download bazel from openmldb.ai"
-        curl -SLo bazel https://openmldb.ai/download/legacy/bazel-1.0.0
+        # curl -SLo bazel https://openmldb.ai/download/legacy/bazel-1.0.0
     else
         echo "download bazel from github sub-mod"
         curl -SLo bazel https://github.com/sub-mod/bazel-builds/releases/download/1.0.0/bazel-1.0.0
@@ -30,10 +30,11 @@ fi
 
 tool_install
 
+echo "set envs, if IN_WORKFLOW, you should set envs in workflow"
+export PATH=$PATH:`pwd`
+source /opt/rh/devtoolset-8/enable
+
 if [ "$IN_WORKFLOW" == "false" ]; then
-    echo "set envs"
-    export PATH=$PATH:`pwd`
-    source /opt/rh/devtoolset-8/enable
     echo "clone OpenMLDB and cd"
     git clone https://github.com/4paradigm/OpenMLDB.git
     cd OpenMLDB
@@ -43,10 +44,11 @@ echo "add patch in fetch cmake"
 # skip -lrt in rocksdb
 sed -i'' '34s/$/ -DWITH_CORE_TOOLS=OFF/' third-party/cmake/FetchRocksDB.cmake
 
-# timeout is better, cuz if BUILD_BUNDLED=OFF will download pre-built thirdparty, not good
-echo  "modify in .deps needs a make first, download zetasql first(build will fail)"
+# timeout can't ensure # if BUILD_BUNDLED=OFF will download pre-built thirdparty, not good
+echo  "modify in .deps needs a make first, download&build zetasql first(build will fail)"
 # sed -i'' '31s/${BUILD_BUNDLED}/ON/' third-party/CMakeLists.txt
-timeout 300 make thirdparty BUILD_BUNDLED=ON # ignore error 
+cmake -S third-party -B `pwd`/.deps -DSRC_INSTALL_DIR=`pwd`/thirdsrc -DDEPS_INSTALL_DIR=`pwd`/.deps/usr -DBUILD_BUNDLED=ON
+cmake --build `pwd`/.deps --target zetasql
 echo "add patch in .deps zetasql"
 sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
 # skip more target to avoid adding -lrt
