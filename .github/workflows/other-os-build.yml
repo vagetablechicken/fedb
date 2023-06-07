@@ -85,11 +85,11 @@ jobs:
       - name: package
         run: |
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
-      # upload-artifact v1 for old glibc
+      # upload-artifact v1 for old glibc, and v1 no wildcard support
       - name: upload artifacts
         uses: actions/upload-artifact@v1
         with:
-          path: openmldb-*.tar.gz
+          path: ${{ env.OPENMLDB_PREFIX }}.tar.gz
           name: binary-package
 
       - name: upload java native
