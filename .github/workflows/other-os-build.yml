@@ -45,11 +45,7 @@ jobs:
           IN_WORKFLOW=true bash steps/centos6_build.sh
           # bazel bin
           echo `pwd` >> $GITHUB_PATH
-      - name: upload artifacts
-        uses: actions/upload-artifact@v1
-        with:
-          path: bazel
-          name: test
+
       - name: prepare release
         run: |
           VERSION="snapshot"
