@@ -44,7 +44,7 @@ echo "add patch in fetch cmake"
 # skip -lrt in rocksdb
 sed -i'' '34s/$/ -DWITH_CORE_TOOLS=OFF/' third-party/cmake/FetchRocksDB.cmake
 
-# timeout can't ensure # if BUILD_BUNDLED=OFF will download pre-built thirdparty, not good
+# If BUILD_BUNDLED=OFF will download pre-built thirdparty, not good. So we use cmake to build zetasql only
 echo  "modify in .deps needs a make first, download&build zetasql first(build will fail)"
 # sed -i'' '31s/${BUILD_BUNDLED}/ON/' third-party/CMakeLists.txt
 cmake -S third-party -B `pwd`/.deps -DSRC_INSTALL_DIR=`pwd`/thirdsrc -DDEPS_INSTALL_DIR=`pwd`/.deps/usr -DBUILD_BUNDLED=ON
