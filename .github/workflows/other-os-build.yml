@@ -42,7 +42,7 @@ jobs:
 
       - name: setup tools
         run: |
-          bash steps/centos6_build.sh
+          IN_WORKFLOW=true bash steps/centos6_build.sh
           # bazel bin
           echo `pwd` >> $GITHUB_PATH
 
