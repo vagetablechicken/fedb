@@ -74,7 +74,8 @@ jobs:
           cmake -S . -B `pwd`/build -DCMAKE_PREFIX_PATH=`pwd`/.deps/usr -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} \
           -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=openmldb-snapshot-darwin  -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF
-          cmake --build build --target all -- -j${{ env.NPROC }}
+          # parallel avoid oom?
+          cmake --build build --target all -- -j1
 
       - name: install
         run: |

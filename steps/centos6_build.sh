@@ -21,7 +21,7 @@ echo "add patch in fetch cmake"
 sed -i'' '34s/$/ -DWITH_CORE_TOOLS=OFF/' third-party/cmake/FetchRocksDB.cmake
 echo  "modify in .deps needs a make first, download zetasql first(build will fail)"
 # sed -i'' '31s/${BUILD_BUNDLED}/ON/' third-party/CMakeLists.txt
-timeout 600 make thirdparty BUILD_BUNDLED=ON # ignore error # timeout is better? BUILD_BUNDLED=OFF will download pre-built thirdparty, not good
+timeout 300 make thirdparty BUILD_BUNDLED=ON # ignore error # timeout is better? BUILD_BUNDLED=OFF will download pre-built thirdparty, not good
 echo "add patch in zetasql"
 sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
 # skip more target to avoid adding -lrt
