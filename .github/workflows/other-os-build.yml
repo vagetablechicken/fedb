@@ -67,15 +67,15 @@ jobs:
           # delete thirdparty build directory($ROOT/.deps/build) to save disk space
           rm -rf .deps/build
 
-      # use raw cmake to avoid thirdparty build again
+      # use raw cmake to avoid thirdparty build again and parallel limit(1 is ok)
       - name: configure & build
         run: |
           source /opt/rh/devtoolset-8/enable
           cmake -S . -B `pwd`/build -DCMAKE_PREFIX_PATH=`pwd`/.deps/usr -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} \
-          -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=openmldb-snapshot-darwin  -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF
+          -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}  -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF
           # parallel avoid oom?
-          cmake --build build --target all -- -j1
+          cmake --build build --target all -- -j2
 
       - name: install
         run: |
@@ -92,20 +92,13 @@ jobs:
           path: openmldb-*.tar.gz
           name: binary-package
 
-      # java sdk will be package by make?
-      # - name: java native build
-      #   working-directory: java
-      #   if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
-      #   run: |
-      #     ./mvnw --batch-mode clean install -DskipTests=true -Dscalatest.skip=true -Dgpg.skip # only -pl native is ok?
-
       - name: upload java native
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         uses: actions/upload-artifact@v2
         with:
           name: native-jar
           path: java/openmldb-native/target/openmldb-native-*.jar
-
+      # tool doesn't need to be built on each os
       - name: upload python whls
         if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
         uses: actions/upload-artifact@v2
