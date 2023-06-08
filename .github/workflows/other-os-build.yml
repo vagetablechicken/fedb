@@ -43,8 +43,10 @@ jobs:
       - name: upload artifacts
         uses: actions/upload-artifact@v1
         with:
-          path: steps
-          name: upload-a-dir
+          path: |
+            steps
+            tools
+          name: upload-2-dir
       # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
       # rm /depends 400M, not enough
       - name: setup tools
@@ -109,7 +111,7 @@ jobs:
           path: ${{ env.OPENMLDB_PREFIX }}.tar.gz
           name: binary-package
 
-      # no wildcard support, so update the dir
+      # no wildcard support, so update the dir, don't use wildcard & `/` in the end
       - name: upload java native
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         uses: actions/upload-artifact@v1
