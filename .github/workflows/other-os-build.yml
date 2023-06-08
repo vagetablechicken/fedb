@@ -40,8 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v1 # must v1 for centos6 nodejs
 
-      # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
-      # rm /depends 400M, not enough
       - name: setup tools
         run: |
           IN_WORKFLOW=true bash steps/centos6_build.sh
@@ -70,7 +68,8 @@ jobs:
           rm -rf .deps/build
 
       # use raw cmake to avoid thirdparty build again and parallel limit(avoid oom, 2 is ok)
-      # No space left on device when java sdk on, python sdk is small
+      # No space left on device when java sdk on, python sdk is small, rm /depends 400M, not enough, so we disable java here
+      # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
       - name: configure & install binary/python sdk(skip java sdk, binary-package don't have jars, add manually)
         run: |
           source /opt/rh/devtoolset-8/enable
@@ -84,7 +83,7 @@ jobs:
     
       # only build java sdk, build/ cost ~6.2G, java/ cost ~4.6G
       # we can package only openmldb-native, but it's better to build the whole, to avoid code error
-      # if you want to use other jars, upload them
+      # if you want to download other jars, upload them
       - name: build java sdk
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         run: |
