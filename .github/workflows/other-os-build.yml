@@ -39,6 +39,12 @@ jobs:
       CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v1 # must v1 for centos6 nodejs
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          path: steps
+          name: upload-a-dir
       # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
       # rm /depends 400M, not enough
       - name: setup tools
@@ -110,7 +116,7 @@ jobs:
         with:
           name: java-jars
           path: |
-            java/openmldb-native/target/
+            java/openmldb-native/target
 
       # tool doesn't need to be built on each os
       - name: upload python whls
@@ -119,7 +125,7 @@ jobs:
         with: 
           name: python-whls
           path: |
-            python/openmldb_sdk/dist/
+            python/openmldb_sdk/dist
       # TODO(hw): upload cxx sdk
 
   # macos no need to build thirdparty, but binary/os needs to be built on each os
