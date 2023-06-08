@@ -39,7 +39,8 @@ jobs:
       CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v1 # must v1 for centos6 nodejs
-
+      # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
+      # rm /depends 400M, not enough
       - name: setup tools
         run: |
           IN_WORKFLOW=true bash steps/centos6_build.sh
@@ -67,24 +68,34 @@ jobs:
           # delete thirdparty build directory($ROOT/.deps/build) to save disk space
           rm -rf .deps/build
 
-      # use raw cmake to avoid thirdparty build again and parallel limit(2 is ok)
-      - name: configure & build
+      # use raw cmake to avoid thirdparty build again and parallel limit(avoid oom, 2 is ok)
+      # No space left on device when java sdk on, python sdk is small
+      - name: configure & install binary/python sdk(skip java sdk, binary-package don't have jars, add manually)
         run: |
           source /opt/rh/devtoolset-8/enable
           cmake -S . -B `pwd`/build -DCMAKE_PREFIX_PATH=`pwd`/.deps/usr -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} \
-          -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}  -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF
-          # parallel avoid oom?
-          cmake --build build --target all -- -j2
-
-      - name: install
+          -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=OFF \
+          -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}  \
+          -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF -DEXAMPLES_TESTING_ENABLE=OFF
+          cmake --build build --target install -- -j2
+          # clean up to save disk space(~11G), don't know which is relative, build again in next step
+          rm -rf build
+    
+      # only build java sdk, build/ cost ~6.2G, java/ cost ~4.6G
+      - name: build java sdk
+        if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         run: |
           source /opt/rh/devtoolset-8/enable
-          cmake --build build --target install -- -j${{ env.NPROC }}
+          cmake -S . -B `pwd`/build -DCMAKE_PREFIX_PATH=`pwd`/.deps/usr -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=ON \
+          -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}  \
+          -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF -DEXAMPLES_TESTING_ENABLE=OFF
+          cmake --build build --target sql_javasdk_package -- -j2
 
       - name: package
         run: |
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
+
       # upload-artifact v1 for old glibc, and v1 no wildcard support
       - name: upload artifacts
         uses: actions/upload-artifact@v1
@@ -92,12 +103,15 @@ jobs:
           path: ${{ env.OPENMLDB_PREFIX }}.tar.gz
           name: binary-package
 
+      # no wildcard support, so update the dir
       - name: upload java native
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         uses: actions/upload-artifact@v1
         with:
-          name: native-jar
-          path: java/openmldb-native/target/openmldb-native-*.jar
+          name: java-jars
+          path: |
+            java/openmldb-native/target/
+
       # tool doesn't need to be built on each os
       - name: upload python whls
         if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
@@ -105,7 +119,8 @@ jobs:
         with: 
           name: python-whls
           path: |
-            python/openmldb_sdk/dist/openmldb*.whl
+            python/openmldb_sdk/dist/
+      # TODO(hw): upload cxx sdk
 
   # macos no need to build thirdparty, but binary/os needs to be built on each os
   macos-11:
