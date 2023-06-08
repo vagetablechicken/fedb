@@ -40,13 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v1 # must v1 for centos6 nodejs
 
-      - name: upload artifacts
-        uses: actions/upload-artifact@v1
-        with:
-          path: |
-            steps
-            tools
-          name: upload-2-dir
       # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
       # rm /depends 400M, not enough
       - name: setup tools
@@ -90,6 +83,8 @@ jobs:
           rm -rf build
     
       # only build java sdk, build/ cost ~6.2G, java/ cost ~4.6G
+      # we can package only openmldb-native, but it's better to build the whole, to avoid code error
+      # if you want to use other jars, upload them
       - name: build java sdk
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         run: |
@@ -105,20 +100,19 @@ jobs:
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
 
       # upload-artifact v1 for old glibc, and v1 no wildcard support
-      - name: upload artifacts
+      - name: upload binary
         uses: actions/upload-artifact@v1
         with:
           path: ${{ env.OPENMLDB_PREFIX }}.tar.gz
           name: binary-package
 
-      # no wildcard support, so update the dir, don't use wildcard & `/` in the end
+      # no wildcard support, so update the dir, don't use wildcard & `/` in the end, and no multi path
       - name: upload java native
         if: ${{ env.SQL_JAVASDK_ENABLE == 'ON' }}
         uses: actions/upload-artifact@v1
         with:
           name: java-jars
-          path: |
-            java/openmldb-native/target
+          path: java/openmldb-native/target
 
       # tool doesn't need to be built on each os
       - name: upload python whls
