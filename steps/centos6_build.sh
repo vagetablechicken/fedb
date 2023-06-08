@@ -59,6 +59,8 @@ if [ "OPENMLDB_SOURCE" = "true" ]; then
     sed -i'' '911s#],#,"https://openmldb.ai/download/legacy/icu4c-65_1-src.tgz"],#' .deps/build/src/zetasql/bazel/zetasql_deps_step_2.bzl
 fi
 
+# python wheel will be installed in sdk make
+
 if [ "$IN_WORKFLOW" == "false" ]; then
     echo "build and install, you can set env, e.g. SQL_JAVASDK_ENABLE=ON SQL_PYSDK_ENABLE=ON NRPOC=8"
     make BUILD_BUNDLED=ON 

@@ -75,7 +75,7 @@ jobs:
           -DSQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -DSQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} \
           -DTESTING_ENABLE=OFF -DCMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}  -DHYBRIDSE_TESTING_ENABLE=OFF -DEXAMPLES_ENABLE=OFF
           # parallel avoid oom?
-          cmake --build build --target all -- -j4
+          cmake --build build --target all -- -j2
 
       - name: install
         run: |
