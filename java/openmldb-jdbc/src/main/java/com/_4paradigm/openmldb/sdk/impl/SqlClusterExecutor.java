@@ -31,9 +31,11 @@ import com._4paradigm.openmldb.TableColumnDescPair;
 import com._4paradigm.openmldb.TableColumnDescPairVector;
 import com._4paradigm.openmldb.DBTableColumnDescPair;
 import com._4paradigm.openmldb.DBTableColumnDescPairVector;
+import com._4paradigm.openmldb.DBTableVector;
 import com._4paradigm.openmldb.TableReader;
 import com._4paradigm.openmldb.VectorString;
 import com._4paradigm.openmldb.common.LibraryLoader;
+import com._4paradigm.openmldb.common.Pair;
 import com._4paradigm.openmldb.jdbc.CallablePreparedStatement;
 import com._4paradigm.openmldb.jdbc.SQLResultSet;
 import com._4paradigm.openmldb.proto.NS;
@@ -320,7 +322,7 @@ public class SqlClusterExecutor implements SqlExecutor {
             throw new SQLException("input schema is null or empty");
         }
         List<String> results = new ArrayList<>();
-        // TODO(hw): multi db is not supported now
+        // TODO(hw): multi db is not supported now, create db.table works?
         for (Map.Entry<String, Map<String, Schema>> entry : tableSchema.entrySet()) {
             Map<String, Schema> schemaMap = entry.getValue();
             TableColumnDescPairVector tableColumnDescPairVector = convertSchema(schemaMap);
@@ -358,56 +360,102 @@ public class SqlClusterExecutor implements SqlExecutor {
     }
 
     // for back compatibility, genOutputSchema can set no used_db
+    // 1. if only one db(no <db>.<table> in sql), it's ok
+    // 2. if multi db, sql must be <db>.<table>, no using db works
     public static Schema genOutputSchema(String sql, Map<String, Map<String, Schema>> tableSchema)
             throws SQLException {
         return genOutputSchema(sql, "", tableSchema);
     }
 
-    // NOTICE: even tableSchema is <db, <table, schea>>, we'll assume that all
+    // NOTICE: even tableSchema is <db, <table, schema>>, we'll assume that all
     // tables in one db in sql_router_sdk
     // returns
     // 1. empty list: means valid
     // 2. otherwise a list(len 2):[0] the error msg; [1] the trace
-    public static List<String> validateSQLInBatch(String sql, Map<String, Map<String, Schema>> tableSchema)
-            throws SQLException {
+    public static List<String> validateSQLInBatch(String sql, String usedDB,
+            Map<String, Map<String, Schema>> tableSchema) throws SQLException {
         SqlClusterExecutor.initJavaSdkLibrary("");
 
         if (null == tableSchema || tableSchema.isEmpty()) {
             throw new SQLException("input schema is null or empty");
         }
-        TableColumnDescPairVector tableColumnDescPairVector = new TableColumnDescPairVector();
-        // TODO(hw): multi db is not supported now, so we add all db-tables here
+        DBTableColumnDescPairVector dbTableColumnDescPairVector = new DBTableColumnDescPairVector();
         for (Map.Entry<String, Map<String, Schema>> entry : tableSchema.entrySet()) {
+            String db = entry.getKey();
             Map<String, Schema> schemaMap = entry.getValue();
-            tableColumnDescPairVector.addAll(convertSchema(schemaMap));
+            dbTableColumnDescPairVector.add(new DBTableColumnDescPair(db, convertSchema(schemaMap)));
         }
-        List<String> err = sql_router_sdk.ValidateSQLInBatch(sql, tableColumnDescPairVector);
-        tableColumnDescPairVector.delete();
+        List<String> err = sql_router_sdk.ValidateSQLInBatch(sql, usedDB, dbTableColumnDescPairVector);
+        dbTableColumnDescPairVector.delete();
         return err;
+    }
+
+    // for back compatibility, validateSQLInBatch can set no used_db
+    public static List<String> validateSQLInBatch(String sql, Map<String, Map<String, Schema>> tableSchema)
+            throws SQLException {
+        return validateSQLInBatch(sql, "", tableSchema);
     }
 
     // return: the same as validateSQLInBatch
-    public static List<String> validateSQLInRequest(String sql, Map<String, Map<String, Schema>> tableSchema)
+    public static List<String> validateSQLInRequest(String sql, String usedDB,
+            Map<String, Map<String, Schema>> tableSchema)
             throws SQLException {
         SqlClusterExecutor.initJavaSdkLibrary("");
 
         if (null == tableSchema || tableSchema.isEmpty()) {
             throw new SQLException("input schema is null or empty");
         }
-        TableColumnDescPairVector tableColumnDescPairVector = new TableColumnDescPairVector();
-        // TODO(hw): multi db is not supported now, so we add all db-tables here
+        DBTableColumnDescPairVector dbTableColumnDescPairVector = new DBTableColumnDescPairVector();
         for (Map.Entry<String, Map<String, Schema>> entry : tableSchema.entrySet()) {
+            String db = entry.getKey();
             Map<String, Schema> schemaMap = entry.getValue();
-            tableColumnDescPairVector.addAll(convertSchema(schemaMap));
+            dbTableColumnDescPairVector.add(new DBTableColumnDescPair(db, convertSchema(schemaMap)));
         }
-        List<String> err = sql_router_sdk.ValidateSQLInRequest(sql, tableColumnDescPairVector);
-        tableColumnDescPairVector.delete();
+        List<String> err = sql_router_sdk.ValidateSQLInRequest(sql, usedDB, dbTableColumnDescPairVector);
+        dbTableColumnDescPairVector.delete();
         return err;
     }
 
-    // literal merge, should be validated by validateSQLInRequest
+    // for back compatibility, validateSQLInRequest can set no used_db
+    public static List<String> validateSQLInRequest(String sql, Map<String, Map<String, Schema>> tableSchema)
+            throws SQLException {
+        return validateSQLInRequest(sql, "", tableSchema);
+    }
+
+    // list<db,table>, db won't be empty
+    public static List<Pair<String, String>> GetDependentTables(String sql, String usedDB,
+            Map<String, Map<String, Schema>> tableSchema)
+            throws SQLException {
+        SqlClusterExecutor.initJavaSdkLibrary("");
+
+        if (null == tableSchema || tableSchema.isEmpty()) {
+            throw new SQLException("input schema is null or empty");
+        }
+        DBTableColumnDescPairVector dbTableColumnDescPairVector = new DBTableColumnDescPairVector();
+        for (Map.Entry<String, Map<String, Schema>> entry : tableSchema.entrySet()) {
+            String db = entry.getKey();
+            Map<String, Schema> schemaMap = entry.getValue();
+            dbTableColumnDescPairVector.add(new DBTableColumnDescPair(db, convertSchema(schemaMap)));
+        }
+        DBTableVector tables = sql_router_sdk.GetDependentTables(sql, usedDB, dbTableColumnDescPairVector);
+        List<Pair<String, String>> ret = new ArrayList<>();
+        for (int i = 0; i < tables.size(); i++) {
+            String db = tables.get(i).getFirst();
+            if (db.isEmpty()) {
+                db = usedDB;
+            }
+            ret.add(new Pair<>(db, tables.get(i).getSecond()));
+        }
+        tables.delete();
+        dbTableColumnDescPairVector.delete();
+        return ret;
+    }
+
+    // literal merge, and validated by validateSQLInRequest, notice that mainTable
+    // may not in usedDB
     // return: select * from ..., including the join keys
-    private static String mergeSQLWithPartValidate(List<String> sqls, String mainTable, List<String> uniqueKeys,
+    private static String mergeSQLWithPartValidate(List<String> sqls, String usedDB, String mainTable,
+            List<String> uniqueKeys,
             Map<String, Map<String, Schema>> tableSchema) throws SQLException {
         // make uniqueKeys more unique, gen keys selection
         List<String> uniqueKeysNewName = new ArrayList<>();
@@ -435,7 +483,7 @@ public class SqlClusterExecutor implements SqlExecutor {
                     uniqueKeysRenamed.stream().map(keyRenamed -> keyRenamed + idx).collect(Collectors.joining(", ")),
                     sql.substring(6));
             // validate
-            List<String> ret = SqlClusterExecutor.validateSQLInRequest(outSelection, tableSchema);
+            List<String> ret = SqlClusterExecutor.validateSQLInRequest(outSelection, usedDB, tableSchema);
             if (!ret.isEmpty()) {
                 throw new SQLException("sql with uniquekeys [" + outSelection + "] is invalid: " + ret);
             }
@@ -463,18 +511,28 @@ public class SqlClusterExecutor implements SqlExecutor {
         return sb.toString();
     }
 
+    // input: sqls, using db, unique keys in main table, table schema
     // with table schema, we can except join keys and validate the merged sql
-    public static String mergeSQL(List<String> sqls, String mainTable, List<String> uniqueKeys,
+    public static String mergeSQL(List<String> sqls, String db, List<String> uniqueKeys,
             Map<String, Map<String, Schema>> tableSchema)
             throws SQLException {
         // ensure each sql is valid
         for (String sql : sqls) {
-            List<String> ret = SqlClusterExecutor.validateSQLInRequest(sql, tableSchema);
+            // TODO(hw): get main table will validate sql too? what if main table renamed?
+            // add test
+            List<String> ret = SqlClusterExecutor.validateSQLInRequest(sql, db, tableSchema);
             if (!ret.isEmpty()) {
                 throw new SQLException("sql is invalid, can't merge: " + ret);
             }
         }
-        String merged = mergeSQLWithPartValidate(sqls, mainTable, uniqueKeys, tableSchema);
+        // get main table from first sql
+        Pair<String, String> mainTable = SqlClusterExecutor.GetDependentTables(sqls.get(0), db, tableSchema).get(0);
+
+        // main table is used to combine unique keys, to avoid some ambiguous column
+        // name problem, but if the main table of one sql is <table>, we can't use
+        // <db>.<table>.<key> as merge_<key>_
+        String merged = mergeSQLWithPartValidate(sqls, db, mainTable.getKey() + "." + mainTable.getValue(), uniqueKeys,
+                tableSchema);
 
         // try to do column filter, if failed, we'll throw an exception
         Schema outputSchema = SqlClusterExecutor.genOutputSchema(merged, tableSchema);
@@ -490,9 +548,9 @@ public class SqlClusterExecutor implements SqlExecutor {
         merged = filtered;
 
         // validate
-        List<String> ret = SqlClusterExecutor.validateSQLInRequest(merged, tableSchema);
+        List<String> ret = SqlClusterExecutor.validateSQLInRequest(merged, db, tableSchema);
         if (!ret.isEmpty()) {
-            throw new SQLException("merged sql is invalid: " + ret);
+            throw new SQLException("merged sql is invalid: " + ret + ", merged sql: " + merged);
         }
         return merged;
     }
