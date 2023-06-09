@@ -62,6 +62,7 @@ jobs:
           options: -v ${{ github.workspace }}:/root/OpenMLDB -e USE_DEPS_CACHE=${{ steps.deps-cache.outputs.cache-hit }} -e OPENMLDB_PREFIX=${{ env.OPENMLDB_PREFIX }} -e SQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -e SQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }}
           shell: bash
           run: |
+            cd /root/OpenMLDB
             IN_WORKFLOW=true bash steps/centos6_build.sh
             # bazel bin
             export PATH=$PATH:`pwd`
