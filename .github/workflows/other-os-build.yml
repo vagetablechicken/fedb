@@ -48,7 +48,7 @@ jobs:
 
       - name: Cache thirdparty
         id: cache-thirdparty
-        uses: actions/cache@v2
+        uses: actions/cache@v1
         with:
           path: |
             .deps/
