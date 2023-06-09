@@ -13,7 +13,7 @@ function tool_install() {
     echo "ID=centos" > /etc/os-release
     if [ "$OPENMLDB_SOURCE" == "true" ]; then
         echo "download bazel from openmldb.ai"
-        # curl -SLo bazel https://openmldb.ai/download/legacy/bazel-1.0.0
+        curl -SLo bazel https://openmldb.ai/download/legacy/bazel-1.0.0
     else
         echo "download bazel from github sub-mod"
         curl -SLo bazel https://github.com/sub-mod/bazel-builds/releases/download/1.0.0/bazel-1.0.0
@@ -24,8 +24,7 @@ function tool_install() {
 if [ "$IN_WORKFLOW" == "true" ]; then
     echo "in workflow"
 else
-    echo "in self build, cd /root/mnt"
-    cd /root/mnt
+    echo "in self build"
 fi
 
 tool_install
@@ -33,12 +32,6 @@ tool_install
 echo "set envs, if IN_WORKFLOW, you should set envs in workflow"
 export PATH=$PATH:`pwd`
 source /opt/rh/devtoolset-8/enable
-
-if [ "$IN_WORKFLOW" == "false" ]; then
-    echo "clone OpenMLDB and cd"
-    git clone https://github.com/4paradigm/OpenMLDB.git
-    cd OpenMLDB
-fi
 
 echo "add patch in fetch cmake"
 # skip -lrt in rocksdb
