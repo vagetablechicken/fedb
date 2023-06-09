@@ -56,6 +56,8 @@ jobs:
             .deps/
           key: centos6-thirdparty-${{ hashFiles('third-party/**/CMakeLists.txt', 'third-party/**/*.cmake', 'third-party/**/*.sh') }}
 
+      # thirdparty -j8 is ok
+      # build -j2 is ok, >=4 will oom
       - uses: addnab/docker-run-action@v3
         with:
           image: ghcr.io/4paradigm/centos6_gcc7_hybridsql
@@ -69,7 +71,7 @@ jobs:
             source /opt/rh/devtoolset-8/enable
             if [[ "${USE_DEPS_CACHE}" != "true" ]]; then
               echo "build thirdparty"
-              make thirdparty CMAKE_INSTALL_PREFIX=${OPENMLDB_PREFIX} BUILD_BUNDLE=ON
+              make thirdparty CMAKE_INSTALL_PREFIX=${OPENMLDB_PREFIX} BUILD_BUNDLE=ON NPROC=8
               rm -rf .deps/build # GitHub runner disk space is limited
             fi
             echo "build"
