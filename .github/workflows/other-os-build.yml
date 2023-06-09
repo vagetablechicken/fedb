@@ -48,11 +48,11 @@ jobs:
 
       - name: Cache thirdparty
         id: cache-thirdparty
-        uses: actions/cache@v3
+        uses: actions/cache@v2
         with:
           path: |
             .deps/
-          key: ${{ runner.os }}-thirdparty-${{ hashFiles('third-party/**/CMakeLists.txt', 'third-party/**/*.cmake', 'third-party/**/*.sh') }}
+          key: centos6-thirdparty-${{ hashFiles('third-party/**/CMakeLists.txt', 'third-party/**/*.cmake', 'third-party/**/*.sh') }}
 
       - name: prepare release
         run: |
@@ -144,7 +144,6 @@ jobs:
       TESTING_ENABLE: OFF
       ARCH: x86_64
       NPROC: 3
-      CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v3
       # it's ok to prepare version even java sdk disabled
@@ -174,7 +173,7 @@ jobs:
         run: |
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
 
-      - name: upload artifacts
+      - name: upload binary
         uses: actions/upload-artifact@v2
         with:
           path: openmldb-*.tar.gz
@@ -187,11 +186,11 @@ jobs:
           name: native-jar
           path: java/openmldb-native/target/openmldb-native-*.jar
 
-      - name: upload python whls
+      - name: upload python whl
         if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
         uses: actions/upload-artifact@v2
         with: 
-          name: python-whls
+          name: python-whl
           path: |
             python/openmldb_sdk/dist/openmldb*.whl
 
@@ -207,7 +206,6 @@ jobs:
       TESTING_ENABLE: OFF
       ARCH: x86_64
       NPROC: 3
-      CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
     steps:
       - uses: actions/checkout@v3
       # ref https://github.com/actions/runner-images/blob/main/images/macos/macos-11-Readme.md macOS 10.15	macosx10.15	11.7 | macOS 11.1	macosx11.1	12.4
@@ -242,7 +240,7 @@ jobs:
         run: |
           tar czf ${{ env.OPENMLDB_PREFIX }}.tar.gz ${{ env.OPENMLDB_PREFIX }}/
 
-      - name: upload artifacts
+      - name: upload binary
         uses: actions/upload-artifact@v2
         with:
           path: openmldb-*.tar.gz
@@ -255,10 +253,10 @@ jobs:
           name: native-jar
           path: java/openmldb-native/target/openmldb-native-*.jar
 
-      - name: upload python whls
+      - name: upload python whl
         if: ${{ env.SQL_PYSDK_ENABLE == 'ON' }}
         uses: actions/upload-artifact@v2
         with: 
-          name: python-whls
+          name: python-whl
           path: |
             python/openmldb_sdk/dist/openmldb*.whl
