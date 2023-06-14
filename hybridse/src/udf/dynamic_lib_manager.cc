@@ -45,6 +45,9 @@ base::Status DynamicLibManager::ExtractFunction(const std::string& name, bool is
     }
     if (!so_handle) {
         void* handle = dlopen(file.c_str(), RTLD_LAZY);
+        if (handle == nullptr) {
+           LOG(WARNING) << "dlopen failed: " << dlerror();
+        }
         CHECK_TRUE(handle != nullptr, common::kExternalUDFError, "can not open the dynamic library: " + file)
         so_handle = std::make_shared<DynamicLibHandle>(handle);
         std::lock_guard<std::mutex> lock(mu_);
