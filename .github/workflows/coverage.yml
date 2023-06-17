@@ -65,15 +65,16 @@ jobs:
       - name: start service
         run: |
           ./steps/ut_zookeeper.sh start
-
+      # 16G build/ (no run), run test will take 1G more
       - name: Coverage CPP
         run: |
-          timeout 4200 make coverage-cpp
+          make coverage-cpp
         
       - name: debug
         if: always()
         run: | 
           du -d 1 -h build
+          df
 
       - name: Upload Coverage Report
         uses: codecov/codecov-action@v3
