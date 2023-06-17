@@ -75,7 +75,7 @@ jobs:
           find . -name "*.a" -type f -delete
           find . -type d -name "*.dir" -exec rm -r {} +
           # total 119(120-api_server_test)
-          ctest --force-new-ctest-process --output-on-failure -E "api_server_test"
+          SQL_CASE_BASE_DIR=$(pwd)/.. YAML_CASE_BASE_DIR=$(pwd)/.. ctest --force-new-ctest-process --output-on-failure -E "api_server_test"
 
       - name: debug
         if: always()
