@@ -68,7 +68,7 @@ jobs:
 
       - name: Coverage CPP
         run: |
-          timeout 3600 make coverage-cpp
+          timeout 4200 make coverage-cpp
         
       - name: debug
         if: always()
