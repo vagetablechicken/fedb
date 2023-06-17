@@ -60,7 +60,8 @@ jobs:
 
       - name: coverage configure
         run: |
-          make coverage-configure
+          timeout 3600 make coverage-configure
+          du -d 1 -h build
 
       - name: start service
         run: |
