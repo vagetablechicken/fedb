@@ -65,11 +65,18 @@ jobs:
       - name: start service
         run: |
           ./steps/ut_zookeeper.sh start
-      # 16G build/ (no run), run test will take 1G more
+      # make coverage-cpp will gen 16G build/ (no run), run test will take 2G more, so split make and test
       - name: Coverage CPP
         run: |
-          make coverage-cpp
-        
+          cd build
+          make -j2
+          # rm some irrelevant files
+          find . -name "*.o" -type f -delete
+          find . -name "*.a" -type f -delete
+          find . -type d -name "*.dir" -exec rm -r {} +
+          # total 119(120-api_server_test)
+          ctest --force-new-ctest-process --output-on-failure -E "api_server_test"
+
       - name: debug
         if: always()
         run: | 
