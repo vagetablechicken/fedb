@@ -60,8 +60,7 @@ jobs:
 
       - name: coverage configure
         run: |
-          timeout 3600 make coverage-configure
-          du -d 1 -h build
+          make coverage-configure
 
       - name: start service
         run: |
@@ -69,7 +68,8 @@ jobs:
 
       - name: Coverage CPP
         run: |
-          make coverage-cpp
+          timeout 3600 make coverage-cpp
+          du -d 1 -h build
 
       - name: Upload Coverage Report
         uses: codecov/codecov-action@v3
