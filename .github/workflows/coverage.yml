@@ -60,7 +60,7 @@ jobs:
 
       - name: coverage configure
         run: |
-          make coverage-configure
+          COVERAGE_NO_DEPS=ON make coverage-configure
 
       - name: start service
         run: |
@@ -70,16 +70,23 @@ jobs:
         run: |
           # rm some irrelevant files
           rm -rf .deps/build
+          # only build tests: no build output by ctest, so we use cmake
+          # ctest --build-and-test . build --build-nocmake --build-generator "Unix Makefiles" -j $NPROC
+          # split make too, delete irrelavant files in the middle
+          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR <60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
+          # rm some in the middle
+          rm -f build/bin/*
+          find build -name "*.a" -type f -delete
+          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR >=60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
+          
           cd build
-          make -j2
-          # rm some irrelevant files
+          # rm some irrelevant files, *.dir/Makefile can't be deleted, test in bin won't test by coverage
+          rm build/bin/*
+          find build -name "*.a" -type f -delete
           find . -name "*.o" -type f -delete
-          find . -name "*.a" -type f -delete
-          # *.dir can't be deleted
           # find . -type d -name "*.dir" -not -name "" -exec rm -r {} +
-          # total 119(120-api_server_test)
-          SQL_CASE_BASE_DIR=$(pwd)/.. YAML_CASE_BASE_DIR=$(pwd)/.. ctest --force-new-ctest-process --output-on-failure -E "api_server_test"
-          # coverage report succeed?
+          # Makefile target coverage, not the cmake target(won't build tests again), total 119(120-api_server_test)
+          make coverage
 
       - name: debug
         if: always()
