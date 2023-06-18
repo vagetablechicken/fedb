@@ -86,7 +86,8 @@ jobs:
           find build -name "*.a" -type f -delete
           find build -name "*.o" -type f -delete
           # find . -type d -name "*.dir" -not -name "" -exec rm -r {} +
-
+          du -d 1 -h build
+          df
           # Makefile target coverage, not the cmake target(won't build tests again), total 119(120-api_server_test)
           cd build
           make coverage
