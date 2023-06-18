@@ -77,6 +77,8 @@ jobs:
           # rm some in the middle
           rm -f build/bin/*
           find build -name "*.a" -type f -delete
+          du -d 1 -h build
+          df
           cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR >=60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
           
           cd build
