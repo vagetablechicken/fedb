@@ -60,7 +60,7 @@ jobs:
 
       - name: coverage configure
         run: |
-          COVERAGE_NO_DEPS=ON make coverage-configure
+          make coverage-configure COVERAGE_NO_DEPS=ON
 
       - name: start service
         run: |
@@ -73,7 +73,7 @@ jobs:
           # only build tests: no build output by ctest, so we use cmake
           # ctest --build-and-test . build --build-nocmake --build-generator "Unix Makefiles" -j $NPROC
           # split make too, delete irrelavant files in the middle
-          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR <60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
+          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR <60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC -DCMAKE_BUILD_TYPE=Debug -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=ON -DTESTING_ENABLE=ON -DCOVERAGE_ENABLE=ON -DCOVERAGE_NO_DEPS=ON -DBUILD_SHARED_LIBS=ON --target
           # rm some in the middle
           rm -f build/bin/*
           find build -name "*.a" -type f -delete
