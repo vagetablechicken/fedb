@@ -70,6 +70,12 @@ jobs:
         run: |
           make coverage-cpp
 
+      - name: debug
+        if: always()
+        run: | 
+          du -d 1 -h build
+          df -h
+
       - name: Upload Coverage Report
         uses: codecov/codecov-action@v3
         with:
