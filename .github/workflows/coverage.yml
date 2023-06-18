@@ -84,8 +84,7 @@ jobs:
 
           # rm some irrelevant files, *.dir/Makefile/*.make can't be deleted, test in bin won't test by coverage
           rm -f build/bin/*
-          find build \( -name "*.a" -o -name "*.o" -o -name "*.o.d" \) -delete
-          # find . -type d -name "*.dir" -not -name "" -exec rm -r {} +
+          find build \( -name "*.a" -o -name "*.o" -o -name "*.o.d" -o -name "*.make" -o -name "cmake*.cmake" \) -delete
           du -d 1 -h build
           df -h
           # Makefile target coverage, not the cmake target(won't build tests again), total 119(120-api_server_test)
