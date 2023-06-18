@@ -80,14 +80,15 @@ jobs:
           du -d 1 -h build
           df
           cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR >=60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
-          
-          cd build
+
           # rm some irrelevant files, *.dir/Makefile can't be deleted, test in bin won't test by coverage
           rm build/bin/*
           find build -name "*.a" -type f -delete
-          find . -name "*.o" -type f -delete
+          find build -name "*.o" -type f -delete
           # find . -type d -name "*.dir" -not -name "" -exec rm -r {} +
+
           # Makefile target coverage, not the cmake target(won't build tests again), total 119(120-api_server_test)
+          cd build
           make coverage
 
       - name: debug
