@@ -73,12 +73,12 @@ jobs:
           # only build tests: no build output by ctest, so we use cmake
           # ctest --build-and-test . build --build-nocmake --build-generator "Unix Makefiles" -j $NPROC
           # split make too, delete irrelavant files in the middle
-          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR <60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC -DCMAKE_BUILD_TYPE=Debug -DSQL_PYSDK_ENABLE=OFF -DSQL_JAVASDK_ENABLE=ON -DTESTING_ENABLE=ON -DCOVERAGE_ENABLE=ON -DCOVERAGE_NO_DEPS=ON -DBUILD_SHARED_LIBS=ON --target
+          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR <60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
           # rm some in the middle
           rm -f build/bin/*
           find build -name "*.a" -type f -delete
           du -d 1 -h build
-          df
+          df -h
           cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR >=60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
 
           # rm some irrelevant files, *.dir/Makefile can't be deleted, test in bin won't test by coverage
@@ -87,16 +87,16 @@ jobs:
           find build -name "*.o" -type f -delete
           # find . -type d -name "*.dir" -not -name "" -exec rm -r {} +
           du -d 1 -h build
-          df
+          df -h
           # Makefile target coverage, not the cmake target(won't build tests again), total 119(120-api_server_test)
           cd build
-          make coverage
+          SQL_CASE_BASE_DIR=$(pwd)/.. YAML_CASE_BASE_DIR=$(pwd)/.. make coverage
 
       - name: debug
         if: always()
         run: | 
           du -d 1 -h build
-          df
+          df -h
 
       - name: Upload Coverage Report
         uses: codecov/codecov-action@v3
