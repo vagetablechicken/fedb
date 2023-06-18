@@ -81,10 +81,10 @@ jobs:
           du -d 1 -h build
           df -h
           cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR >=80) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
-
+          # ~11G
           # rm some irrelevant files, *.dir/Makefile/*.make can't be deleted, test in bin won't test by coverage
           rm -f build/bin/*
-          find build \( -name "*.a" -o -name "*.o" -o -name "*.o.d" -o -name "*.make" -o -name "cmake*.cmake" \) -delete
+          find build \( -name "*.a" -o -name "*.o" -o -name "*.o.d" -o -name "cmake*.cmake" \) -delete
           du -d 1 -h build
           df -h
           # Makefile target coverage, not the cmake target(won't build tests again), total 119(120-api_server_test)
