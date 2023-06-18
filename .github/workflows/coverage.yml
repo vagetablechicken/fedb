@@ -72,19 +72,19 @@ jobs:
           rm -rf .deps/build
           # only build tests: no build output by ctest, so we use cmake
           # ctest --build-and-test . build --build-nocmake --build-generator "Unix Makefiles" -j $NPROC
+
           # split make too, delete irrelavant files in the middle
-          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR <60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
-          # rm some in the middle
+          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR <80) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
+          # rm some in the middle, leave ~7.4G
           rm -f build/bin/*
           find build -name "*.a" -type f -delete
           du -d 1 -h build
           df -h
-          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR >=60) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
+          cmake --build build --target help | grep -Eo "\S+_test$" | awk '{if(NR >=80) printf(" %s ",$0)}' | xargs cmake --build build -j $NPROC --target
 
           # rm some irrelevant files, *.dir/Makefile can't be deleted, test in bin won't test by coverage
-          rm build/bin/*
-          find build -name "*.a" -type f -delete
-          find build -name "*.o" -type f -delete
+          rm -f build/bin/*
+          find build -name "*.a" -o -name "*.o" -o -name "*.o.d" -delete
           # find . -type d -name "*.dir" -not -name "" -exec rm -r {} +
           du -d 1 -h build
           df -h
