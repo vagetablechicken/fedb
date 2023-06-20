@@ -238,26 +238,24 @@ if (NOT ICU_FOUND)
 endif ()
 message(STATUS "Found ICU Libraries: ${ICU_LIBRARIES}")
 
-list(APPEND file_based_test_driver_LIBS
-        alternations
-        test_case_options
-        test_case_outputs
-        test_case_mode
-        logging
-        path
-        status
-        unified_diff_oss
-        ret_check
-        )
+# TODO(hw): no need?
+# list(APPEND file_based_test_driver_LIBS
+#         alternations
+#         test_case_options
+#         test_case_outputs
+#         test_case_mode
+#         logging
+#         path
+#         status
+#         unified_diff_oss
+#         ret_check
+#         )
 set(ZETASQL_LIBS
         zetasql
-        ${file_based_test_driver_LIBS}
+        # ${file_based_test_driver_LIBS}
         ${ABSL_LIBS}
         re2
         ${ICU_LIBRARIES}
-        date_proto
-        timeofday_proto
-        latlng_proto
         )
 
 if (TCMALLOC_ENABLE)

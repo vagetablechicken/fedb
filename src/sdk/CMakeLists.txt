@@ -252,37 +252,11 @@ target_link_libraries(openmldb_api openmldb_sdk
 
 # get linked libraries built in OpenMLDB
 get_target_property(CXXSDK_LIBS openmldb_api LINK_LIBRARIES)
-message(STATUS "openmldb_api link libs(doing): ${CXXSDK_LIBS}")
+# TODO: add openmldb_api
+message(STATUS "cxx sdk link libs(builtin): ${CXXSDK_LIBS}")
 
 # To get the final SDK, we need add third party libraries 
 # Below, we will find and integrate these required libraries
-# LIBRARIES_PATH save all required libraries path
-
-# 1. zetasql
-
-
-# Get path by $<TARGET_FILE:${X}> for some libraries built in OpenMLDB
-set(SELF_LIBS ${BUILTIN_LIBS} hybridse_sdk hybridse_core hybridse_flags)
-foreach(X  IN LISTS SELF_LIBS)
-    list(APPEND LIBRARIES_PATH $<TARGET_FILE:${X}>)
-endforeach()
-
-list(APPEND MERGED_LIBS ${BIN_LIBS} ${SDK_LIBS} ${LINK_LIBS})
-# Some libraries have their own paths
-foreach(X  IN LISTS MERGED_LIBS)
-    if(EXISTS ${X})
-        # message(STATUS ${X})
-        list(APPEND LIBRARIES_PATH ${X})
-    endif()
-endforeach()
-
-# Some third party libraries, get path by ${X_LIBRARY}
-set(THIRD_PARTY_LIBS zetasql zookeeper_mt re2 pthread rt m dl)
-foreach(X IN LISTS THIRD_PARTY_LIBS)
-    # message(STATUS ${${X}_LIBRARY})
-    find_library(${X}_LIBRARY ${X})
-    list(APPEND LIBRARIES_PATH ${${X}_LIBRARY})
-endforeach()
 
 # lib_name is the name of a library
 # all_libs save all the libraries name of absl and LLVM which find recursively
@@ -305,30 +279,88 @@ function(get_link_libraries_by_target lib_name all_libs)
     set(${all_libs} "${${all_libs}};${lib_name}" PARENT_SCOPE)
 endfunction(get_link_libraries_by_target)
 
-# ${ABSL_LIBS} and ${LLVM_LIBS} need to recursively look up
-# We need absl::statusor, but it's not mentioned
-list(APPEND ABSL_AND_LLVM ${ABSL_LIBS} ${LLVM_LIBS})
-foreach(X IN LISTS ABSL_AND_LLVM)
-    get_link_libraries_by_target(${X} ABSL_LLVM_LIBS)
+# CXXSDK_THIRDPARTY_LIBS save all required libraries path
+set(CXXSDK_THIRDPARTY_LIBS "")
+
+# 1. zetasql & it's dependencies use ZETASQL_LIBS, ABSL_LIBS, ICU_LIBRARIES
+set(ZETASQL_ABSL_TARGETS "")
+foreach(X IN LISTS ZETASQL_LIBS)
+    message(STATUS "zetasql link libs(doing): ${X}")
+    set(LIB_APTH "")
+    if (NOT TARGET ${X})
+        message(STATUS "zetasql link libs(doing): ${X} is not a target")
+        if(EXISTS ${X})
+            message(STATUS "zetasql link libs(doing): ${X} is a file")
+            set(LIB_APTH ${X})
+        else()
+            message(STATUS "zetasql link libs(doing): ${X} is not a file")
+            find_library(LIB_APTH ${X})
+        endif()
+    else()
+        # to simplify, just think it's absl target
+        list(APPEND ZETASQL_ABSL_TARGETS ${X})
+        # no recursive get
+        # get_target_property(_libs ${X} INTERFACE_LINK_LIBRARIES)
+        # message(STATUS "${X} get ${_libs}")
+    endif()
+    if(LIB_APTH)
+        list(APPEND CXXSDK_THIRDPARTY_LIBS ${LIB_APTH})      
+    endif()
 endforeach()
+message(STATUS "zetasql absl targets: ${ZETASQL_ABSL_TARGETS} vs ${ABSL_LIBS}")
+# handle absl libs, need to recursively look up, target may need more deps
+set(CXXSDK_ABSL_LIBS "")
+foreach(X IN LISTS ABSL_LIBS)
+    get_link_libraries_by_target(${X} ZETASQL_ABSL_TARGETS)
+    foreach(Y IN LISTS ZETASQL_ABSL_TARGETS)
+        get_property(_loc TARGET ${Y} PROPERTY LOCATION)
+        list(APPEND CXXSDK_ABSL_LIBS ${_loc})
+    endforeach()
+endforeach()
+list(REMOVE_DUPLICATES CXXSDK_ABSL_LIBS)
 # Because the value of ABSL_LLVM_LIBS is changed by "ABSL_LLVM_LIBS=ABSL_LLVM_LIBS+lib_name" in recursion, and ABSL_LLVM_LIBS starts as null.
 # So there is a null value at the beginning of the final A. Remove null values here.
-list(REMOVE_ITEM ABSL_LLVM_LIBS "")
+list(REMOVE_ITEM CXXSDK_ABSL_LIBS "")
+list(LENGTH CXXSDK_ABSL_LIBS _len)
+list(LENGTH ABSL_LIBS _len2)
+message(STATUS "zetasql absl libs: ${CXXSDK_ABSL_LIBS}, len: ${_len}, origin: ${_len2}")
+list(APPEND CXXSDK_THIRDPARTY_LIBS ${CXXSDK_ABSL_LIBS})
+message(STATUS "cxx sdk link libs(thirdparty): ${CXXSDK_THIRDPARTY_LIBS}")
 
-# Find path of libraries in ${ABSL_LLVM_LIBS}
-foreach(X  IN LISTS ABSL_LLVM_LIBS)
-    get_property(_loc TARGET ${X} PROPERTY LOCATION)
-    list(APPEND ABSL_LLVM_PATH ${_loc})
-endforeach()
+# list(APPEND MERGED_LIBS ${BIN_LIBS} ${SDK_LIBS} ${LINK_LIBS})
+# # Some libraries have their own paths
+# foreach(X  IN LISTS MERGED_LIBS)
+#     if(EXISTS ${X})
+#         # message(STATUS ${X})
+#         list(APPEND LIBRARIES_PATH ${X})
+#     endif()
+# endforeach()
 
-list(APPEND to_openmldbsdk $<TARGET_FILE:openmldb_api> ${ABSL_LLVM_PATH} ${LIBRARIES_PATH})
+# # Some third party libraries, get path by ${X_LIBRARY}
 
-# must rm lib first, otherwise err 'Malformed archive'
-add_custom_target(pack_openmldbsdk ALL 
-COMMAND rm -f libopenmldbsdk.a
-COMMAND ar -crsT libopenmldbsdk${to_openmldbsdk}
-COMMENT "pack static cxx sdk and all depend static libs into one"
+# # Because the value of ABSL_LLVM_LIBS is changed by "ABSL_LLVM_LIBS=ABSL_LLVM_LIBS+lib_name" in recursion, and ABSL_LLVM_LIBS starts as null.
+# # So there is a null value at the beginning of the final A. Remove null values here.
+# list(REMOVE_ITEM ABSL_LLVM_LIBS "")
+
+# # Find path of libraries in ${ABSL_LLVM_LIBS}
+# foreach(X  IN LISTS ABSL_LLVM_LIBS)
+#     get_property(_loc TARGET ${X} PROPERTY LOCATION)
+#     list(APPEND ABSL_LLVM_PATH ${_loc})
+# endforeach()
+
+# list(APPEND to_openmldbsdk $<TARGET_FILE:openmldb_api> ${ABSL_LLVM_PATH} ${LIBRARIES_PATH})
+
+# # must rm lib first, otherwise err 'Malformed archive'
+# add_custom_target(pack_openmldbsdk ALL 
+# COMMAND rm -f libopenmldbsdk.a
+# COMMAND ar -crsT libopenmldbsdk${to_openmldbsdk}
+# COMMENT "pack static cxx sdk and all depend static libs into one"
+# )
+add_custom_target(pack_cxxsdk ALL
+# write a file, better to debug
+# ar -M < file
 )
+
 
 if(TESTING_ENABLE)
     add_executable(openmldb_api_test openmldb_api_test.cc)
