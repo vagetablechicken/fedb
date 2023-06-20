@@ -220,11 +220,11 @@ if(SQL_JAVASDK_ENABLE)
             PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
 endif()
 
-# c++ sdk
-if (APPLE)
-    message(STATUS "skip c++ sdk build on macos")
-    return()
-endif()
+# c++ sdk TODO: if pack can't in macos, open it
+# if (APPLE)
+#     message(STATUS "skip c++ sdk build on macos")
+#     return()
+# endif()
 
 add_library(openmldb_api STATIC openmldb_api.cc)
 target_include_directories (
@@ -236,15 +236,33 @@ target_include_directories (
     ${PROJECT_SOURCE_DIR}/hybridse/include
     ${PROJECT_SOURCE_DIR}/.deps/usr/include
 )
-target_link_libraries(openmldb_api ${BIN_LIBS})
+# openmldb_sdk is enouth, but we need to add all libs to one, add lib message here
+target_link_libraries(openmldb_api openmldb_sdk 
+    openmldb_codec
+    openmldb_catalog
+    schema
+    client
+    zk_client
+    base
+    openmldb_flags
+    hybridse_sdk
+    hybridse_core
+    hybridse_flags
+)
 
-# To get the final SDK, we need some libraries
+# get linked libraries built in OpenMLDB
+get_target_property(CXXSDK_LIBS openmldb_api LINK_LIBRARIES)
+message(STATUS "openmldb_api link libs(doing): ${CXXSDK_LIBS}")
+
+# To get the final SDK, we need add third party libraries 
 # Below, we will find and integrate these required libraries
 # LIBRARIES_PATH save all required libraries path
-# TODO(hw): we should use openmldb_api target link libs, not list them manually
+
+# 1. zetasql
+
 
 # Get path by $<TARGET_FILE:${X}> for some libraries built in OpenMLDB
-set(SELF_LIBS ${BUILTIN_LIBS} openmldb_sdk openmldb_flags hybridse_sdk hybridse_core hybridse_flags)
+set(SELF_LIBS ${BUILTIN_LIBS} hybridse_sdk hybridse_core hybridse_flags)
 foreach(X  IN LISTS SELF_LIBS)
     list(APPEND LIBRARIES_PATH $<TARGET_FILE:${X}>)
 endforeach()
@@ -260,7 +278,7 @@ endforeach()
 
 # Some third party libraries, get path by ${X_LIBRARY}
 set(THIRD_PARTY_LIBS zetasql zookeeper_mt re2 pthread rt m dl)
-foreach(X  IN LISTS THIRD_PARTY_LIBS)
+foreach(X IN LISTS THIRD_PARTY_LIBS)
     # message(STATUS ${${X}_LIBRARY})
     find_library(${X}_LIBRARY ${X})
     list(APPEND LIBRARIES_PATH ${${X}_LIBRARY})
@@ -308,7 +326,7 @@ list(APPEND to_openmldbsdk $<TARGET_FILE:openmldb_api> ${ABSL_LLVM_PATH} ${LIBRA
 # must rm lib first, otherwise err 'Malformed archive'
 add_custom_target(pack_openmldbsdk ALL 
 COMMAND rm -f libopenmldbsdk.a
-COMMAND ar -crsT libopenmldbsdk.a ${to_openmldbsdk}
+COMMAND ar -crsT libopenmldbsdk${to_openmldbsdk}
 COMMENT "pack static cxx sdk and all depend static libs into one"
 )
 
