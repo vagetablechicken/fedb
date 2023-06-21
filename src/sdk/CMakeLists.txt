@@ -280,10 +280,10 @@ function(get_link_libraries_by_target lib_name all_libs)
 endfunction(get_link_libraries_by_target)
 
 # CXXSDK_THIRDPARTY_LIBS save all required libraries path
-set(CXXSDK_THIRDPARTY_LIBS "")
+set(CXXSDK_THIRDPARTY_LIBS )
 
 # 1. zetasql & it's dependencies use ZETASQL_LIBS, ABSL_LIBS, ICU_LIBRARIES
-set(ZETASQL_ABSL_TARGETS "")
+set(ZETASQL_ABSL_TARGETS )
 foreach(X IN LISTS ZETASQL_LIBS)
     message(STATUS "zetasql link libs(doing): ${X}")
     set(LIB_APTH "")
@@ -320,7 +320,7 @@ endforeach()
 list(REMOVE_DUPLICATES CXXSDK_ABSL_LIBS)
 # Because the value of ABSL_LLVM_LIBS is changed by "ABSL_LLVM_LIBS=ABSL_LLVM_LIBS+lib_name" in recursion, and ABSL_LLVM_LIBS starts as null.
 # So there is a null value at the beginning of the final A. Remove null values here.
-list(REMOVE_ITEM CXXSDK_ABSL_LIBS "")
+# list(REMOVE_ITEM CXXSDK_ABSL_LIBS "")
 list(LENGTH CXXSDK_ABSL_LIBS _len)
 list(LENGTH ABSL_LIBS _len2)
 message(STATUS "zetasql absl libs: ${CXXSDK_ABSL_LIBS}, len: ${_len}, origin: ${_len2}")
@@ -356,9 +356,24 @@ message(STATUS "cxx sdk link libs(thirdparty): ${CXXSDK_THIRDPARTY_LIBS}")
 # COMMAND ar -crsT libopenmldbsdk${to_openmldbsdk}
 # COMMENT "pack static cxx sdk and all depend static libs into one"
 # )
+set(CXXSDK_NAME libopenmldbsdk.a)
+
+# gen mri file
+# TODO: a better way to generate mri file, list to string no backslash
+# list(JOIN CXXSDK_THIRDPARTY_LIBS "$<SEMICOLON>ADDLIB:" ADD_LIBS_PART)
+# message(STATUS "add libs part: ${ADD_LIBS_PART}")
+# string(CONCAT ADD_LIBS "\"ADDLIB:" ${ADD_LIBS_PART} "\"")
+# be careful about the escape char
+add_custom_target(gen_mri ALL
+COMMAND echo "CREATE" ${CXXSDK_NAME} > pack_cxxsdk.mri
+COMMAND echo -e ${ADD_LIBS} >> pack_cxxsdk.mri
+COMMAND echo -e \"SAVE\\nEND\" >> pack_cxxsdk.mri
+)
+
 add_custom_target(pack_cxxsdk ALL
-# write a file, better to debug
-# ar -M < file
+COMMAND rm -f ${CXXSDK_NAME}
+COMMAND ar -M < pack_cxxsdk.mri
+DEPENDS gen_mri
 )
 
 
