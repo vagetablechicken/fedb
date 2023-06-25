@@ -250,13 +250,18 @@ message(STATUS "Found ICU Libraries: ${ICU_LIBRARIES}")
 #         unified_diff_oss
 #         ret_check
 #         )
+
+find_library(zetasql_LIB zetasql)
+find_library(re2_LIB re2)
 set(ZETASQL_LIBS
-        zetasql
+        ${zetasql_LIB}
         # ${file_based_test_driver_LIBS}
         ${ABSL_LIBS}
-        re2
+        ${re2_LIB}
         ${ICU_LIBRARIES}
         )
+
+find_library(zookeeper_mt_LIB zookeeper_mt)
 
 if (TCMALLOC_ENABLE)
     set(CMAKE_EXE_LINKER_FLAGS "-fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free ${CMAKE_EXE_LINKER_FLAGS}")
