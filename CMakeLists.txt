@@ -195,7 +195,7 @@ set(LLVM_DIR "${CMAKE_PREFIX_PATH}/lib/cmake/llvm")
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
-llvm_map_components_to_libnames(LLVM_LIBS support core orcjit nativecodegen)
+llvm_map_components_to_libnames(LLVM_LIBS support core irreader orcjit nativecodegen)
 message(STATUS "Using LLVM components: ${LLVM_LIBS}")
 add_definitions(${LLVM_DEFINITIONS})
 
@@ -222,6 +222,7 @@ list(
         absl::random_random
         absl::strings
         absl::strings_internal
+        absl::str_format
         absl::synchronization
         absl::time
         absl::status

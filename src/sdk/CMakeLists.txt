@@ -310,7 +310,7 @@ set(CXXSDK_THIRDPARTY_LIBS )
 foreach(X IN LISTS ZETASQL_LIBS)
     get_lib_path(${X} Y)
     # message(STATUS "get ${X} path: ${Y}")
-    # to simplify, TODO we handle absl implicit link below(some absl lib can't get location by get_target_property), so no recursive get here
+    # to simplify, we handle absl implicit link below(some absl lib can't get location by get_target_property), so no recursive get here
     if(NOT "${Y}" STREQUAL "")
         list(APPEND CXXSDK_THIRDPARTY_LIBS ${Y})      
     endif()
@@ -318,6 +318,7 @@ endforeach()
 
 # 2. absl llvm libs(some libs needs to be linked explicitly)
 set(ABSL_LLVM_LIBS ${ABSL_LIBS} ${LLVM_LIBS}) # TODO LLVM miss some libs, add them here
+# set(ABSL_LLVM_LIBS ${LLVM_LIBS})
 # handle absl libs, need to recursively look up, target may need more deps
 foreach(X IN LISTS ABSL_LLVM_LIBS)
     set(_tgts "")
