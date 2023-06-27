@@ -458,6 +458,55 @@ try {
 }
 ```
 
+我们还提供了`SqlClusterExecutor::getCallablePreparedStmtBatch`，可以执行批量请求式查询。
+```java
+PreparedStatement pstmt = null;
+ResultSet resultSet = null;
+try {
+    pstmt = sqlExecutor.getCallablePreparedStmtBatch(db, deploymentName);
+    // 如果是执行deployment, 可以通过名字获取preparedstatement
+    // pstmt = sqlExecutor.getCallablePreparedStmt(db, deploymentName);
+    ResultSetMetaData metaData = pstmt.getMetaData();
+    // 执行request模式需要在RequestPreparedStatement设置一行请求数据
+    setData(pstmt, metaData);
+    // 调用executeQuery会执行这个select sql, 然后将结果放在了resultSet中
+    resultSet = pstmt.executeQuery();
+
+    Assert.assertTrue(resultSet.next());
+    Assert.assertEquals(resultSet.getMetaData().getColumnCount(), 3);
+    Assert.assertEquals(resultSet.getString(1), "bb");
+    Assert.assertEquals(resultSet.getInt(2), 24);
+    Assert.assertEquals(resultSet.getLong(3), 34);
+    Assert.assertFalse(resultSet.next());
+
+    // reuse way
+    for (int i = 0; i < 5; i++) {
+        setData(pstmt, metaData);
+        pstmt.executeQuery();
+        // skip result check
+    }
+} catch (SQLException e) {
+    e.printStackTrace();
+    Assert.fail();
+} finally {
+    try {
+        if (resultSet != null) {
+            // result用完之后需要close
+            resultSet.close();
+        }
+        if (pstmt != null) {
+            pstmt.close();
+        }
+    } catch (SQLException throwables) {
+        throwables.printStackTrace();
+    }
+}
+```
+
+```{caution}
+请注意区分`SqlClusterExecutor::getCallablePreparedStmt`和`SqlClusterExecutor::getRequestPreparedStmt`这两类，前者是执行已上线的Deployment，后者是执行SQL请求式查询（SQL不需要上线，也不是作为Deployment，不参与Deployment监控统计）。
+```
+
 ###  删除指定索引下某个 key 的所有数据
 
 通过 Java SDK 可以有以下两种方式删除数据:

@@ -21,7 +21,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.ArrayList;
@@ -64,6 +63,7 @@ public class App {
             demo.requestSelect();
             // 执行 deployment
             demo.executeDeployment();
+            demo.executeDeploymentBatch();
             demo.dropDeployment();
             // 删除表
             demo.dropTable();
@@ -302,6 +302,45 @@ public class App {
                 pstmt.executeQuery();
                 // skip result check
             }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            Assert.fail();
+        } finally {
+            try {
+                if (resultSet != null) {
+                    // result用完之后需要close
+                    resultSet.close();
+                }
+                if (pstmt != null) {
+                    pstmt.close();
+                }
+            } catch (SQLException throwables) {
+                throwables.printStackTrace();
+            }
+        }
+    }
+
+    private void executeDeploymentBatch() {
+        PreparedStatement pstmt = null;
+        ResultSet resultSet = null;
+        try {
+            pstmt = sqlExecutor.getCallablePreparedStmtBatch(db, deploymentName);
+            ResultSetMetaData metaData = pstmt.getMetaData();
+            // add batch
+            for (int i = 0; i < 5; i++) {
+                setData(pstmt, metaData);
+                pstmt.addBatch();
+            }
+            resultSet = pstmt.executeQuery();
+            // all result in one rs
+            for (int i = 0; i < 5; i++) {
+                Assert.assertTrue(resultSet.next());
+                Assert.assertEquals(resultSet.getMetaData().getColumnCount(), 3);
+                Assert.assertEquals(resultSet.getString(1), "bb");
+                Assert.assertEquals(resultSet.getInt(2), 24);
+                Assert.assertEquals(resultSet.getLong(3), 34);
+            }
+            Assert.assertFalse(resultSet.next());
         } catch (SQLException e) {
             e.printStackTrace();
             Assert.fail();

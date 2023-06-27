@@ -32,29 +32,6 @@ public class CallablePreparedStatementImpl extends CallablePreparedStatement {
     }
 
     @Override
-    public SQLResultSet executeQuery() throws SQLException {
-        checkClosed();
-        checkExecutorClosed();
-        dataBuild();
-        Status status = new Status();
-        com._4paradigm.openmldb.ResultSet resultSet = router.CallProcedure(db, spName, currentRow, status);
-        if (status.getCode() != 0 || resultSet == null) {
-            String msg = status.ToString();
-            status.delete();
-            if (resultSet != null) {
-                resultSet.delete();
-            }
-            throw new SQLException("call procedure fail, msg: " + msg);
-        }
-        status.delete();
-        SQLResultSet rs = new SQLResultSet(resultSet);
-        if (closeOnComplete) {
-            closed = true;
-        }
-        return rs;
-    }
-
-    @Override
     public QueryFuture executeQueryAsync(long timeOut, TimeUnit unit) throws SQLException {
         checkClosed();
         checkExecutorClosed();
