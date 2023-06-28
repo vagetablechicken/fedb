@@ -120,7 +120,7 @@ def insepct_online(args):
     assert not fails, f"unhealthy tables: {fails}"
     print(f"all tables are healthy")
 
-    if getattr(args, 'dist', False):
+    if getattr(args, "dist", False):
         table_checker = TableChecker(conn)
         table_checker.check_distribution(dbs=flags.FLAGS.db.split(","))
 
@@ -133,7 +133,9 @@ def inspect_offline(args):
     print(f"inspect {total} offline jobs")
     if num:
         failed_jobs_str = "\n".join(jobs)
-        raise AssertionError(f"{num} offline final jobs are failed\nfailed jobs:\n{failed_jobs_str}")
+        raise AssertionError(
+            f"{num} offline final jobs are failed\nfailed jobs:\n{failed_jobs_str}"
+        )
     print("all offline final jobs are finished")
 
 
@@ -144,7 +146,9 @@ def _get_jobs(states=None):
     total_num = len(jobs)
     # jobs sorted by id
     jobs.sort(key=lambda x: x[0])
-    show_jobs = [_format_job_row(row) for row in jobs if not states or row[2].lower() in states]
+    show_jobs = [
+        _format_job_row(row) for row in jobs if not states or row[2].lower() in states
+    ]
     return total_num, len(show_jobs), show_jobs
 
 
@@ -225,7 +229,13 @@ def static_check(args):
 
 
 def rpc(args):
+    connect = Connector()
+    status_checker = checker.StatusChecker(connect)
+
     host = args.host
+    if not host:
+        status_checker.check_components()
+        return
     operation = args.operation
     field = json.loads(args.field)
     rpc_service = RPC(host, operation, field)
@@ -271,41 +281,32 @@ def parse_arg(argv):
     online = inspect_sub.add_parser("online", help="only inspect online table.")
     online.set_defaults(command=insepct_online)
     online.add_argument(
-        "--dist",
-        action="store_true",
-        help="Inspect online distribution."
+        "--dist", action="store_true", help="Inspect online distribution."
     )
     # inspect offline
-    offline = inspect_sub.add_parser(
-        "offline", help="only inspect offline jobs."
-    )
+    offline = inspect_sub.add_parser("offline", help="only inspect offline jobs.")
     offline.set_defaults(command=inspect_offline)
     # inspect job
-    ins_job = inspect_sub.add_parser("job", help="show jobs by state, show joblog or parse joblog by id.")
+    ins_job = inspect_sub.add_parser(
+        "job", help="show jobs by state, show joblog or parse joblog by id."
+    )
     ins_job.set_defaults(command=inspect_job)
     ins_job.add_argument(
-        "--state",
-        default="all",
-        help="Specify which state offline jobs, split by ','"
+        "--state", default="all", help="Specify which state offline jobs, split by ','"
     )
-    ins_job.add_argument(
-        "--id",
-        help="inspect joblog by id"
-    )
+    ins_job.add_argument("--id", help="inspect joblog by id")
     ins_job.add_argument(
         "--detail",
         action="store_true",
-        help="show detailed joblog information, use with `--id`"
+        help="show detailed joblog information, use with `--id`",
     )
     ins_job.add_argument(
         "--conf-url",
         default="https://raw.githubusercontent.com/4paradigm/OpenMLDB/main/python/openmldb_tool/diagnostic_tool/common_err.yml",
-        help="url used to update the log parser configuration. If downloading is slow, you can try mirror source 'https://openmldb.ai/download/diag/common_err.yml'"
+        help="url used to update the log parser configuration. If downloading is slow, you can try mirror source 'https://openmldb.ai/download/diag/common_err.yml'",
     )
     ins_job.add_argument(
-        "--conf-update",
-        action="store_true",
-        help="update the log parser configuration"
+        "--conf-update", action="store_true", help="update the log parser configuration"
     )
 
     # sub test
@@ -341,10 +342,19 @@ def parse_arg(argv):
     # sub rpc
     rpc_parser = subparsers.add_parser(
         "rpc",
-        help="",
+        help="user-friendly rpc tool",
     )
     rpc_parser.add_argument(
-        "host"
+        "host",
+        nargs="?",
+        help=textwrap.dedent(
+            """ \
+        host name, if no value, print the component table. 
+        ns: nameserver(master only, no need to choose)
+        tablet:you can get from component table, e.g. the first tablet in table is tablet1
+        tm: taskmanager
+        """
+        ),
     )
     rpc_parser.add_argument(
         "operation",
@@ -357,7 +367,10 @@ def parse_arg(argv):
     )
     rpc_parser.add_argument(
         "--hint",
-        help=""
+        nargs="?",
+        const="all",
+        default="",
+        help="print rpc hint for one method, if no value, print all possible rpc methods",
     )
     rpc_parser.set_defaults(command=rpc)
 

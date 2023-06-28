@@ -23,9 +23,11 @@ from .connector import Connector
 
 class RPC:
     """rpc service"""
+
     def __init__(self, host, operation, field) -> None:
-        self.host = host
-        self.host, self.endpoint, self.service = self._get_endpoint_service(self.host)
+        self.host, self.endpoint, self.service = self._get_endpoint_service(
+            host.lower()
+        )
         self.operation = operation
         self.field = field
 
@@ -37,13 +39,15 @@ class RPC:
         return self.parse_html(r.text)
 
     def rpc_exec(self):
-        r = requests.post(f"http://{self.endpoint}/{self.service}/{self.operation}", json=self.field)
+        r = requests.post(
+            f"http://{self.endpoint}/{self.service}/{self.operation}", json=self.field
+        )
         return r.text
 
     def hint(self, info):
         dir_path = os.path.dirname(os.path.abspath(__file__))
         json_path = os.path.join(dir_path, "proto.json")
-        with open(json_path, 'r') as file:
+        with open(json_path, "r") as file:
             proto = json.load(file)
         result = self.search_in(proto["enum"], info)
         if result is None:
@@ -70,11 +74,14 @@ class RPC:
     def _get_endpoint_service(self, host):
         conn = Connector()
         components_map = StatusChecker(conn)._get_components()
-        if host[-1].isdigit():
-            num = int(host[-1]) - 1
-            host = host[:-1]
+        if host.startswith("tablet"):
+            num = int(host[6:]) - 1
+            host = "tablet"
         else:
+            assert host in ["ns", "tm"]
             num = 0
+            host = "nameserver" if host == "ns" else "taskmanager"
+        assert host in components_map, f"{host} not found in cluster"
         endpoint = components_map[host][num][0]
         host2service = {
             "nameserver": "NameServer",
@@ -85,5 +92,5 @@ class RPC:
         return host, endpoint, service
 
     def parse_html(self, html):
-        soup = BeautifulSoup(html, 'html.parser')
+        soup = BeautifulSoup(html, "html.parser")
         return soup.get_text("\n")
