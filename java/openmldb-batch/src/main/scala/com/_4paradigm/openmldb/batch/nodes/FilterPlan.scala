@@ -56,7 +56,8 @@ object FilterPlan {
       val regName = "SPARKFE_FILTER_CONDITION_" + node.filter().condition().fn_info().fn_name()
       try {
         var externalFunMap = Map[String, com._4paradigm.openmldb.proto.Common.ExternalFun]()
-        if (config.openmldbZkCluster.nonEmpty && config.openmldbZkRootPath.nonEmpty
+        val openmldbSession = ctx.getOpenmldbSession
+        if (ctx.getConf.openmldbZkCluster.nonEmpty && ctx.getConf.openmldbZkRootPath.nonEmpty
           && openmldbSession != null && openmldbSession.openmldbCatalogService != null) {
           externalFunMap = openmldbSession.openmldbCatalogService.getExternalFunctionsMap()
         }
@@ -68,7 +69,7 @@ object FilterPlan {
           moduleBroadcast = ctx.getSerializableModuleBuffer,
           hybridseJsdkLibraryPath = ctx.getConf.openmldbJsdkLibraryPath,
           ctx.getConf.enableUnsafeRowOptimization,
-          ctx.getConf.externalFunMap,
+          externalFunMap,
           ctx.getConf.taskmanagerExternalFunctionDir,
           ctx.getSparkSession.conf.get("spark.master").equalsIgnoreCase("yarn")
         )

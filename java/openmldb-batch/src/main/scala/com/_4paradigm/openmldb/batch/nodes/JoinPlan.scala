@@ -228,7 +228,7 @@ object JoinPlan {
 
     @transient private lazy val tls = new ThreadLocal[UnSafeJoinConditionUDFImpl]() {
       override def initialValue(): UnSafeJoinConditionUDFImpl = {
-        new UnSafeJoinConditionUDFImpl(ctx,
+        new UnSafeJoinConditionUDFImpl(
           functionName, inputSchemaSlices, outputSchema, moduleTag, moduleBroadcast, hybridseJsdkLibraryPath,
           isUnsafeRowOpt, externalFunMap, taskmanagerExternalFunctionDir, isYarnMode)
       }
