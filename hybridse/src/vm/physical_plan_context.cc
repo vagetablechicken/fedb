@@ -91,6 +91,7 @@ Status PhysicalPlanContext::InitFnDef(const ColumnProjects& projects, const Sche
     for (size_t i = 0; i < projects.size(); ++i) {
         type::ColumnDef column_def;
         column_def.set_name(projects.GetName(i));
+        LOG(INFO) << "Add column " << column_def.name();
         column_def.set_is_not_null(false);
 
         type::Type column_type;
@@ -126,6 +127,8 @@ Status PhysicalPlanContext::InitFnDef(const ColumnProjects& projects, const Sche
     std::string fn_name =
         "__internal_sql_codegen_" + std::to_string(codegen_func_id_counter_++);
     output_fn->SetFn(fn_name, resolved_func, schemas_ctx);
+    LOG(WARNING) << "Generate codegen function: " << fn_name << " with "
+              << projects.size() << " columns";
     if (has_agg) {
         output_fn->SetPrimaryFrame(projects.GetPrimaryFrame());
     }

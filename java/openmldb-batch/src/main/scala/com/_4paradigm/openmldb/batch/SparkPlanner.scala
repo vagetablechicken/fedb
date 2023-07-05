@@ -337,7 +337,7 @@ class SparkPlanner(session: SparkSession, config: OpenmldbBatchConfig, sparkAppN
     } else {
       logger.info("Disable window parallelization optimization, enable by setting openmldb.window.parallelization")
     }
-
+    logger.warn("0705 snapshot")
     try {
       sqlEngine = new SqlEngine(seqAsJavaList(dbs), engineOptions)
       val engine = sqlEngine.getEngine
@@ -369,9 +369,12 @@ class SparkPlanner(session: SparkSession, config: OpenmldbBatchConfig, sparkAppN
           logger.warn("Get driver so file path: " + driverSoFilePath)
 
           if (File(driverSoFilePath).exists) {
-            Engine.RegisterExternalFunction(functionName, returnDataType, functionProto.getReturnNullable,
+            val ret = Engine.RegisterExternalFunction(functionName, returnDataType, functionProto.getReturnNullable,
               argsDataType, functionProto.getArgNullable, functionProto.getIsAggregate,
               driverSoFilePath)
+            if (!ret.isOK) {
+                logger.warn("Register external function failed: " + functionName + ", " + ret.str)
+            }
           } else {
             logger.warn("The dynamic library file does not exit in " + driverSoFilePath)
           }

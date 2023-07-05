@@ -22,7 +22,8 @@ import com._4paradigm.hybridse.codec.RowView
 import com._4paradigm.hybridse.sdk.{HybridSeException, JitManager, SerializableByteBuffer, UnsupportedHybridSeException}
 import com._4paradigm.hybridse.node.{BinaryExpr, ExprListNode, ExprType, FnOperator, JoinType}
 import com._4paradigm.hybridse.vm.{CoreAPI, HybridSeJitWrapper, PhysicalJoinNode}
-import com._4paradigm.openmldb.batch.utils.{ExpressionUtil, HybridseUtil, SparkColumnUtil, SparkRowUtil, SparkUtil}
+import com._4paradigm.openmldb.batch.utils.{ExpressionUtil, ExternalUdfUtil, HybridseUtil, SparkColumnUtil,
+  SparkRowUtil, SparkUtil}
 import com._4paradigm.openmldb.batch.{PlanContext, SparkInstance, SparkRowCodec}
 import com._4paradigm.openmldb.sdk.impl.SqlClusterExecutor
 import org.apache.spark.sql.types.StructType
@@ -111,9 +112,15 @@ object JoinPlan {
       if (ctx.getConf.enableJoinWithSparkExpr) {
         joinConditions += ExpressionUtil.recursiveGetSparkColumnFromExpr(filter.condition(), node, leftDf, rightDf,
           hasIndexColumn)
-        logger.info("Generate spark join conditions: " + joinConditions)
+        logger.warn("Generate spark join conditions: " + joinConditions)
       } else { // Disable join with native expression, use encoder/decoder and jit function
         val regName = "SPARKFE_JOIN_CONDITION_" + filter.fn_info().fn_name()
+        var externalFunMap = Map[String, com._4paradigm.openmldb.proto.Common.ExternalFun]()
+        val openmldbSession = ctx.getOpenmldbSession
+        if (ctx.getConf.openmldbZkCluster.nonEmpty && ctx.getConf.openmldbZkRootPath.nonEmpty
+          && openmldbSession != null && openmldbSession.openmldbCatalogService != null) {
+          externalFunMap = openmldbSession.openmldbCatalogService.getExternalFunctionsMap()
+        }
         val conditionUDF = new JoinConditionUDF(
           functionName = filter.fn_info().fn_name(),
           inputSchemaSlices = inputSchemaSlices,
@@ -121,7 +128,10 @@ object JoinPlan {
           moduleTag = ctx.getTag,
           moduleBroadcast = ctx.getSerializableModuleBuffer,
           hybridseJsdkLibraryPath = ctx.getConf.openmldbJsdkLibraryPath,
-          ctx.getConf.enableUnsafeRowOptimization
+          ctx.getConf.enableUnsafeRowOptimization,
+          externalFunMap,
+          ctx.getConf.taskmanagerExternalFunctionDir,
+          ctx.getSparkSession.conf.get("spark.master").equalsIgnoreCase("yarn")
         )
         spark.udf.register(regName, conditionUDF)
 
@@ -140,6 +150,8 @@ object JoinPlan {
         joinConditions += functions.callUDF(regName, allColWrap)
       }
 
+    } else {
+        logger.warn("No extra join condition")
     }
 
     if (joinConditions.isEmpty) {
@@ -208,19 +220,28 @@ object JoinPlan {
                          moduleTag: String,
                          moduleBroadcast: SerializableByteBuffer,
                          hybridseJsdkLibraryPath: String,
-                         isUnsafeRowOpt: Boolean
+                         isUnsafeRowOpt: Boolean,
+                         externalFunMap: Map[String, com._4paradigm.openmldb.proto.Common.ExternalFun],
+                         taskmanagerExternalFunctionDir: String,
+                         isYarnMode: Boolean
                         ) extends Function1[Row, Boolean] with Serializable {
 
     @transient private lazy val tls = new ThreadLocal[UnSafeJoinConditionUDFImpl]() {
       override def initialValue(): UnSafeJoinConditionUDFImpl = {
-        new UnSafeJoinConditionUDFImpl(
+        new UnSafeJoinConditionUDFImpl(ctx,
           functionName, inputSchemaSlices, outputSchema, moduleTag, moduleBroadcast, hybridseJsdkLibraryPath,
-          isUnsafeRowOpt)
+          isUnsafeRowOpt, externalFunMap, taskmanagerExternalFunctionDir, isYarnMode)
       }
     }
 
     override def apply(row: Row): Boolean = {
-      tls.get().apply(row)
+      try{
+        tls.get().apply(row)
+      }catch {
+        case e:Exception =>
+          e.printStackTrace()
+          throw e
+      }
     }
   }
 
@@ -230,8 +251,12 @@ object JoinPlan {
                                    moduleTag: String,
                                    moduleBroadcast: SerializableByteBuffer,
                                    openmldbJsdkLibraryPath: String,
-                                   isUnafeRowOpt: Boolean
+                                   isUnafeRowOpt: Boolean,
+                                   externalFunMap: Map[String, com._4paradigm.openmldb.proto.Common.ExternalFun],
+                                   taskmanagerExternalFunctionDir: String,
+                                   isYarnMode: Boolean
                                   ) extends Function1[Row, Boolean] with Serializable {
+    logger.warn(s"Init UnSafeJoinConditionUDFImpl for $functionName, moduleTag $moduleTag")
     private val jit = initJIT()
 
     private val fn: Long = jit.FindFunction(functionName)
@@ -244,11 +269,15 @@ object JoinPlan {
     private val outView: RowView = new RowView(outputSchema)
 
     def initJIT(): HybridSeJitWrapper = {
+      // before jit, more init
+      SqlClusterExecutor.initJavaSdkLibrary(openmldbJsdkLibraryPath)
+
+      // Load external udf if exists
+      ExternalUdfUtil.executorRegisterExternalUdf(externalFunMap, taskmanagerExternalFunctionDir, isYarnMode)
       // ensure worker native
       val buffer = moduleBroadcast.getBuffer
-      SqlClusterExecutor.initJavaSdkLibrary(openmldbJsdkLibraryPath)
       JitManager.initJitModule(moduleTag, buffer, isUnafeRowOpt)
-
+      logger.warn("init jit in join plan done")
       JitManager.getJit(moduleTag)
     }
 

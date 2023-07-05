@@ -56,6 +56,7 @@ public class JitManager {
             }
             HybridSeJitWrapper.InitJitSymbols(jit);
             jits.put(tag, jit);
+            logger.warn("Create jit with tag:\n" + tag);
         }
         return jits.get(tag);
     }

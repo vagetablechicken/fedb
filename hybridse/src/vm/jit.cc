@@ -140,6 +140,8 @@ bool HybridSeJit::AddSymbol(::llvm::orc::JITDylib& jd,
     ::llvm::orc::SymbolMap symbol_map;
     symbol_map.insert(std::make_pair(mi(symbol), jit_symbol));
     auto err = jd.define(::llvm::orc::absoluteSymbols(symbol_map));
+    if (fn_name.find("combin") != std::string::npos)
+        LOG(WARNING) << "add symbol " << fn_name << " with addr " << jit_symbol.getAddress();
     if (err) {
         LOG(WARNING) << "fail to add symbol " << fn_name;
         return false;
@@ -189,12 +191,21 @@ RawPtrHandle HybridSeLlvmJitWrapper::FindFunction(const std::string& funcname) {
     if (funcname == "") {
         return 0;
     }
+    LOG(WARNING) << "find function " << funcname;
     ::llvm::Expected<::llvm::JITEvaluatedSymbol> symbol(jit_->lookup(funcname));
     ::llvm::Error e = symbol.takeError();
     if (e) {
-        LOG(WARNING) << "fail to resolve fn address of" << funcname << ": "
+        LOG(WARNING) << "fail to resolve fn address of " << funcname << ": "
                      << LlvmToString(e);
         return 0;
+    }
+    if (symbol->getAddress() == 0) {
+        LOG(WARNING) << "fail to resolve fn address of " << funcname
+                     << ": address is null";
+        return 0;
+    } else {
+        LOG(WARNING) << "resolve fn address of " << funcname << " to "
+                     << symbol->getAddress();
     }
     return reinterpret_cast<const int8_t*>(symbol->getAddress());
 }
