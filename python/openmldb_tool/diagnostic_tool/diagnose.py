@@ -31,7 +31,6 @@ from diagnostic_tool.collector import Collector
 import diagnostic_tool.server_checker as checker
 from diagnostic_tool.table_checker import TableChecker
 from diagnostic_tool.parser import LogParser
-from diagnostic_tool.rpc import RPC
 
 from absl import app
 from absl import flags
@@ -235,14 +234,56 @@ def rpc(args):
     host = args.host
     if not host:
         status_checker.check_components()
+        print(
+            """choose one host to connect, e.g. "openmldb_tool rpc ns".        
+        ns: nameserver(master only, no need to choose)
+        tablet:you can get from component table, e.g. the first tablet in table is tablet1
+        tm: taskmanager"""
+        )
         return
+    from diagnostic_tool.rpc import RPC
+
+    # use status connction to get version
+    conns_with_version = {
+        endpoint: version
+        for endpoint, version, _, _ in status_checker.check_connection()
+    }
+    _, endpoint, _ = RPC.get_endpoint_service(host)
+    proto_version = conns_with_version[endpoint]
+    print(f"server proto version is {proto_version}")
+
     operation = args.operation
     field = json.loads(args.field)
-    rpc_service = RPC(host, operation, field)
+    rpc_service = RPC(host)
     if args.hint:
-        rpc_service.hint(args.hint)
+        pb2_dir = flags.FLAGS.pbdir
+        print(f"hint use pb2 files from {pb2_dir}")
+        # check about rpc depends proto compiled dir
+        if (
+            not os.path.isdir(pb2_dir)
+            or len([pb for pb in os.listdir(pb2_dir) if pb.endswith("_pb2.py")]) < 8
+        ):
+            print(f"{pb2_dir} is broken, mkdir and download")
+            os.system(f"mkdir -p {pb2_dir}")
+            import tarfile
+            import requests
+
+            # pb2.tar has no dir, extract to pb2_dir
+            url = "https://openmldb.ai/download/diag/pb2.tgz"
+            r = requests.get(url)
+            with open(f"{pb2_dir}/pb2.tgz", "wb") as f:
+                f.write(r.content)
+
+            with tarfile.open(f"{pb2_dir}/pb2.tgz", "r:gz") as tar:
+                tar.extractall(pb2_dir)
+        rpc_service.hint(args.operation)
         return
-    rpc_service()
+    if not operation:
+        print(
+            "choose one operation, e.g. `openmldb_tool rpc ns ShowTable`, --hint for methods list or one method help"
+        )
+        return
+    rpc_service(operation, field)
 
 
 def parse_arg(argv):
@@ -364,13 +405,12 @@ def parse_arg(argv):
     rpc_parser.add_argument(
         "--field",
         default="{}",
+        help='json format, e.g. \'{"db":"db1","table":"t1"}\', default is \'{}\'',
     )
     rpc_parser.add_argument(
         "--hint",
-        nargs="?",
-        const="all",
-        default="",
-        help="print rpc hint for one method, if no value, print all possible rpc methods",
+        action="store_true",
+        help="print rpc hint for current operation(rpc method), if no operation, print all possible rpc methods",
     )
     rpc_parser.set_defaults(command=rpc)
 
