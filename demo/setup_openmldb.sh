@@ -18,7 +18,7 @@
 set -eE -x
 VERSION="$1"
 if [[ -z ${VERSION} ]]; then
-    VERSION=0.6.3
+    VERSION=0.8.2
 fi
 echo "version: ${VERSION}"
 
@@ -55,7 +55,6 @@ tar xzf "${SPARK_TAR}" -C "${WORKDIR}/openmldb/spark-3.2.1-bin-openmldbspark" --
 pushd "${WORKDIR}/openmldb"
 ln -s "${WORKDIR}/zookeeper-3.4.14" zookeeper
 ln -s spark-3.2.1-bin-openmldbspark spark
-rm -f spark-3.2.1-bin-openmldbspark/jars/curator-* # curator NoSuchMethodError error
 popd
 
 rm -f ./*.tar.gz
