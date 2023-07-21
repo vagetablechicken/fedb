@@ -42,11 +42,12 @@ services:
         # taxi use case test
         cd /work/taxi-trip
         /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < taxi.sql
-        pip uninstall sklearn -y
         python3 train.py /tmp/feature_data /tmp/model.txt || exit -1
         # port 8887
         ./start_predict_server.sh 127.0.0.1:9080 /tmp/model.txt
-        python3 predict.py || (cat /tmp/p.log && exit -1)
+        # why can't work?
+        aa || ( echo "aa failed" && exit -1 )
+        python3 predict.py || ( cat /tmp/p.log && exit -1 )
 
         # talkingdata demo test
         cd /work/talkingdata
