@@ -22,22 +22,22 @@ services:
         # quickstart test
         cd /work/quick_start
         /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < cluster_quickstart.sql
-        pytho1n3 request_test.py
+        python3 request_test.py || exit -1
 
         # java/python sdk, no jar in ci, so we should check the java result manually
         cd /work/java_quickstart
         # if no jar, download it
         if [ ! -f demo-1.0-SNAPSHOT.jar ]; then
-            curl -SLO https://openmldb.ai/download/demo/demo-1.0-SNAPSHOT.jar
+            curl -SLO https://openmldb.ai/download/testing/demo-1.0-SNAPSHOT.jar
         fi
         java -cp demo-1.0-SNAPSHOT.jar com.openmldb.demo.App
         cd /work/python_quickstart
         python3 demo.py || exit -1
         cd /work/cxx_quickstart
         if [ ! -f demo ]; then
-            curl -SLO https://openmldb.ai/download/demo/demo
+            curl -SLO https://openmldb.ai/download/testing/demo
         fi
-        ./demo || exit -1
+        ./demo
 
         # taxi use case test
         cd /work/taxi-trip
