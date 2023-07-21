@@ -42,7 +42,7 @@ services:
         # taxi use case test
         cd /work/taxi-trip
         /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < taxi.sql
-        pip uninstall lightgbm -y
+        pip uninstall sklearn -y
         python3 train.py /tmp/feature_data /tmp/model.txt || exit -1
         # port 8887
         ./start_predict_server.sh 127.0.0.1:9080 /tmp/model.txt
@@ -67,7 +67,7 @@ services:
         curl -SLO https://openmldb.ai/download/self_host_hadoop_config/libtest_udf.so 
         cp libtest_udf.so /work/openmldb/udf/
         cp libtest_udf.so /work/openmldb/taskmanager/bin/udf/
-        # TODO
+        # TODO and move some tests to black-box test(add some user cmd), not in openmldb_tool, but openmldb_tool can get and run it?
         
         cd /work
         openmldb_tool status --diff -f /work/openmldb/conf/hosts 
