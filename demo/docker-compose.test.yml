@@ -36,6 +36,7 @@ services:
         if [ ! -f demo ]; then
             curl -SLO https://openmldb.ai/download/testing/demo
         fi
+        chmod +x demo
         ./demo
 
         # taxi use case test
