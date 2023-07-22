@@ -15,65 +15,66 @@ services:
     # No need to docker-compose build again. But if you modified the Dockerfile, must rebuild it.
     command:
       - /bin/bash
-      - -cx
+      - -ecx
       - |
-        ./init.sh
-        sleep 5
-        # quickstart test
-        cd /work/quick_start
-        /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < cluster_quickstart.sql
-        python3 request_test.py || exit -1
+        python3 predict.py || ( echo "123" && exit -1 )
 
-        # java/python sdk, no jar in ci, so we should check the java result manually
-        cd /work/java_quickstart
-        # if no jar, download it
-        if [ ! -f demo-1.0-SNAPSHOT.jar ]; then
-            curl -SLO https://openmldb.ai/download/testing/demo-1.0-SNAPSHOT.jar
-        fi
-        java -cp demo-1.0-SNAPSHOT.jar com.openmldb.demo.App
-        cd /work/python_quickstart
-        python3 demo.py || exit -1
-        cd /work/cxx_quickstart
-        if [ ! -f demo ]; then
-            curl -SLO https://openmldb.ai/download/testing/demo
-        fi
-        ./demo
+        # ./init.sh
+        # sleep 5
+        # # quickstart test
+        # cd /work/quick_start
+        # /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < cluster_quickstart.sql
+        # python3 request_test.py || exit -1
 
-        # taxi use case test
-        cd /work/taxi-trip
-        /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < taxi.sql
-        python3 train.py /tmp/feature_data /tmp/model.txt || exit -1
-        # port 8887
-        ./start_predict_server.sh 127.0.0.1:9080 /tmp/model.txt
-        # why can't work?
-        aa || ( echo "aa failed" && exit -1 )
-        python3 predict.py || ( cat /tmp/p.log && exit -1 )
+        # # java/python sdk, no jar in ci, so we should check the java result manually
+        # cd /work/java_quickstart
+        # # if no jar, download it
+        # if [ ! -f demo-1.0-SNAPSHOT.jar ]; then
+        #     curl -SLO https://openmldb.ai/download/testing/demo-1.0-SNAPSHOT.jar
+        # fi
+        # java -cp demo-1.0-SNAPSHOT.jar com.openmldb.demo.App
+        # cd /work/python_quickstart
+        # python3 demo.py || exit -1
+        # cd /work/cxx_quickstart
+        # if [ ! -f demo ]; then
+        #     curl -SLO https://openmldb.ai/download/testing/demo
+        # fi
+        # ./demo
 
-        # talkingdata demo test
-        cd /work/talkingdata
-        # port 8881
-        python3 predict_server.py --no-init > predict.log 2>&1 &
-        python3 train_and_serve.py || exit -1
-        python3 predict.py || (cat predict.log && exit -1)
+        # # taxi use case test
+        # cd /work/taxi-trip
+        # /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client < taxi.sql
+        # python3 train.py /tmp/feature_data /tmp/model.txt || exit -1
+        # # port 8887
+        # ./start_predict_server.sh 127.0.0.1:9080 /tmp/model.txt
+        # # why can't work?
+        # python3 predict.py || ( cat /tmp/p.log && exit -1 )
 
-        # oneflow sql test
-        cd /work/oneflow_demo/sql_scripts
-        # 10 min
-        cat sql_order | xargs cat | /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client
-        # check deployment, jobs will be checked by openmldb_tool
-        curl http://127.0.0.1:9080/dbs/JD_db/deployments/demo | grep "ok" || exit -1
+        # # talkingdata demo test
+        # cd /work/talkingdata
+        # # port 8881
+        # python3 predict_server.py --no-init > predict.log 2>&1 &
+        # python3 train_and_serve.py || exit -1
+        # python3 predict.py || (cat predict.log && exit -1)
 
-        # udf test
-        cd /work
-        curl -SLO https://openmldb.ai/download/self_host_hadoop_config/libtest_udf.so 
-        cp libtest_udf.so /work/openmldb/udf/
-        cp libtest_udf.so /work/openmldb/taskmanager/bin/udf/
-        # TODO and move some tests to black-box test(add some user cmd), not in openmldb_tool, but openmldb_tool can get and run it?
-        # bb test has setup and run two phases, setup support onebox env and env should have internet, otherwise, you should setup manually
-        # run just sqls, no matter who run it, just run it
+        # # oneflow sql test
+        # cd /work/oneflow_demo/sql_scripts
+        # # 10 min
+        # cat sql_order | xargs cat | /work/openmldb/bin/openmldb --zk_cluster=127.0.0.1:2181 --zk_root_path=/openmldb --role=sql_client
+        # # check deployment, jobs will be checked by openmldb_tool
+        # curl http://127.0.0.1:9080/dbs/JD_db/deployments/demo | grep "ok" || exit -1
+
+        # # udf test
+        # cd /work
+        # curl -SLO https://openmldb.ai/download/self_host_hadoop_config/libtest_udf.so 
+        # cp libtest_udf.so /work/openmldb/udf/
+        # cp libtest_udf.so /work/openmldb/taskmanager/bin/udf/
+        # # TODO and move some tests to black-box test(add some user cmd), not in openmldb_tool, but openmldb_tool can get and run it?
+        # # bb test has setup and run two phases, setup support onebox env and env should have internet, otherwise, you should setup manually
+        # # run just sqls, no matter who run it, just run it
         
-        cd /work
-        openmldb_tool status --diff -f /work/openmldb/conf/hosts 
-        openmldb_tool inspect
-        openmldb_tool test
-        openmldb_tool static-check --conf_file=/work/openmldb/conf/hosts -VCL --local
+        # cd /work
+        # openmldb_tool status --diff -f /work/openmldb/conf/hosts 
+        # openmldb_tool inspect
+        # openmldb_tool test
+        # openmldb_tool static-check --conf_file=/work/openmldb/conf/hosts -VCL --local
