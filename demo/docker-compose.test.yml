@@ -5,12 +5,11 @@ services:
       context: .
     volumes:
       - ./jd-recommendation:/work/oneflow_demo
-      - ./job_checker.py:/work/job_checker.py
       - ./quick_start:/work/quick_start
       # no mvn in image, so build the java demo outside and mount the jar
-      - ./java_quickstart/demo/target/demo-1.0-SNAPSHOT.jar:/work/java_quickstart/demo-1.0-SNAPSHOT.jar
+      - ./java_quickstart/demo/target:/work/java_quickstart
       - ./python_quickstart:/work/python_quickstart
-      - ./cxx_quickstart/demo:/work/cxx_quickstart/demo
+      - ./cxx_quickstart:/work/cxx_quickstart
     # You can add `cat <log_file>` here(e.g. `cat /work/openmldb/taskmanager/bin/logs/job_1_error.log`, cat `predict.log`), to check the log info. 
     # No need to docker-compose build again. But if you modified the Dockerfile, must rebuild it.
     command:
@@ -52,7 +51,7 @@ services:
         # port 8881
         python3 predict_server.py --no-init > predict.log 2>&1 &
         python3 train_and_serve.py || exit -1
-        python3 predict.py || (cat predict.log && exit -1)
+        python3 predict.py || ( cat predict.log && exit -1 )
 
         # oneflow sql test
         cd /work/oneflow_demo/sql_scripts
