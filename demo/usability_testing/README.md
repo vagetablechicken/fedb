@@ -4,7 +4,7 @@
 
 This directory contains the black-box testing for the project. The tests are sql scripts that are run against the database. But some of the tests need setup and the setup may can not be done automatically.
 
-Notice that, we need to check the result manually, grep `ERROR` in sql results and check the output result data, **not only check job status**. We may support run scripts by diag tool, and it will check the result automatically.
+Notice that, we need to check the result manually, grep `ERROR` in sql results and check the output result data, **not only check job status**. We may support run scripts by diag tool, and it will check the result automatically(add mark to let diag tool sleep for some async ops).
 
 ## Setup data
 

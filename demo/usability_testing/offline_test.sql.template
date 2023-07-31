@@ -2,7 +2,7 @@ create database if not exists offline_test;
 use offline_test;
 drop table if exists t1;
 create table t1(c1 int, c2 string);
-/* offline load test */
+/* offline load test, still use getDeepCopy when drop soft, so it'll get ERROR Get unsupported file path, fix later */
 set @@execute_mode='offline';
 set @@sync_job=true;
 -- deep copy
