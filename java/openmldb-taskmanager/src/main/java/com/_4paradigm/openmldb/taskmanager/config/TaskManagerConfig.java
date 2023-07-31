@@ -276,4 +276,6 @@ public class TaskManagerConfig {
         parse();
         return SPARK_MASTER.equals("yarn") || SPARK_MASTER.equals("yarn-cluster");
     }
+
+    // TODO: FirstNonEmpty function
 }

@@ -36,8 +36,11 @@ object SparkJobManager {
    * @return the SparkLauncher object
    */
   def createSparkLauncher(mainClass: String): SparkLauncher = {
-
-    val launcher = new SparkLauncher()
+    val env: java.util.Map[String, String] = new java.util.HashMap[String, String]
+    env.put("HADOOP_CONF_DIR", TaskManagerConfig.HADOOP_CONF_DIR) // test taskmanager restart
+    // env.put("YARN_CONF_DIR", TaskManagerConfig.HADOOP_CONF_DIR)
+    // env.put("HADOOP_USER_NAME", "huangwei")
+    val launcher = new SparkLauncher(env)
       .setAppResource(TaskManagerConfig.BATCHJOB_JAR_PATH)
       .setMainClass(mainClass)
 
