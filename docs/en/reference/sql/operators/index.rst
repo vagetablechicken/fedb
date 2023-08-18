@@ -1,5 +1,5 @@
 =============================
-Expressions, Functions, and Operations
+Expressions and Operations
 =============================
 
 
@@ -7,4 +7,3 @@ Expressions, Functions, and Operations
     :maxdepth: 1
 
     operators
-    Files/udfs_8h
