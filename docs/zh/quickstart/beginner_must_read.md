@@ -42,9 +42,16 @@ docker创建OpenMLDB见[快速上手](./openmldb_quickstart.md)，请注意文�
 csv文件格式有诸多不便，更推荐使用parquet格式，需要OpenMLDB集群版并启动taskmanager组件。
 ```
 
-## SQL限制
+## SQL
 
 OpenMLDB并不完全兼容标准SQL。所以，部分SQL执行会得不到预期结果。如果发现SQL执行不符合预期，请先查看下SQL是否满足[功能边界](./function_boundary.md)。
+
+## SQL编写指南
+
+首先，OpenMLDB SQL 通常是使用WINDOW，LAST JOIN，WINDOW UNION三种子句，可以跟随教程"基于 SQL 的特征开发"[(上)](../tutorial/tutorial_sql_1.md)[(下)](../tutorial/tutorial_sql_2.md)进行学习。
+
+如果使用WHERE，GROUP BY，ORDER BY等子句，需要注意限制条件。在每个子句的详细文档中都有具体的说明，比如[`HAVING`子句](../openmldb_sql/dql/HAVING_CLAUSE.md)在在线请求模式中不支持。翻阅[dql](../openmldb_sql/dql)目录，或使用搜索功能，可以快速找到子句的详细文档。
+
 
 ## SQL执行
 
