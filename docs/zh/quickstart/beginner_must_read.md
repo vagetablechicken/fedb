@@ -1,14 +1,14 @@
 # 上手必读
 
-由于OpenMLDB是分布式系统，多种模式，客户端丰富，初次使用可能会有很多疑问，或者遇到一些运行、使用问题，本文从新手使用的角度，讲解如何进行诊断调试，需求帮助时如何提供有效信息给技术人员等等。
+由于OpenMLDB是分布式系统，多种模式，客户端丰富，初次使用可能会有很多疑问，或者遇到一些运行、使用问题，本文从新手使用的角度，讲解如何进行诊断调试，需要帮助时如何提供有效信息给技术人员等等。
 
-## 创建OpenMLDB与连接
+## OpenMLDB集群管理
 
 首先，我们建议不熟悉分布式多进程管理的新手使用docker创建OpenMLDB，方便快速上手。熟悉OpenMLDB各组件之后，再尝试分布式部署。
 
 docker创建OpenMLDB见[快速上手](./openmldb_quickstart.md)，请注意文档中有两个版本，单机版和集群版。请清楚自己要创建哪个版本，不要混合使用。
 
-启动成功的标准是可以使用CLI连接上OpenMLDB服务端（即使用`/work/openmldb/bin/openmldb`连接OpenMLDB，单机或集群均可以通过CLI连接），并且执行`show components;`可以看到OpenMLDB服务端组件的运行情况。
+启动成功的标准是可以使用CLI连接上OpenMLDB服务端（即使用`/work/openmldb/bin/openmldb`连接OpenMLDB，单机或集群均可以通过CLI连接），并且执行`show components;`可以看到OpenMLDB服务端组件的运行情况。推荐使用[诊断工具](../maintain/diagnose.md)，执行status和inspect，可以得到更可靠的诊断结果。
 
 如果CLI无法连接OpenMLDB，请先确认进程是否运行正常，可以通过`ps f|grep bin/openmldb`确认nameserver和tabletserver进程，集群版还需要通过`ps f | grep zoo.cfg`来确认zk服务，`ps f | grep TaskManagerServer`来确认taskmanager进程。
 
@@ -17,6 +17,26 @@ docker创建OpenMLDB见[快速上手](./openmldb_quickstart.md)，请注意文�
 ```{seealso}
 如果我们还需要OpenMLDB服务端的配置和日志，可以使用诊断工具获取，见[下文](#提供配置与日志获得技术支持)。
 ```
+
+### 运维
+
+集群各组件进程启动后，在使用过程中可能遇到各种变化，比如服务进程意外退出，需要重启服务进程，或者需要扩容服务进程。
+
+如果你需要保留已有的在线表，**不要主动地kill全部Tablet再重启**，保证Tablet只有单台在上下线。`stop-all.sh`和`start-all.sh`脚本是给快速重建集群用的，可能会导致在线表数据恢复失败，**不保证能修复**。
+
+当你发现进程变化或者操作其变化后，需要使用诊断工具进行诊断，确认集群状态是否正常。最常用的两个命令是：
+```bash
+openmldb_tool status # --diff hosts 可检查TaskManager等是否掉线，当然，你也可以手动判断
+openmldb_tool inspect online
+```
+
+如果诊断出server offline，或是TaskManager等掉线，需要先尝试启动回来。如果启动失败，请查看对应日志，提供错误信息。
+
+如果server都在线，但inspect online发现online表不正常。需要从以下几点排查：
+- 是否是手动操作了stop all & start all，日志中是否包含`recovering data`信息？
+  - 如果过程中已经尝试过`recovering data`，但inspect结果仍然不正常，手动恢复的可能性较小 TODO
+  - 如果没有尝试过`recovering data`，参考下一步。
+- 尝试`recovering data`，命令参考[OpenMLDB运维工具](../maintain/openmldb_ops.md)。如果仍然不正常，请提供日志。
 
 ## 源数据
 
@@ -46,12 +66,23 @@ csv文件格式有诸多不便，更推荐使用parquet格式，需要OpenMLDB�
 
 OpenMLDB并不完全兼容标准SQL。所以，部分SQL执行会得不到预期结果。如果发现SQL执行不符合预期，请先查看下SQL是否满足[功能边界](./function_boundary.md)。
 
-## SQL编写指南
+### SQL编写指南
 
-首先，OpenMLDB SQL 通常是使用WINDOW，LAST JOIN，WINDOW UNION三种子句，可以跟随教程"基于 SQL 的特征开发"[(上)](../tutorial/tutorial_sql_1.md)[(下)](../tutorial/tutorial_sql_2.md)进行学习。
+首先，OpenMLDB SQL 通常是使用`WINDOW`（包括`WINDOW UNION`），`LAST JOIN`子句，它们能保证在任何模式下使用。可以跟随教程"基于 SQL 的特征开发"[(上)](../tutorial/tutorial_sql_1.md)[(下)](../tutorial/tutorial_sql_2.md)进行学习。
 
-如果使用WHERE，GROUP BY，ORDER BY等子句，需要注意限制条件。在每个子句的详细文档中都有具体的说明，比如[`HAVING`子句](../openmldb_sql/dql/HAVING_CLAUSE.md)在在线请求模式中不支持。翻阅[dql](../openmldb_sql/dql)目录，或使用搜索功能，可以快速找到子句的详细文档。
+如果使用`WHERE`，`WITH`，`HAVING`等子句，需要注意限制条件。在每个子句的详细文档中都有具体的说明，比如[`HAVING`子句](../openmldb_sql/dql/HAVING_CLAUSE.md)在在线请求模式中不支持。翻阅OpenMLDB SQL的DQL目录，或使用搜索功能，可以快速找到子句的详细文档。
 
+在不熟悉OpenMLDB SQL的情况下，我们建议从下到上编写SQL，确保每个子句都能通过，再逐步组合成完整的SQL。
+
+JAVA SDK中有静态方法可用，CLI目前没有太直接的方法，待改进。
+TODO deploy bias example
+#### 在线请求模式
+
+如果你想要SQL能在“在线请求模式”中正确运行，较为方便的做法是，在CLI等客户端中，使用“在线预览模式”去实际运行SQL。主表中的每一行将被当作请求行，进行计算，并返回结果。这样你可以确认计算是否符合预期。
+
+todo sql怎么调试
+
+但要确保SQL可以在此模式下工作，还是需要`DEPLOY <name> <SQL>`。但如果你并不想直接上线，可以使用`EXPLAIN <SQL>`来确认SQL是否可以上线。但目前`EXPLAIN`的检查较为严格，可能因为当前表没有合适的索引，而判定SQL无法在“在线请求模式”中执行（因为无索引而无法保证实时性能，所以被拒绝）。`DEPLOY <name> <SQL>`是最完备的，`DEPLOY`将自动索引创建，也会检查SQL的正确性。
 
 ## SQL执行
 
@@ -88,7 +119,7 @@ create table t1(c1 int;
 
 #### 在线
 
-集群版在线模式下，我们通常只推荐使用`DEPLOY`创建deployment，HTTP访问APIServer执行deployment做实时特征计算。在CLI或其他客户端中，直接在在线中进行SELECT查询，称为“在线预览”。在线预览有诸多限制，详情请参考[功能边界-集群版在线预览模式](../function_boundary.md#集群版在线预览模式)，请不要执行不支持的SQL。
+集群版在线模式下，我们通常只推荐使用`DEPLOY`创建deployment，HTTP访问APIServer执行deployment做实时特征计算。在CLI或其他客户端中，直接在在线中进行SELECT查询，称为“在线预览”。在线预览有诸多限制，详情请参考[功能边界-集群版在线预览模式](./function_boundary.md#集群版在线预览模式)，请不要执行不支持的SQL。
 
 ### 提供复现脚本
 
