@@ -111,7 +111,7 @@ SELECT select_expr [,select_expr...], window_function_name(expr) OVER window_nam
     -rows_range：例如，10s preceding and current row的时间窗口，就要抛弃10s以外的数据行（第10s包含在窗口内），也包括current row，于是窗口只会出现order key值在`[current_row_order_key - 10s, current_row_order_key]`范围内的数据行。
 
 ```{note}
-窗口划分范围，仅与order by列相关。如果认为窗口内行数或具体某数据不符合预期范围，一般是窗口写法的误解，极小概率是SQL引擎计算有误。请以某一个partition key为例，分步检查表的数据：
+窗口划分范围，仅与order by列相关。如果认为窗口内行数或具体某数据不符合预期范围，一般是窗口写法的误解，极小概率是SQL引擎计算有误。请以某一个partition key为例，分步检查表的数据（以下操作都是在线模式）：
 - 提取与该key相等的所有数据。可以使用`select * from table where partition_key = xxx`来提取，或使用源数据文件，通过pandas/spark等工具提取。
 - 再按order by列排序，这类似于window设置窗口为unbounded preceding and current row。此处，可以将手动处理的数据和OpenMLDB的unbounded window计算结果进行对比。
   - 由于OpenMLDB只支持在窗口内聚合，很难看到窗口的数据全貌，而且窗口内数据较多时，查看全部也是很难的。通常是使用count/min/max/lag等聚合函数来衡量窗口内数据的数量和范围。
