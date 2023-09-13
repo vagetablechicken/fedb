@@ -174,3 +174,21 @@ openmldb_tool --env=onebox --dist_conf=standalone_dist.yml
 如果是分布式的集群，需要配置ssh免密才能顺利使用诊断工具，参考文档[诊断工具](../maintain/diagnose.md)。
 
 如果你的环境无法做到，请手动获取配置与日志。
+
+## 性能
+
+deployment耗时统计需要开启：
+```
+SET GLOBAL deploy_stats = 'on';
+```
+开启后的Deployment执行都将被统计，之前的不会被统计，表中的数据不包含集群外部的网络耗时，仅统计deployment在server端从开始执行到结束的时间。推荐直接查询统计表：
+```
+set @@execute_mode='online';
+select * from INFORMATION_SCHEMA.DEPLOY_RESPONSE_TIME;
+```
+表的读法，可参考[mariadb response-time-distribution](https://mariadb.com/kb/en/query-response-time-plugin/#response-time-distribution)。
+
+
+在监控项目[OpenMLDB Exporter](https://github.com/4paradigm/openmldb-exporter)中的deploy相关指标，都是从这个统计表中提取并再计算的结果。
+
+https://github.com/4paradigm/openmldb-exporter/blob/493974b5c7b003d1f3d06c9db18b470cb4462c65/openmldb_exporter/collector/collectors.py#L75
