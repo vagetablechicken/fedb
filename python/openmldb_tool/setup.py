@@ -28,7 +28,7 @@ setup(
         "Programming Language :: Python :: 3",
     ],
     install_requires=[
-        "openmldb >= 0.6.9",
+        "openmldb >= 0.8.1",
         "absl-py",
         "pyyaml",
         "paramiko",

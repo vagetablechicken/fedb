@@ -19,6 +19,7 @@ import json
 import os
 import textwrap
 import time
+from collections import defaultdict
 
 from diagnostic_tool.connector import Connector
 from diagnostic_tool.dist_conf import read_conf
@@ -96,8 +97,98 @@ def status(args):
 
 
 def inspect(args):
-    insepct_online(args)
-    inspect_offline(args)
+    # report all
+    # 1. server level
+    connect = Connector()
+    status_checker = checker.StatusChecker(connect)
+    server_map = status_checker._get_components()
+    offlines = []
+    tablets = []
+    for component, value_list in server_map.items():
+        for endpoint, status in value_list:
+            if status != "online":
+                offlines.append(f"[{component}]{endpoint}")
+                continue  # offline tablet is needlessly to rpc
+            if component == "tablet":
+                tablets.append(endpoint)
+    if offlines:
+        s = "\n".join(offlines)
+        print(f"offline servers:\n{s}")
+    else:
+        print("all online(no backup tm and apiserver)")
+    # 2. table level
+    rs = connect.execfetch("show table status like '%';")
+    rs.sort(key=lambda x: x[0])
+    print(f"{len(rs)} tables(including system tables)")
+    tid2table = {}
+    warn_tables = []
+    for t in rs:
+        # any warning means unhealthy, partition_unalive may be 0 but already unhealthy, warnings is accurate?
+        if t[13]:
+            warn_tables.append(f"{t[2]}.{t[1]}")
+        tid2table[int(t[0])] = f"{t[2]}.{t[1]}"
+    if warn_tables:
+        s = "\n".join(warn_tables)
+        print(f"unhealthy tables:\n{s}")
+    else:
+        print("all tables are healthy")
+    # 3. partition level
+    partitions = defaultdict(lambda: defaultdict(dict))
+    from diagnostic_tool.rpc import RPC  # TODO 需要调整rpc重要程度，不要optional了？
+
+    tablets.sort()
+    valid_tablets = []
+    for tablet in tablets:
+        # GetTableStatusRequest empty field means get all
+        rpc = RPC(tablet)
+        res = json.loads(rpc.rpc_exec("GetTableStatus", {}))
+        # may get empty when tablet server is not ready
+        if "all_table_status" not in res:
+            print(f"get failed from {tablet}")
+            continue
+        valid_tablets.append(tablet)
+        for part in res["all_table_status"]:
+            part["tablet"] = tablet
+            # tid, pid are int
+            tid, pid = part["tid"], part["pid"]
+            partitions[tid][pid][tablet] = part
+    # we don't know the replicanum setting, need to call nameserver
+    # just hint about the offline tablets here
+    print(f"valid tablet {valid_tablets}, miss the offline tablets")
+    t_list = sorted(partitions.items(), key=lambda x: x[0])
+    p_ok = "[o]"
+    p_err = "[x]"
+    p_no = "[/]"
+    print(f"partition status: {p_ok} normal, {p_err} abnormal, {p_no} not exists")
+    for tid, parts in t_list:
+        print(f"table {tid} {tid2table[tid]}")  # TODO tid -> db.table
+        parts = sorted(parts.items(), key=lambda x: x[0])
+        table_str = ""
+        for pid, part in parts:
+            table_str += f"p{pid}("
+            # use the same order
+            for tablet in tablets:
+                state = p_no
+                if tablet in part:
+                    state = p_ok if part[tablet]["state"] == "kTableNormal" else p_err
+                table_str += f"{state}"
+                if state != p_ok:
+                    print(
+                        f"p{pid} {'not exist' if state == p_no else part[tablet]['state']} on {tablet}"
+                    )
+            table_str += ") "
+        print(table_str)
+
+    # op sorted by id
+    print("check all ops in nameserver")
+    rs = connect.execfetch("show jobs from NameServer;")
+    should_warn = False
+    for op in rs:
+        if op[2] != "FINISHED":
+            print(op)
+            should_warn = True
+    if not should_warn:
+        print("all nameserver ops are finished")
 
 
 def insepct_online(args):
@@ -121,7 +212,9 @@ def insepct_online(args):
 
     if getattr(args, "dist", False):
         table_checker = TableChecker(conn)
-        table_checker.check_distribution(dbs=flags.FLAGS.db.split(","))
+        dbs = flags.FLAGS.db
+        db_list = dbs.split(",") if dbs else None
+        table_checker.check_distribution(dbs=db_list)
 
 
 def inspect_offline(args):

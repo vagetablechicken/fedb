@@ -27,6 +27,8 @@ flags.DEFINE_string(
     "pb2 root dir, if not set, will use the <path>/pb2 directory in the same directory as this script",
 )
 
+def validate_ip_address(ip_string):
+   return not any(c.isalpha() for c in ip_string)
 
 class DescriptorHelper:
     def __init__(self, service):
@@ -103,12 +105,21 @@ class Field:
                 d.update(Field.to_json(f))
             return d
 
+host2service = {
+    "nameserver": "NameServer",
+    "taskmanager": "openmldb.taskmanager.TaskManagerServer",
+    "tablet": "TabletServer",
+}
 
 class RPC:
     """rpc service"""
-
     def __init__(self, host) -> None:
-        self.host, self.endpoint, self.service = RPC.get_endpoint_service(host.lower())
+        if validate_ip_address(host):
+            self.endpoint = host
+            self.host = "tablet" # TODO
+            self.service = host2service[self.host]
+        else:
+            self.host, self.endpoint, self.service = RPC.get_endpoint_service(host.lower())
 
     def rpc_help(self):
         if self.host == "taskmanager":
@@ -168,11 +179,7 @@ class RPC:
             host = "nameserver" if host == "ns" else "taskmanager"
         assert host in components_map, f"{host} not found in cluster"
         endpoint = components_map[host][num][0]
-        host2service = {
-            "nameserver": "NameServer",
-            "taskmanager": "openmldb.taskmanager.TaskManagerServer",
-            "tablet": "TabletServer",
-        }
+
         service = host2service[host]
         return host, endpoint, service
 
