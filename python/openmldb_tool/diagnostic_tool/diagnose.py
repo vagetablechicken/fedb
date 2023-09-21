@@ -102,15 +102,13 @@ def inspect(args):
     connect = Connector()
     status_checker = checker.StatusChecker(connect)
     server_map = status_checker._get_components()
+    print(server_map)
     offlines = []
-    tablets = []
     for component, value_list in server_map.items():
         for endpoint, status in value_list:
             if status != "online":
                 offlines.append(f"[{component}]{endpoint}")
                 continue  # offline tablet is needlessly to rpc
-            if component == "tablet":
-                tablets.append(endpoint)
     if offlines:
         s = "\n".join(offlines)
         print(f"offline servers:\n{s}")
@@ -133,12 +131,22 @@ def inspect(args):
     else:
         print("all tables are healthy")
     # 3. partition level
-    partitions = defaultdict(lambda: defaultdict(dict))
     from diagnostic_tool.rpc import RPC  # TODO 需要调整rpc重要程度，不要optional了？
 
-    tablets.sort()
-    valid_tablets = []
-    for tablet in tablets:
+    # ns table info
+    rpc = RPC("ns")
+    res = json.loads(rpc.rpc_exec("ShowTable", {"show_all": True}))
+    all_table_info = res["table_info"]
+    # TODO split system tables and user tables
+
+    # show table info
+    # <tid, <pid, <tablet, replica>>>
+    replicas = defaultdict(lambda: defaultdict(dict))
+    tablets = server_map["tablet"]  # has status
+    valid_tablets = set()
+    for tablet, status in tablets:
+        if status == "offline":
+            continue
         # GetTableStatusRequest empty field means get all
         rpc = RPC(tablet)
         res = json.loads(rpc.rpc_exec("GetTableStatus", {}))
@@ -146,16 +154,75 @@ def inspect(args):
         if "all_table_status" not in res:
             print(f"get failed from {tablet}")
             continue
-        valid_tablets.append(tablet)
-        for part in res["all_table_status"]:
-            part["tablet"] = tablet
+        valid_tablets.add(tablet)
+        for rep in res["all_table_status"]:
+            rep["tablet"] = tablet
             # tid, pid are int
-            tid, pid = part["tid"], part["pid"]
-            partitions[tid][pid][tablet] = part
-    # we don't know the replicanum setting, need to call nameserver
-    # just hint about the offline tablets here
-    print(f"valid tablet {valid_tablets}, miss the offline tablets")
-    t_list = sorted(partitions.items(), key=lambda x: x[0])
+            tid, pid = rep["tid"], rep["pid"]
+            replicas[tid][pid][tablet] = rep
+
+    tablet2idx = {tablet[0]: i + 1 for i, tablet in enumerate(tablets)}
+    print(f"tablet server order: {tablet2idx}")
+    print(f"valid tablet servers {valid_tablets}")
+
+    # similar with `show table status` warnings field, but easier to read
+    # prettytable.colortable just make table border and header lines colorful
+    def show(t, replicas_on_tablet):
+        print(t["db"], t["name"], t["tid"], t["partition_num"], t["replica_num"])
+        pnum, rnum = t["partition_num"], t["replica_num"]
+        from prettytable import PLAIN_COLUMNS, PrettyTable
+
+        x = PrettyTable()
+        x.field_names = [i for i in range(pnum * (rnum + 1))]
+        idx_row = []
+        leader_row = []
+        followers_row = []
+        for i, p in enumerate(t["table_partition"]):
+            # each partition add 3 row, and rnum + 1 columns
+            # tablet idx  pid | 1 | 4 | 5
+            # leader       1        o
+            # followers         o       o
+            pid = p["pid"]
+            assert pid == i
+            # x.set_style(PLAIN_COLUMNS)
+            # sort by list tablets
+            replicas = []
+            leader = -1
+            for r in p["partition_meta"]:
+                tablet = r["endpoint"]
+                # tablet_has_partition useless?
+                # print(r["endpoint"], r["is_leader"], r["tablet_has_partition"])
+                info_on_tablet = replicas_on_tablet[t["tid"]][p["pid"]][r["endpoint"]]
+                # ignore offset
+                # TODO check with info_on_tablet["mode"]
+                m = {
+                    "role": "leader" if r["is_leader"] else "follower",
+                    "state": info_on_tablet["state"],
+                }
+                replicas.append((tablet2idx[tablet], m))
+                if r["is_leader"]:
+                    leader = len(replicas) - 1
+            replicas.sort(key=lambda x: x[0])
+            idx_row += ["p" + str(pid)] + [r[0] for r in replicas]
+            assert leader != -1
+            # append len(replicas) + 1, and set idx leader to o
+            temp_row = [""] * (len(replicas) + 1)
+            temp_row[leader + 1] = "o"
+            leader_row += temp_row
+            followers_row.append("")
+            for i, r in enumerate(replicas):
+                followers_row.append("o" if i != leader else "")
+        # TODO: support multi-line for better display?
+        x.add_row(idx_row)
+        x.add_row(leader_row)
+        x.add_row(followers_row)
+        print(x.get_string(border=True, header=False))
+
+    # display, depends on table info, replicas are used to check
+    for t in all_table_info:
+        show(t, replicas)
+
+    return
     p_ok = "[o]"
     p_err = "[x]"
     p_no = "[/]"

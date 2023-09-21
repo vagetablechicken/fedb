@@ -116,7 +116,7 @@ class RPC:
     def __init__(self, host) -> None:
         if validate_ip_address(host):
             self.endpoint = host
-            self.host = "tablet" # TODO
+            self.host = "tablet" # TODO: you can get ns/tm by name, it's not necessary to input ip
             self.service = host2service[self.host]
         else:
             self.host, self.endpoint, self.service = RPC.get_endpoint_service(host.lower())
