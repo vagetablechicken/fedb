@@ -3,11 +3,10 @@ name: Release Mirror
 
 on:
   workflow_dispatch:
-
-inputs:
-  version:
-    description: 'release version'
-    required: false
+    inputs:
+      version:
+        description: 'release version'
+        required: false
 
 jobs:
   cp:
