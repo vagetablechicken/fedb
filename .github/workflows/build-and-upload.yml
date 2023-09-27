@@ -1,0 +1,158 @@
+# OpenMLDB core cpp jobs
+name: cicd
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'demo/**'
+      - 'docker/**'
+      - 'image/**'
+      - 'release/**'
+      - 'tools/**'
+      - '*.md'
+      - 'benchmark/**'
+    tags:
+      - v*
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'demo/**'
+      - 'docker/**'
+      - 'image/**'
+      - 'release/**'
+      - 'tools/**'
+      - '*.md'
+      - 'benchmark/**'
+  workflow_dispatch:
+
+env:
+  GIT_SUBMODULE_STRATEGY: recursive
+  NPROC: 2 # default Parallel build number for GitHub's Linux runner
+  EXAMPLES_ENABLE: OFF # turn off hybridse's example code
+  HYBRIDSE_TESTING_ENABLE: OFF # turn off hybridse's test code
+
+jobs:
+  cpp:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/4paradigm/hybridsql:latest
+    env:
+      OS: linux
+      SQL_PYSDK_ENABLE: OFF
+      TESTING_ENABLE: ON
+      NPROC: 8
+      CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: prepare release
+        run: |
+          VERSION="snapshot"
+          if [[ ${{ github.ref }} == "refs/tags/v"* ]]; then
+            VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+            VERSION=${VERSION#v}
+            bash steps/prepare_release.sh "$VERSION"
+          fi
+          echo "OPENMLDB_PREFIX=openmldb-$VERSION-linux" >> $GITHUB_ENV
+
+      - name: enable java on release
+        if: github.event_name == 'push'
+        run: |
+          echo "SQL_JAVASDK_ENABLE=ON" >> $GITHUB_ENV
+
+      - name: configure
+        env:
+          SQL_JAVASDK_ENABLE: ${{ env.SQL_JAVASDK_ENABLE }}
+        run: |
+          make configure CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
+
+      - name: build
+        run: |
+          make build OPENMLDB_BUILD_TARGET=toydb_run_engine
+          # GitHub runner disk space is limited
+          # delete thirdparty build directory($ROOT/.deps/) to save disk space
+          # make thirdpartybuild-clean
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: linux-${{ github.sha }}
+          path: |
+            build/hybridse/examples/toydb/src/toydb_run_engine
+
+  macos-cpp:
+    runs-on: macos-latest
+    env:
+      OS: darwin
+      ARCH: x86_64
+      NPROC: 3
+      CTEST_PARALLEL_LEVEL: 1 # parallel test level for ctest (make test)
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: prepare release
+        run: |
+          VERSION="snapshot"
+          if [[ ${{ github.ref }} == "refs/tags/v"* ]]; then
+            VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+            VERSION=${VERSION#v}
+            bash steps/prepare_release.sh "$VERSION"
+          fi
+          echo "OPENMLDB_PREFIX=openmldb-$VERSION-darwin" >> $GITHUB_ENV
+
+      - name: enable java on release
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          echo "SQL_JAVASDK_ENABLE=ON" >> $GITHUB_ENV
+
+      - name: configure
+        env:
+          SQL_JAVASDK_ENABLE: ${{ env.SQL_JAVASDK_ENABLE }}
+        run: |
+          make configure CMAKE_INSTALL_PREFIX=${{ env.OPENMLDB_PREFIX }}
+
+      - name: build
+        run: |
+          # even gnu binutils support ar -M script, get error `ar: BFD (GNU Binutils) 2.40 assertion fail archive.c:1813`
+          # brew install binutils
+          # export PATH="/usr/local/opt/binutils/bin:$PATH"
+          make build OPENMLDB_BUILD_TARGET=toydb_run_engine
+          # GitHub runner disk space is limited
+          # delete thirdparty build directory($ROOT/.deps/) to save disk space
+          # make thirdpartybuild-clean
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-${{ github.sha }}
+          path: |
+            build/hybridse/examples/toydb/src/toydb_run_engine
+  
+  # release:
+  #   runs-on: ubuntu-latest
+  #   # if test failed, shouldn't release
+  #   needs: [ "cpp", "macos-cpp" ]
+  #   if: >
+  #     success() && startsWith(github.ref, 'refs/tags/v')
+  #   steps:
+  #     - name: Download Release Artifacts
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: release-artifacts
+
+  #     - name: generate signature
+  #       run: |
+  #         sha256sum openmldb-*.tar.gz > SHA256SUM
+
+  #     - name: Release
+  #       if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+  #       uses: softprops/action-gh-release@v1
+  #       with:
+  #         files: |
+  #           openmldb-*.tar.gz
+  #           SHA256SUM
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
