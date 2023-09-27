@@ -31,7 +31,7 @@ on:
 env:
   GIT_SUBMODULE_STRATEGY: recursive
   NPROC: 2 # default Parallel build number for GitHub's Linux runner
-  EXAMPLES_ENABLE: OFF # turn off hybridse's example code
+  EXAMPLES_ENABLE: ON # turn off hybridse's example code
   HYBRIDSE_TESTING_ENABLE: OFF # turn off hybridse's test code
 
 jobs:
@@ -71,7 +71,7 @@ jobs:
 
       - name: build
         run: |
-          make build OPENMLDB_BUILD_TARGET=toydb_run_engine
+          make hybridse-build
           # GitHub runner disk space is limited
           # delete thirdparty build directory($ROOT/.deps/) to save disk space
           # make thirdpartybuild-clean
@@ -119,7 +119,7 @@ jobs:
           # even gnu binutils support ar -M script, get error `ar: BFD (GNU Binutils) 2.40 assertion fail archive.c:1813`
           # brew install binutils
           # export PATH="/usr/local/opt/binutils/bin:$PATH"
-          make build OPENMLDB_BUILD_TARGET=toydb_run_engine
+          make hybridse-build
           # GitHub runner disk space is limited
           # delete thirdparty build directory($ROOT/.deps/) to save disk space
           # make thirdpartybuild-clean
