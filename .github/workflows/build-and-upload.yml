@@ -71,7 +71,8 @@ jobs:
 
       - name: build
         run: |
-          make hybridse-build
+          cd build
+          make toydb_run_engine -j8
           # GitHub runner disk space is limited
           # delete thirdparty build directory($ROOT/.deps/) to save disk space
           # make thirdpartybuild-clean
