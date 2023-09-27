@@ -72,7 +72,7 @@ jobs:
       - name: build
         run: |
           cd build
-          make toydb_run_engine -j8
+          make toydb_run_engine -j2
           # GitHub runner disk space is limited
           # delete thirdparty build directory($ROOT/.deps/) to save disk space
           # make thirdpartybuild-clean
