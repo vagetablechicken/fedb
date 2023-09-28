@@ -74,22 +74,37 @@ OpenMLDB并不完全兼容标准SQL。所以，部分SQL执行会得不到预期
 
 在不熟悉OpenMLDB SQL的情况下，我们建议从下到上编写SQL，确保每个子句都能通过，再逐步组合成完整的SQL。
 
-JAVA SDK中有静态方法可用，CLI目前没有太直接的方法，待改进。
-TODO deploy bias example
+推荐使用[OpenMLDBSimulator](https://github.com/vagetablechicken/OpenMLDBSimulator)进行SQL探索，SQL完成后再去真实集群进行上线。Simulator可以不依赖真实OpenMLDB集群，在一个交互式虚拟环境中，快速创建表、校验SQL、导出当前环境等等，详情参考该项目的README。使用Simulator不需要操作集群，也就不需要测试后清理集群，还可通过少量的数据进行SQL运行测试，比较适合SQL探索时期。
+
+#### SQL 语法提示
+
+当发现SQL编译报错时，需要查看错误信息。例如`Syntax error: Expected XXX but got keyword YYY`错误，它说明SQL不符合语法，通常是某些关键字写错了位置，或并没有这种写法。详情需要查询错误的子句文档，可注意子句的`Syntax`章节，它详细说明了每个部分的组成，请检查SQL是否符合要求。
+
+比如，[`WINDOW`子句](../openmldb_sql/dql/WINDOW_CLAUSE.md#syntax)中`WindowFrameClause (WindowAttribute)*`部分，我们再拆解它就是`WindowFrameUnits WindowFrameBounds [WindowFrameMaxSize] (WindowAttribute)*`。那么，`WindowFrameUnits WindowFrameBounds MAXSIZE 10 EXCLUDE CURRENT_TIME`就是符合语法的，`WindowFrameUnits WindowFrameBounds EXCLUDE CURRENT_TIME MAXSIZE 10`就是不符合语法的，不能把`WindowFrameMaxSize`放到`WindowFrameClause`外面。
+
+#### SQL 计算提示
+
+SQL编译通过，可以结合数据进行计算。如果计算结果不符合预期，请逐步检查：
+- SQL无论是一列还是多列计算结果不符合预期，都请选择**其中一列**进行调试。
+- 如果你的表数据较多，建议使用小数据量（几行，几十行的量级）来测试，也可以使用OpenMLDBSimulator的[运行toydb](https://github.com/vagetablechicken/OpenMLDBSimulator#run-in-toydb)功能，构造case进行测试。
+- 该列是不是表示了自己想表达的意思，是否使用了不符合预期的函数，或者函数参数错误。
+- 该列如果是窗口聚合的结果，是不是WINDOW定义错误，导致窗口范围不对。参考[推断窗口](../openmldb_sql/dql/WINDOW_CLAUSE.md#如何推断窗口是什么样的)进行检查，使用小数据进行验证测试。
+
+如果你仍然无法解决问题，可以提供OpenMLDBSimulator的yaml case。如果在集群中进行的测试，请[提供复现脚本](#提供复现脚本)。
+
 #### 在线请求模式
 
-如果你想要SQL能上线，即能在“在线请求模式”中正确运行，较为方便的做法是，在CLI等客户端中，使用“在线预览模式”去实际运行SQL。主表中的每一行将被当作请求行，进行计算，并返回结果。这样你可以确认计算是否符合预期。如果不符合预期，请检查SQL的各个部分，例如，认为窗口范围不对，可能是窗口定义与理想有出入，请根据[窗口推断](../openmldb_sql/dql/WINDOW_CLAUSE.md#如何推断窗口是什么样的)来检查。其他子句也请参考对应的子句文档，检查定义是否正确。
+SQL上线，等价于`DEPLOY <name> <SQL>`成功。但`DEPLOY`操作是一个很“重”的操作，SQL如果可以上线，将会创建或修改索引并复制数据到新索引。所以，在SQL探索期使用`DEPLOY`测试SQL是否能上线，是比较浪费资源的，尤其是某些SQL可能需要多次修改才能上线，多次的`DEPLOY`可能产生很多无用的索引。在探索期间，可能还会修改表Schema，又需要删除和再创建。这些操作都是只能手动处理，比较繁琐。
 
-但要确保SQL可以在“在线请求模式”下工作，还是需要`DEPLOY <name> <SQL>`，`DEPLOY`成功即上线成功。但如果你并不想直接上线，可以使用`EXPLAIN <SQL>`来确认SQL是否可以上线。但目前`EXPLAIN`的检查较为严格，可能因为当前表没有合适的索引，而判定SQL无法在“在线请求模式”中执行（因为无索引而无法保证实时性能，所以被拒绝）。`DEPLOY <name> <SQL>`是最完备的，`DEPLOY`将自动索引创建，也会检查SQL的正确性。
+如果你对OpenMLDB SQL较熟悉，一些场景下可以用“在线预览模式”进行测试，但“在线预览模式”不等于“在线请求模式”，不能保证一定可以上线。如果你对索引较为熟悉，可以通过`EXPLAIN <SQL>`来确认SQL是否可以上线，但`EXPLAIN`的检查较为严格，可能因为当前表没有匹配的索引，而判定SQL无法在“在线请求模式”中执行（因为无索引而无法保证实时性能，所以被拒绝）。
 
-如果可以gen create table by sql + explain sql就完备了
-在simulator里可以跑，validateinrequest？
+目前只有Java SDK可以使用[validateSQLInRequest](./sdk/java_sdk.md#sql-校验)方法来检验，使用上稍麻烦。我们推荐使用OpenMLDBSimulator来测试。在Simulator中，通过简单语法创建表，再使用`valreq <SQL>`可以判断是否能上线。
 
 ## SQL执行
 
 OpenMLDB所有命令均为SQL，如果SQL执行失败或交互有问题（不知道命令是否执行成功），请先确认SQL书写是否有误，命令并未执行，还是命令进入了执行阶段。
 
-例如，下面提示Syntax error的是SQL书写有误，请参考[sql reference](../../openmldb_sql/)纠正错误。
+例如，下面提示Syntax error的是SQL书写有误，请参考[SQL编写指南](#sql编写指南)纠正错误。
 ```
 127.0.0.1:7527/db> create table t1(c1 int;
 Error: Syntax error: Expected ")" or "," but got ";" [at 1:23]
@@ -115,12 +130,12 @@ create table t1(c1 int;
 ```{note}
 日志地址由taskmanager.properties的`job.log.path`配置，如果你改变了此配置项，需要到配置的目的地寻找日志。stdout日志默认在`/work/openmldb/taskmanager/bin/logs/job_x.log`，job运行日志默认在`/work/openmldb/taskmanager/bin/logs/job_x_error.log`(注意有error后缀)，
 
-如果taskmanager是yarn模式，而不是local模式，`job_x_error.log`中的信息会较少，不会有job错误的详细信息。需要通过`job_x_error.log`中记录的yarn app id，去yarn系统中查询job的真正错误原因。
+如果taskmanager是yarn模式，而不是local模式，`job_x_error.log`中的信息会较少，不会有job错误的详细信息。需要通过`job_x_error.log`中记录的yarn app id，去yarn系统中查询job的真正错误原因，需要查询到某application中主container的stderr日志。
 ```
 
 #### 在线
 
-集群版在线模式下，我们通常只推荐使用`DEPLOY`创建deployment，HTTP访问APIServer执行deployment做实时特征计算。在CLI或其他客户端中，直接在在线中进行SELECT查询，称为“在线预览”。在线预览有诸多限制，详情请参考[功能边界-集群版在线预览模式](./function_boundary.md#集群版在线预览模式)，请不要执行不支持的SQL。
+集群版在线模式下，我们通常只推荐两种使用，`DEPLOY`创建deployment，执行deployment做实时特征计算（SDK请求deployment，或HTTP访问APIServer请求deployment）。在CLI或其他客户端中，可以直接在“在线”中进行SELECT查询，称为“在线预览”。在线预览有诸多限制，详情请参考[功能边界-集群版在线预览模式](./function_boundary.md#集群版在线预览模式)，请不要执行不支持的SQL。
 
 ### 提供复现脚本
 
