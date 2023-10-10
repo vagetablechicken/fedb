@@ -17,6 +17,12 @@ usage: openmldb_tool [-h] [--helpfull] {status,inspect,test,static-check} ...
 ```
 只有`static-check`静态检查命令需要指定`--dist_conf`参数，该参数指定OpenMLDB节点分布的配置文件。其他命令只需要`--cluster`参数，格式为`<zk_cluster>/<zk_root_path>`，默认为镜像中的OpenMLDB集群地址`127.0.0.1:2181/openmldb`。如果是自行设置的OpenMLDB集群，请配置此参数。
 
+### 一键inspect
+
+`openmldb_tool inspect [--cluster=0.0.0.0:2181/openmldb]`可以一键查询，得到完整的集群状态报告。如果需要局部视角或额外的诊断功能，才需要其他子命令。
+
+
+
 ## 子命令详情
 
 ### status 状态
@@ -184,7 +190,6 @@ nameserver:
 - `-L,--log`收集日志，输出WARNING及以上的日志。
 
 如果检查配置文件或日志，将会把收集到的文件保存在`--collect_dir`中，默认为`/tmp/diag_collect`。你也也可以访问此目录查看收集到的配置或日志，进行更多的分析。
-
 
 #### 检查示例
 
