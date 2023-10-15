@@ -24,7 +24,12 @@ from .rpc import RPC
 
 # ANSI escape codes
 flags.DEFINE_bool("nocolor", False, "disable color output", short_name="noc")
-flags.DEFINE_integer("table_width", 12, "max columns in one row", short_name="tw")
+flags.DEFINE_integer(
+    "table_width",
+    12,
+    "max columns in one row, 1 partition use r+1 cols, set k*(r+1)",
+    short_name="tw",
+)
 
 # color: red, green
 RED = "\033[31m"
@@ -54,6 +59,7 @@ def server_ins(server_map):
         cr_print(RED, f"offline servers:\n{s}")
     else:
         cr_print(GREEN, "all servers online (no backup tm and apiserver)")
+    return offlines
 
 
 # support nocolor
@@ -65,20 +71,21 @@ def light(color, symbol, detail):
 
 
 def state2light(state):
+    state = state.ljust(15)  # state str should be less than 15
     if not state.startswith("k"):
         # meta mismatch status, all red
         return light(RED, "X", state)
     else:
         # meta match, get the real state
         state = state[1:]
-        if state == "TableNormal":
+        if state.startswith("TableNormal"):
             # green
-            return light(GREEN,"O",state)
+            return light(GREEN, "O", state)
         else:
             # ref https://github.com/4paradigm/OpenMLDB/blob/0462f8a9682f8d232e8d44df7513cff66870d686/tools/tool.py#L291
-            # undefined is loading too state == "kTableLoading" or state == "kTableUndefined"
-            # what about state == "kTableLoadingSnapshot" or state == "kSnapshotPaused": TODO
-            return light(YELLOW ,"=" , state)
+            # undefined is loading too: state == "kTableLoading" or state == "kTableUndefined"
+            # TODO what about state == "kTableLoadingSnapshot" or state == "kSnapshotPaused"
+            return light(YELLOW, "=", state)
 
 
 # similar with `show table status` warnings field, but easier to read
@@ -89,10 +96,16 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
     )
     pnum, rnum = t["partition_num"], t["replica_num"]
     assert pnum == len(t["table_partition"])
+    # multi-line for better display, max display columns in one row
+    valuable_cols = pnum * (rnum + 1)
+    display_width = min(flags.FLAGS.table_width, valuable_cols)
+    # if real multi-line, the last line may < width, padding with empty string
+    rest = valuable_cols % display_width
+    total_cols = valuable_cols + (0 if rest == 0 else display_width - rest)
 
-    idx_row = []
-    leader_row = []
-    followers_row = []
+    idx_row = [""] * total_cols
+    leader_row = [""] * total_cols
+    followers_row = [""] * total_cols
     for i, p in enumerate(t["table_partition"]):
         # each partition add 3 row, and rnum + 1 columns
         # tablet idx  pid | 1 | 4 | 5
@@ -114,7 +127,7 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
                 info_on_tablet = {"state": "Miss", "mode": "Miss"}
             else:
                 info_on_tablet = replicas_on_t[r["endpoint"]]
-
+            print(info_on_tablet)
             m = {
                 "role": "leader" if r["is_leader"] else "follower",
                 "state": info_on_tablet["state"],
@@ -129,17 +142,18 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
         # assert len(ind) <= 1, f"should be only one leader or miss leader in {replicas}"
 
         # show partition idx and tablet server idx
-        idx_row += ["p" + str(pid)] + [r[0] for r in replicas]
-        leader_row += [""] * (rnum + 1)
-        followers_row += [""] * (rnum + 1)
         cursor = i * (rnum + 1)
+        idx_row[cursor : cursor + rnum + 1] = ["p" + str(pid)] + [
+            r[0] for r in replicas
+        ]
+
         # fulfill leader line
         if leader_ind:
             for leader in leader_ind:
                 # leader state
                 state = replicas[leader][1]["state"]
                 if state != "Miss" and replicas[leader][1]["acrole"] != "kTableLeader":
-                    state = "MetaMismatch"
+                    state = "NotLeaderOnT"
                 leader_row[cursor + leader + 1] = state2light(state)
         else:
             # can't find leader in nameserver metadata TODO: is it ok to set in the first column?
@@ -152,16 +166,14 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
                 continue
             state = r[1]["state"]
             if state != "Miss" and r[1]["acrole"] != "kTableFollower":
-                state = "MetaMismatch"
+                state = "NotFollowerOnT"
             followers_row[idx] = state2light(state)
 
+    x = PrettyTable(align="l")
 
-    x = PrettyTable()
-    cols = len(idx_row)
-    # multi-line for better display, max 12 columns in one row 
-    x.field_names = [i for i in range(min(flags.FLAGS.table_width, cols))]
-    step = flags.FLAGS.table_width
-    for i in range(0, cols, step):
+    x.field_names = [i for i in range(display_width)]
+    step = display_width
+    for i in range(0, len(idx_row), step):
         x.add_row(idx_row[i : i + step])
         x.add_row(leader_row[i : i + step])
         x.add_row(followers_row[i : i + step], divider=True)
@@ -184,6 +196,7 @@ def table_ins(connect):
     else:
         cr_print(GREEN, "all tables are healthy")
     return warn_tables
+
 
 def partition_ins(server_map):
     # ns table info
@@ -236,7 +249,19 @@ def partition_ins(server_map):
     for t in all_table_info:
         # TODO: no need to print healthy table
         show_table_info(t, replicas, tablet2idx)
-    # comment for table info display TODO: 
+    # comment for table info display TODO: draw a example
+    """
+tablet server order: {'xxx': 1, 'xxx': 2, 'xxx': 3}              -> get real tablet addr by idx
++----+-------------------+------------------+------------------+
+| p0 | 1                 | 2                | 3                |
+|    | [light] status    |                  |                  | -> leader replica is on tablet 1
+|    |                   | [light] status   | [light] status   | -> follower replicas are on tablet 2, 3
++----+-------------------+------------------+------------------+
+light:
+  Green O -> OK
+  Yellow = -> replica meta is ok but state is not normal
+  Red X -> NotFound/Miss/NotFollowerOnT/NotLeaderOnT
+    """
     print(
         """Notes
         For each partition, the first line is leader, the second line is followers. If all green, the partition is healthy.
@@ -245,6 +270,7 @@ def partition_ins(server_map):
         Miss: nameserver think it's a replica, but can't find in tabletserver meta.
         """
     )
+
 
 def ops_ins(connect):
     # op sorted by id TODO: detail to show all?
@@ -265,8 +291,10 @@ def ops_ins(connect):
         print("last 10 unfinished ops:")
         print(*should_warn[-10:], sep="\n")
 
-def inspect_hint(): # TODO:
-    print( """
+
+def inspect_hint():  # TODO:
+    print(
+        """
 ==================
 Summary&Hint:
 ==================

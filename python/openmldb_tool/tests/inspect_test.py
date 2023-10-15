@@ -1,6 +1,9 @@
 import pytest
-from diagnostic_tool.diagnose import show_table_info
+from diagnostic_tool.inspect import show_table_info
 from absl import flags
+
+flags.FLAGS["nocolor"].parse(False)
+flags.FLAGS["table_width"].parse(12)
 
 
 def test_show():
@@ -296,4 +299,42 @@ def test_show():
             },
         }
     }
+    show_table_info(t_info, replicas, tablet2idx)
+
+    print("more partitions, display well")
+    partnum = 13
+    meta_pattern = {
+        "partition_meta": [
+            {
+                "endpoint": tablets[0],
+                "is_leader": True,
+            },
+        ],
+    }
+    t_info = {
+        "name": "TABLE_A",
+        "table_partition": [],
+        "tid": 0,
+        "partition_num": partnum,
+        "replica_num": 1,
+        "db": "DB_A",
+    }
+    replicas = {0: {}}
+
+    for i in range(partnum):
+        t_info["table_partition"].append({"pid": i, **meta_pattern})
+
+    for i in range(partnum):
+        replicas[0][i] = {
+            tablets[0]: {
+                "mode": "kTableLeader",
+                "state": "kTableNormal",
+                "tablet": tablets[0],
+            }
+        }
+    print(t_info, replicas)
+    show_table_info(t_info, replicas, tablet2idx)
+
+    print("nocolor")
+    flags.FLAGS["nocolor"].parse(True)
     show_table_info(t_info, replicas, tablet2idx)

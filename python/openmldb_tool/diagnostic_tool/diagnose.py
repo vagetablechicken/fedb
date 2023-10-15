@@ -103,20 +103,25 @@ def inspect(args):
     status_checker = checker.StatusChecker(connect)
     server_map = status_checker._get_components()
     print(server_map)
-    server_ins(server_map)
+    offlines = server_ins(server_map)
 
     # 2. table level
     # we use `show table status` instead of partition inspection, cuz it's simple and quick
     warn_tables = table_ins(connect)
     
     # if has unhealthy tables, do partition and ops check, otherwise skip
+    hints = ""
     if warn_tables:
-        # 3. partition level
-        partition_ins(server_map)
+        # 3. partition level and get some hint about table
+        hint = partition_ins(server_map)
         # 4. ns ops
         ops_ins(connect)
 
-    inspect_hint()
+    # 5. hint
+    # let user know what to do
+    # 1) start offline servers
+    # 2) let user know the warning table is fatal or not
+    inspect_hint(offlines, hints)
 
 
 def insepct_online(args):
