@@ -30,6 +30,9 @@ flags.DEFINE_integer(
     "max columns in one row, 1 partition use r+1 cols, set k*(r+1)",
     short_name="tw",
 )
+flags.DEFINE_integer(
+    "offset_diff_thresh", 100, "offset diff threshold", short_name="od"
+)
 
 # color: red, green
 RED = "\033[31m"
@@ -90,10 +93,7 @@ def state2light(state):
 
 # similar with `show table status` warnings field, but easier to read
 # prettytable.colortable just make table border and header lines colorful, so we color the value
-def show_table_info(t, replicas_on_tablet, tablet2idx):
-    print(
-        f"Table {t['tid']} {t['db']}.{t['name']} {t['partition_num']} partitions {t['replica_num']} replicas"
-    )
+def check_table_info(t, replicas_on_tablet, tablet2idx):
     pnum, rnum = t["partition_num"], t["replica_num"]
     assert pnum == len(t["table_partition"])
     # multi-line for better display, max display columns in one row
@@ -106,6 +106,9 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
     idx_row = [""] * total_cols
     leader_row = [""] * total_cols
     followers_row = [""] * total_cols
+
+    table_mark = 0
+    hint = ""
     for i, p in enumerate(t["table_partition"]):
         # each partition add 3 row, and rnum + 1 columns
         # tablet idx  pid | 1 | 4 | 5
@@ -118,20 +121,21 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
         replicas = []
         for r in p["partition_meta"]:
             tablet = r["endpoint"]
-            # tablet_has_partition useless?
+            # tablet_has_partition useless
             # print(r["endpoint"], r["is_leader"], r["tablet_has_partition"])
             replicas_on_t = replicas_on_tablet[t["tid"]][p["pid"]]
             # may can't find replica on tablet, e.g. tablet server is not ready
             info_on_tablet = {}
             if r["endpoint"] not in replicas_on_t:
-                info_on_tablet = {"state": "Miss", "mode": "Miss"}
+                info_on_tablet = {"state": "Miss", "mode": "Miss", "offset": -1}
             else:
                 info_on_tablet = replicas_on_t[r["endpoint"]]
-            print(info_on_tablet)
+            # print(info_on_tablet)
             m = {
                 "role": "leader" if r["is_leader"] else "follower",
                 "state": info_on_tablet["state"],
                 "acrole": info_on_tablet["mode"],
+                "offset": info_on_tablet["offset"],
             }
             replicas.append((tablet2idx[tablet], m))
 
@@ -151,10 +155,10 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
         if leader_ind:
             for leader in leader_ind:
                 # leader state
-                state = replicas[leader][1]["state"]
-                if state != "Miss" and replicas[leader][1]["acrole"] != "kTableLeader":
-                    state = "NotLeaderOnT"
-                leader_row[cursor + leader + 1] = state2light(state)
+                lrep = replicas[leader][1]
+                if lrep["state"] != "Miss" and lrep["acrole"] != "kTableLeader":
+                    lrep["state"] = "NotLeaderOnT"  # modify the state
+                leader_row[cursor + leader + 1] = state2light(lrep["state"])
         else:
             # can't find leader in nameserver metadata TODO: is it ok to set in the first column?
             leader_row[cursor] = state2light("NotFound")
@@ -164,10 +168,33 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
             idx = cursor + i + 1
             if i in leader_ind:
                 continue
-            state = r[1]["state"]
-            if state != "Miss" and r[1]["acrole"] != "kTableFollower":
-                state = "NotFollowerOnT"
-            followers_row[idx] = state2light(state)
+            frep = r[1]
+            if frep["state"] != "Miss" and frep["acrole"] != "kTableFollower":
+                frep["state"] = "NotFollowerOnT"
+            followers_row[idx] = state2light(frep["state"])
+
+        # after state adjust, diag table
+        replicas = [r[1] for r in replicas]  # tablet server is needless now
+        # fatal: leader replica is not normal, may read/write fail
+        # get one normal leader, the partition can work
+        if not leader_ind or not any(
+            [replicas[i]["state"] == "kTableNormal" for i in leader_ind]
+        ):
+            table_mark = max(4, table_mark)
+            hint += f"partition {pid} leader replica is not normal\n"
+        # warn: need repair(may auto repair by auto_failover), but not in emergency
+        #  follower replica is not normal
+        if any([r["state"] != "kTableNormal" for r in replicas]):
+            table_mark = max(3, table_mark)
+            hint += f"partition {pid} has unhealthy replicas\n"
+
+        #  offset is not consistent, only check normal replicas
+        offsets = [r["offset"] for r in replicas if r["state"] == "kTableNormal"]
+        if offsets and max(offsets) - min(offsets) > flags.FLAGS.offset_diff_thresh:
+            table_mark = max(3, table_mark)
+            hint += (
+                f"partition {pid} has offset diff > {flags.FLAGS.offset_diff_thresh}\n"
+            )
 
     x = PrettyTable(align="l")
 
@@ -178,7 +205,29 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
         x.add_row(leader_row[i : i + step])
         x.add_row(followers_row[i : i + step], divider=True)
 
-    print(x.get_string(border=True, header=False))
+    table_summary = ""
+    if table_mark >= 4:
+        table_summary = light(
+            RED,
+            "X",
+            f"Fatal table {t['db']}.{t['name']}, read/write may fail, need repair immediately",
+        )
+    elif table_mark >= 3:
+        table_summary = light(
+            YELLOW, "=", f"Warn table {t['db']}.{t['name']}, still work but need repair"
+        )
+    if table_summary:
+        table_summary += "\n" + hint
+    return x, table_summary
+
+
+def show_table_info(t, replicas_on_tablet, tablet2idx):
+    """check table info and display for ut"""
+    print(
+        f"Table {t['tid']} {t['db']}.{t['name']} {t['partition_num']} partitions {t['replica_num']} replicas"
+    )
+    table, _ = check_table_info(t, replicas_on_tablet, tablet2idx)
+    print(table.get_string(border=True, header=False))
 
 
 def table_ins(connect):
@@ -198,7 +247,7 @@ def table_ins(connect):
     return warn_tables
 
 
-def partition_ins(server_map):
+def partition_ins(server_map, related_ops):
     # ns table info
     rpc = RPC("ns")
     res = rpc.rpc_exec("ShowTable", {"show_all": True})
@@ -246,30 +295,47 @@ def partition_ins(server_map):
 
     # display, depends on table info, replicas are used to check
     all_table_info.sort(key=lambda x: x["tid"])
+    # related op map
+    related_ops_map = {}
+    for op in related_ops:
+        db = op[9]
+        table = op[10]
+        if db not in related_ops_map:
+            related_ops_map[db] = {}
+        if table not in related_ops_map[db]:
+            related_ops_map[db][table] = []
+        related_ops_map[db][table].append(op)
+    print(f"related ops: {related_ops_map}")
+    diag_result = []
     for t in all_table_info:
-        # TODO: no need to print healthy table
-        show_table_info(t, replicas, tablet2idx)
-    # comment for table info display TODO: draw a example
-    """
+        # no need to print healthy table
+        table, diag_hint = check_table_info(t, replicas, tablet2idx)
+        if diag_hint:
+            print(
+                f"Table {t['tid']} {t['db']}.{t['name']} {t['partition_num']} partitions {t['replica_num']} replicas"
+            )
+            print(table.get_string(header=False))
+            if t["db"] in related_ops_map and t["name"] in related_ops_map[t["db"]]:
+                diag_hint += f"related op: {sorted(related_ops_map[t['db']][t['name']], key=lambda x: x[11])}"  # 11 is pid
+            diag_result.append(diag_hint)
+    # comment for table info display, only for unhealthy table TODO: draw a example
+    if diag_result:
+        print(
+            """
+Example:
 tablet server order: {'xxx': 1, 'xxx': 2, 'xxx': 3}              -> get real tablet addr by idx
 +----+-------------------+------------------+------------------+
-| p0 | 1                 | 2                | 3                |
+| p0 | 1                 | 2                | 3                | -> p0: partition 0, 1-3: tablet server idx
 |    | [light] status    |                  |                  | -> leader replica is on tablet 1
 |    |                   | [light] status   | [light] status   | -> follower replicas are on tablet 2, 3
 +----+-------------------+------------------+------------------+
 light:
-  Green O -> OK
-  Yellow = -> replica meta is ok but state is not normal
-  Red X -> NotFound/Miss/NotFollowerOnT/NotLeaderOnT
-    """
-    print(
-        """Notes
-        For each partition, the first line is leader, the second line is followers. If all green, the partition is healthy.
-        MetaMismatch: nameserver think it's leader/follower, but it's not the role on tabletserver meta.(MisMatch on first line means leader, second line means follower)
-        NotFound: replicas in nameserver meta have no leader, only leader line
-        Miss: nameserver think it's a replica, but can't find in tabletserver meta.
-        """
-    )
+Green O -> OK
+Yellow = -> replica meta is ok but state is not normal
+Red X -> NotFound/Miss/NotFollowerOnT/NotLeaderOnT
+"""
+        )
+    return diag_result
 
 
 def ops_ins(connect):
@@ -283,21 +349,45 @@ def ops_ins(connect):
         op = list(op)
         if op[2] != "FINISHED":
             op[3] = str(datetime.fromtimestamp(int(op[3]) / 1000))
-            op[4] = str(datetime.fromtimestamp(int(op[4]) / 1000))
+            op[4] = str(datetime.fromtimestamp(int(op[4]) / 1000)) if op[4] else "..."
             should_warn.append(op)
     if not should_warn:
         print("all nameserver ops are finished")
     else:
         print("last 10 unfinished ops:")
         print(*should_warn[-10:], sep="\n")
+    recover_type = ["kRecoverTableOP", "kChangeLeaderOP", "kReAddReplicaOP"]
+    related_ops = [
+        op
+        for op in should_warn
+        if op[1] in recover_type and op[2] in ["Submitted", "RUNNING"]
+    ]
+    return related_ops
 
 
-def inspect_hint():  # TODO:
+def inspect_hint(server_hint, table_hints):  # TODO:
     print(
         """
 ==================
-Summary&Hint:
+Summary&Hint
 ==================
-If partition check get error, you can try recoverdata....
+Server:
 """
     )
+    if server_hint:
+        cr_print(RED, f"offline servers {server_hint}, restart them first")
+    else:
+        cr_print(GREEN, "all servers online")
+    print("\nTable:\n")
+    for h in table_hints:
+        print(h)
+    if table_hints:
+        print(
+            """
+    Make sure all servers online, and no ops for the table is running.
+    Repair table manually, run recoverdata, check https://openmldb.ai/docs/zh/main/maintain/openmldb_ops.html.
+    Check partition level report above for detail.
+    """
+        )
+    else:
+        cr_print(GREEN, "all tables are healthy")

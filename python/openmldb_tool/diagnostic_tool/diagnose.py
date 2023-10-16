@@ -110,17 +110,21 @@ def inspect(args):
     warn_tables = table_ins(connect)
     
     # if has unhealthy tables, do partition and ops check, otherwise skip
-    hints = ""
+    hints = []
     if warn_tables:
-        # 3. partition level and get some hint about table
-        hint = partition_ins(server_map)
-        # 4. ns ops
-        ops_ins(connect)
+        # 3. ns ops
+        related_ops = ops_ins(connect)
+        # 4. partition level and get some hint about table
+        hints = partition_ins(server_map, related_ops)
+
 
     # 5. hint
     # let user know what to do
     # 1) start offline servers
     # 2) let user know the warning table is fatal or not
+#     [] 做整体评价（急需抢救，主可服务，健康等），结合sub/running ns op，表还可能正在loading，正在。。（failed op有时间问题不好说）
+#   [] replica之间offset 超过一定阈值，可以提示下（不代表一定是错误）
+# - 如果table not healthy且nameserver op也没有recovering，使用recoverdata
     inspect_hint(offlines, hints)
 
 
