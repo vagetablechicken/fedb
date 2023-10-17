@@ -36,12 +36,12 @@ setup(
         "requests",
     ],
     extras_require={
-        "rpc": [
+        "pb": [
             "protobuf==3.6.1",
             "beautifulsoup4",
         ],
         "test": [
-            "openmldb-tool[rpc]",
+            "openmldb-tool[pb]",
             "pytest",
         ],
     },

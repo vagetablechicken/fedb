@@ -51,6 +51,8 @@ def cr_print(color, obj):
 
 
 def server_ins(server_map):
+    print("\n\nServer Detail")
+    print(server_map)
     offlines = []
     for component, value_list in server_map.items():
         for endpoint, status in value_list:
@@ -214,7 +216,7 @@ def check_table_info(t, replicas_on_tablet, tablet2idx):
         )
     elif table_mark >= 3:
         table_summary = light(
-            YELLOW, "=", f"Warn table {t['db']}.{t['name']}, still work but need repair"
+            YELLOW, "=", f"Warn table {t['db']}.{t['name']}, still work, but need repair"
         )
     if table_summary:
         table_summary += "\n" + hint
@@ -231,9 +233,10 @@ def show_table_info(t, replicas_on_tablet, tablet2idx):
 
 
 def table_ins(connect):
+    print("\n\nTable Healthy Detail")
     rs = connect.execfetch("show table status like '%';")
     rs.sort(key=lambda x: x[0])
-    print(f"{len(rs)} tables(including system tables)")
+    print(f"summary: {len(rs)} tables(including system tables)")
     warn_tables = []
     for t in rs:
         # any warning means unhealthy, partition_unalive may be 0 but already unhealthy, warnings is accurate?
@@ -248,6 +251,7 @@ def table_ins(connect):
 
 
 def partition_ins(server_map, related_ops):
+    print("\n\nTable Partition Detail")
     # ns table info
     rpc = RPC("ns")
     res = rpc.rpc_exec("ShowTable", {"show_all": True})
@@ -269,7 +273,11 @@ def partition_ins(server_map, related_ops):
             continue
         # GetTableStatusRequest empty field means get all
         rpc = RPC(tablet)
-        res = json.loads(rpc.rpc_exec("GetTableStatus", {}))
+        res = None
+        try:
+            res = json.loads(rpc.rpc_exec("GetTableStatus", {}))
+        except Exception as e:
+            print(f"rpc {tablet} failed")
         # may get empty when tablet server is not ready
         if not res or res["code"] != 0:
             cr_print(RED, f"get table status failed or empty from {tablet}(online)")
@@ -286,7 +294,6 @@ def partition_ins(server_map, related_ops):
 
     tablet2idx = {tablet[0]: i + 1 for i, tablet in enumerate(tablets)}
     print(f"tablet server order: {tablet2idx}")
-    # print(f"valid tablet servers {valid_tablets}")
     if invalid_tablets:
         cr_print(
             RED,
@@ -305,7 +312,8 @@ def partition_ins(server_map, related_ops):
         if table not in related_ops_map[db]:
             related_ops_map[db][table] = []
         related_ops_map[db][table].append(op)
-    print(f"related ops: {related_ops_map}")
+    # print(f"related ops: {related_ops_map}")
+    print("")  # for better display
     diag_result = []
     for t in all_table_info:
         # no need to print healthy table
@@ -332,31 +340,34 @@ tablet server order: {'xxx': 1, 'xxx': 2, 'xxx': 3}              -> get real tab
 light:
 Green O -> OK
 Yellow = -> replica meta is ok but state is not normal
-Red X -> NotFound/Miss/NotFollowerOnT/NotLeaderOnT
-"""
+Red X -> NotFound/Miss/NotFollowerOnT/NotLeaderOnT"""
         )
     return diag_result
 
 
 def ops_ins(connect):
     # op sorted by id TODO: detail to show all?
-    print("show last 10 ops which are not finished")
+    print("\n\nOps Detail")
+    print("> failed ops do not mean cluster is unhealthy, just for reference")
     rs = connect.execfetch("show jobs from NameServer;")
     should_warn = []
     from datetime import datetime
-
-    for op in rs:
-        op = list(op)
+    # already in order
+    ops = [list(op) for op in rs]
+    for i in range(len(ops)):
+        op = ops[i]
+        op[3] = str(datetime.fromtimestamp(int(op[3]) / 1000)) if op[4] else "..."
+        op[4] = str(datetime.fromtimestamp(int(op[4]) / 1000)) if op[4] else "..."
         if op[2] != "FINISHED":
-            op[3] = str(datetime.fromtimestamp(int(op[3]) / 1000))
-            op[4] = str(datetime.fromtimestamp(int(op[4]) / 1000)) if op[4] else "..."
             should_warn.append(op)
+    # peek last one to let user know if cluster has tried to recover, or we should wait
+    print("last one op(check time): ", ops[-1])
     if not should_warn:
         print("all nameserver ops are finished")
     else:
         print("last 10 unfinished ops:")
         print(*should_warn[-10:], sep="\n")
-    recover_type = ["kRecoverTableOP", "kChangeLeaderOP", "kReAddReplicaOP"]
+    recover_type = ["kRecoverTableOP", "kChangeLeaderOP", "kReAddReplicaOP", "kOfflineReplicaOP"]
     related_ops = [
         op
         for op in should_warn
@@ -368,8 +379,9 @@ def ops_ins(connect):
 def inspect_hint(server_hint, table_hints):  # TODO:
     print(
         """
+
 ==================
-Summary&Hint
+Summary & Hint
 ==================
 Server:
 """
@@ -386,7 +398,7 @@ Server:
             """
     Make sure all servers online, and no ops for the table is running.
     Repair table manually, run recoverdata, check https://openmldb.ai/docs/zh/main/maintain/openmldb_ops.html.
-    Check partition level report above for detail.
+    Check 'Table Partitions Detail' above for detail.
     """
         )
     else:

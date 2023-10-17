@@ -31,7 +31,8 @@ from diagnostic_tool.collector import Collector
 import diagnostic_tool.server_checker as checker
 from diagnostic_tool.table_checker import TableChecker
 from diagnostic_tool.parser import LogParser
-from .inspect import server_ins,table_ins,partition_ins,ops_ins,inspect_hint
+from .inspect import server_ins, table_ins, partition_ins, ops_ins, inspect_hint
+from .rpc import RPC
 
 from absl import app
 from absl import flags
@@ -82,7 +83,7 @@ def status(args):
 
     # --diff with dist conf file, conf_file is required
     if args.diff:
-        assert flags.FLAGS.conf_file, "need --conf_file"
+        assert flags.FLAGS.conf_file, "need --conf_file/-f"
         print(
             "only check components in conf file, if cluster has more components, ignore them"
         )
@@ -102,13 +103,12 @@ def inspect(args):
     connect = Connector()
     status_checker = checker.StatusChecker(connect)
     server_map = status_checker._get_components()
-    print(server_map)
     offlines = server_ins(server_map)
 
     # 2. table level
     # we use `show table status` instead of partition inspection, cuz it's simple and quick
     warn_tables = table_ins(connect)
-    
+
     # if has unhealthy tables, do partition and ops check, otherwise skip
     hints = []
     if warn_tables:
@@ -117,14 +117,11 @@ def inspect(args):
         # 4. partition level and get some hint about table
         hints = partition_ins(server_map, related_ops)
 
-
     # 5. hint
     # let user know what to do
     # 1) start offline servers
-    # 2) let user know the warning table is fatal or not
-#     [] 做整体评价（急需抢救，主可服务，健康等），结合sub/running ns op，表还可能正在loading，正在。。（failed op有时间问题不好说）
-#   [] replica之间offset 超过一定阈值，可以提示下（不代表一定是错误）
-# - 如果table not healthy且nameserver op也没有recovering，使用recoverdata
+    # 2) let user know the warning table is fatal or not, related ops, warn if offset is too large
+    # 3) if table not healthy and no related ops, use recoverdata
     inspect_hint(offlines, hints)
 
 
@@ -271,7 +268,6 @@ def rpc(args):
         tm: taskmanager"""
         )
         return
-    from diagnostic_tool.rpc import RPC
 
     # use status connction to get version
     conns_with_version = {
