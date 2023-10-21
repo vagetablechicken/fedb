@@ -24,7 +24,7 @@
 #include "butil/logging.h"
 #include "gflags/gflags.h"
 #include "gtest/gtest.h"
-#include "json2pb/rapidjson.h"
+#include "rapidjson/rapidjson.h"
 #include "sdk/mini_cluster.h"
 
 namespace openmldb::apiserver {
@@ -117,7 +117,7 @@ class APIServerTest : public ::testing::Test {
 };
 
 TEST_F(APIServerTest, jsonFormat) {
-    butil::rapidjson::Document document;
+    rapidjson::Document document;
 
     // Check the format of put request
     if (document
@@ -136,13 +136,33 @@ TEST_F(APIServerTest, jsonFormat) {
     ASSERT_EQ(1, value.Size());
     const auto& arr = value[0];
     ASSERT_EQ(7, arr.Size());
-    ASSERT_EQ(butil::rapidjson::kStringType, arr[0].GetType());
-    ASSERT_EQ(butil::rapidjson::kNumberType, arr[1].GetType());
-    ASSERT_EQ(butil::rapidjson::kNumberType, arr[2].GetType());
-    ASSERT_EQ(butil::rapidjson::kStringType, arr[3].GetType());
-    ASSERT_EQ(butil::rapidjson::kNumberType, arr[4].GetType());
-    ASSERT_EQ(butil::rapidjson::kTrueType, arr[5].GetType());
-    ASSERT_EQ(butil::rapidjson::kNullType, arr[6].GetType());
+    ASSERT_EQ(rapidjson::kStringType, arr[0].GetType());
+    ASSERT_EQ(rapidjson::kNumberType, arr[1].GetType());
+    ASSERT_EQ(rapidjson::kNumberType, arr[2].GetType());
+    ASSERT_EQ(rapidjson::kStringType, arr[3].GetType());
+    ASSERT_EQ(rapidjson::kNumberType, arr[4].GetType());
+    ASSERT_EQ(rapidjson::kTrueType, arr[5].GetType());
+    ASSERT_EQ(rapidjson::kNullType, arr[6].GetType());
+
+    // about double nan, inf
+    double nan = std::nan("");
+    double inf = std::numeric_limits<double>::infinity();
+    uint64_t temp;
+    memcpy(&temp, &inf, sizeof(temp));
+    ASSERT_EQ(0x7ff0000000000000, temp);
+    // std::hex << std::setprecision(16) << *reinterpret_cast<uint64_t *>(&my_double)
+    double rapid_json_inf = 0.0;
+    auto reader = JsonReaderWithFlag("1.797693134862316e308");
+    reader >> rapid_json_inf;
+    ASSERT_TRUE(std::isinf(rapid_json_inf));
+    ASSERT_EQ(0x7ff0000000000000, *reinterpret_cast<uint64_t*>(&rapid_json_inf));
+    // std::hex << std::showbase << my_double
+    auto writer = JsonWriterWithFlag<rapidjson::kWriteNanAndInfFlag>();
+    writer.StartArray();
+    writer& nan;
+    writer& inf;
+    writer.EndArray();
+    ASSERT_STREQ("[NaN,Infinity]", writer.GetString());
 }
 
 TEST_F(APIServerTest, query) {
@@ -168,7 +188,7 @@ TEST_F(APIServerTest, query) {
 
         LOG(INFO) << "exec query resp:\n" << cntl.response_attachment().to_string();
 
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << cntl.response_attachment().to_string();
@@ -229,7 +249,7 @@ TEST_F(APIServerTest, parameterizedQuery) {
 
         LOG(INFO) << "exec query resp:\n" << cntl.response_attachment().to_string();
 
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << cntl.response_attachment().to_string();
@@ -274,7 +294,7 @@ TEST_F(APIServerTest, parameterizedQuery) {
 
         LOG(INFO) << "exec query resp:\n" << cntl.response_attachment().to_string();
 
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << cntl.response_attachment().to_string();
@@ -315,7 +335,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -329,7 +349,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -343,7 +363,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -356,7 +376,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -392,7 +412,7 @@ TEST_F(APIServerTest, validPut) {
         env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         GeneralResp resp;
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(-1, resp.code) << resp.msg;
         ASSERT_STREQ("convertion failed for col field4", resp.msg.c_str());
@@ -411,7 +431,7 @@ TEST_F(APIServerTest, validPut) {
         env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         GeneralResp resp;
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -463,7 +483,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -481,7 +501,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -500,7 +520,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(-1, resp.code);
     }
@@ -518,7 +538,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -537,7 +557,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        JsonReader reader(cntl.response_attachment().to_string().c_str());
+        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -587,7 +607,7 @@ TEST_F(APIServerTest, procedure) {
     ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
     LOG(INFO) << "get sp resp: " << show_cntl.response_attachment();
 
-    butil::rapidjson::Document document;
+    rapidjson::Document document;
     if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
         ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                            << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -713,7 +733,7 @@ TEST_F(APIServerTest, testResultType) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
 
         LOG(INFO) << "exec deployment resp:\n" << cntl.response_attachment().to_string();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         // check resp data
         if (document.Parse(cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
@@ -781,7 +801,7 @@ TEST_F(APIServerTest, no_common) {
     ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
     LOG(INFO) << "get sp resp: " << show_cntl.response_attachment();
 
-    butil::rapidjson::Document document;
+    rapidjson::Document document;
     if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
         ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                            << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -868,7 +888,7 @@ TEST_F(APIServerTest, no_common_not_first_string) {
     ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
     LOG(INFO) << "get sp resp: " << show_cntl.response_attachment();
 
-    butil::rapidjson::Document document;
+    rapidjson::Document document;
     if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
         ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                            << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -925,7 +945,7 @@ TEST_F(APIServerTest, getDBs) {
         brpc::Controller show_cntl;  // default is GET
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs";
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -957,7 +977,7 @@ TEST_F(APIServerTest, getDBs) {
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs";
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
         ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -991,7 +1011,7 @@ TEST_F(APIServerTest, getTables) {
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs/" + db_name + "/tables";
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
         ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -1022,7 +1042,7 @@ TEST_F(APIServerTest, getTables) {
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs/" + db_name + "/tables";
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
         ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -1047,7 +1067,7 @@ TEST_F(APIServerTest, getTables) {
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs/db_not_exist/tables";
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
         ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -1060,7 +1080,7 @@ TEST_F(APIServerTest, getTables) {
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs/" + db_name + "/tables/" + table;
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
         ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -1076,7 +1096,7 @@ TEST_F(APIServerTest, getTables) {
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs/" + db_name + "/tables/not_exist";
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
         ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -1089,7 +1109,7 @@ TEST_F(APIServerTest, getTables) {
         show_cntl.http_request().uri() = "http://127.0.0.1:8010/dbs/db_not_exist/tables/apple";
         env->http_channel.CallMethod(NULL, &show_cntl, NULL, NULL, NULL);
         ASSERT_FALSE(show_cntl.Failed()) << show_cntl.ErrorText();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         if (document.Parse(show_cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()
                                << ", raw resp: " << show_cntl.response_attachment().to_string();
@@ -1158,7 +1178,7 @@ TEST_F(APIServerTest, jsonInput) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
 
         LOG(INFO) << "exec deployment resp:\n" << cntl.response_attachment().to_string();
-        butil::rapidjson::Document document;
+        rapidjson::Document document;
         // check resp data
         if (document.Parse(cntl.response_attachment().to_string().c_str()).HasParseError()) {
             ASSERT_TRUE(false) << "response parse failed with code " << document.GetParseError()

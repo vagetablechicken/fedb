@@ -20,8 +20,17 @@
 #include <cstddef>
 #include <string>
 
+#include "rapidjson/document.h"  // rapidjson's DOM-style API
+#include "rapidjson/writer.h"
+
 namespace openmldb {
 namespace apiserver {
+
+using rapidjson::Document;
+using rapidjson::Writer;
+using rapidjson::SizeType;
+using rapidjson::StringBuffer;
+using rapidjson::Value;
 
 /**
 \class Archiver
@@ -46,8 +55,9 @@ class JsonReader {
     /**
         \param json A non-const source json string for in-situ parsing.
         \note in-situ means the source JSON string will be modified after parsing.
+        just pass document for template read flags
     */
-    explicit JsonReader(const char* json);
+    JsonReader(void* document);
 
     /// Destructor.
     ~JsonReader();
@@ -92,7 +102,7 @@ class JsonReader {
 
 class JsonWriter {
  public:
-    JsonWriter();
+    JsonWriter(void* writer, void* stream);
     ~JsonWriter();
 
     /// Obtains the serialized JSON string.
@@ -138,6 +148,20 @@ JsonReader& operator>>(JsonReader& ar, T& s) {
 template <typename T>
 JsonWriter& operator<<(JsonWriter& ar, T& s) {
     return ar & s;
+}
+
+template<unsigned flags = rapidjson::RAPIDJSON_PARSE_DEFAULT_FLAGS>
+JsonReader JsonReaderWithFlag(const char* json) {
+    auto document = new Document;
+    document->Parse<flags>(json);
+    return {reinterpret_cast<void*>(document)};
+}
+
+template<unsigned flags = rapidjson::RAPIDJSON_WRITE_DEFAULT_FLAGS>
+JsonWriter JsonWriterWithFlag() {
+    auto stream = new StringBuffer;
+    void* writer = new Writer<StringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, rapidjson::CrtAllocator, flags>(*stream);
+    return {writer, reinterpret_cast<void*>(stream)};
 }
 
 }  // namespace apiserver

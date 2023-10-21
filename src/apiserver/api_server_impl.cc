@@ -79,7 +79,7 @@ void APIServerImpl::Process(google::protobuf::RpcController* cntl_base, const Ht
     DLOG(INFO) << "unresolved path: " << unresolved_path << ", method: " << HttpMethod2Str(method);
     const butil::IOBuf& req_body = cntl->request_attachment();
 
-    JsonWriter writer;
+    auto writer = JsonWriterWithFlag();
     provider_.handle(unresolved_path, method, req_body, writer);
 
     cntl->response_attachment().append(writer.GetString());
@@ -119,7 +119,7 @@ void APIServerImpl::RegisterQuery() {
         auto db = db_it->second;
 
         QueryReq req;
-        JsonReader query_reader(req_body.to_string().c_str());
+        auto query_reader = JsonReaderWithFlag(req_body.to_string().c_str());
         query_reader >> req;
         if (!query_reader) {
             writer << resp.Set("Json parse failed, " + req_body.to_string());
@@ -158,8 +158,8 @@ void APIServerImpl::RegisterQuery() {
     });
 }
 
-absl::Status APIServerImpl::JsonArray2SQLRequestRow(const butil::rapidjson::Value& non_common_cols_v,
-                                            const butil::rapidjson::Value& common_cols_v,
+absl::Status APIServerImpl::JsonArray2SQLRequestRow(const Value& non_common_cols_v,
+                                            const Value& common_cols_v,
                                             std::shared_ptr<openmldb::sdk::SQLRequestRow> row) {
     auto sch = row->GetSchema();
 
@@ -203,7 +203,7 @@ absl::Status APIServerImpl::JsonArray2SQLRequestRow(const butil::rapidjson::Valu
 }
 
 template <typename T>
-bool APIServerImpl::AppendJsonValue(const butil::rapidjson::Value& v, hybridse::sdk::DataType type, bool is_not_null,
+bool APIServerImpl::AppendJsonValue(const Value& v, hybridse::sdk::DataType type, bool is_not_null,
                                     T row) {
     // check if null
     if (v.IsNull()) {
@@ -283,8 +283,8 @@ bool APIServerImpl::AppendJsonValue(const butil::rapidjson::Value& v, hybridse::
 }
 
 // common_cols_v is still an array, but non_common_cols_v is map, should find the value by the column name
-absl::Status APIServerImpl::JsonMap2SQLRequestRow(const butil::rapidjson::Value& non_common_cols_v,
-                                          const butil::rapidjson::Value& common_cols_v,
+absl::Status APIServerImpl::JsonMap2SQLRequestRow(const Value& non_common_cols_v,
+                                          const Value& common_cols_v,
                                           std::shared_ptr<openmldb::sdk::SQLRequestRow> row) {
     auto sch = row->GetSchema();
 
@@ -436,7 +436,7 @@ void APIServerImpl::ExecuteProcedure(bool has_common_col, const InterfaceProvide
         return;
     }
 
-    butil::rapidjson::Value common_cols_v;
+    Value common_cols_v;
     if (has_common_col) {
         auto common_cols = document.FindMember("common_cols");
         if (common_cols != document.MemberEnd()) {
