@@ -99,6 +99,7 @@ struct QueryReq {
     int timeout = -1;  // only for offline jobs
     std::string sql;
     std::shared_ptr<openmldb::sdk::SQLRequestRow> parameter;
+    bool write_nan_and_inf_null = false;
 };
 
 JsonReader& operator&(JsonReader& ar, QueryReq& s);  // NOLINT
@@ -113,12 +114,13 @@ struct ExecSPResp {
     bool need_schema = false;
     bool json_result = false;
     std::shared_ptr<hybridse::sdk::ResultSet> rs;
+    bool write_nan_and_inf_null = false;
 };
 
 void WriteSchema(JsonWriter& ar, const std::string& name, const hybridse::sdk::Schema& schema,  // NOLINT
                  bool only_const);
 
-void WriteValue(JsonWriter& ar, std::shared_ptr<hybridse::sdk::ResultSet> rs, int i);  // NOLINT
+void WriteValue(JsonWriter& ar, std::shared_ptr<hybridse::sdk::ResultSet> rs, int i, bool write_nan_and_inf_null);  // NOLINT
 
 // ExecSPResp reading is unsupported now, cuz we decode ResultSet with Schema here, it's irreversible
 JsonWriter& operator&(JsonWriter& ar, ExecSPResp& s);  // NOLINT
@@ -148,6 +150,8 @@ struct QueryResp {
     int code = 0;
     std::string msg = "ok";
     std::shared_ptr<hybridse::sdk::ResultSet> rs;
+    // option, won't write to result
+    bool write_nan_and_inf_null = false;
 };
 
 JsonWriter& operator&(JsonWriter& ar, QueryResp& s);  // NOLINT

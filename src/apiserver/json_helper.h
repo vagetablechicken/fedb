@@ -27,10 +27,10 @@ namespace openmldb {
 namespace apiserver {
 
 using rapidjson::Document;
-using rapidjson::Writer;
 using rapidjson::SizeType;
 using rapidjson::StringBuffer;
 using rapidjson::Value;
+using rapidjson::Writer;
 
 /**
 \class Archiver
@@ -57,7 +57,7 @@ class JsonReader {
         \note in-situ means the source JSON string will be modified after parsing.
         just pass document for template read flags
     */
-    JsonReader(void* document);
+    JsonReader(const char* json);
 
     /// Destructor.
     ~JsonReader();
@@ -90,10 +90,10 @@ class JsonReader {
     static const bool IsReader = true;
     static const bool IsWriter = !IsReader;
 
- private:
-    JsonReader(const JsonReader&);
-    JsonReader& operator=(const JsonReader&);
+    JsonReader& operator=(const JsonReader&) = delete;
+    JsonReader(const JsonReader&) = delete;
 
+ private:
     // PIMPL
     void* document_;  ///< DOM result of parsing.
     void* stack_;     ///< Stack for iterating the DOM
@@ -102,7 +102,7 @@ class JsonReader {
 
 class JsonWriter {
  public:
-    JsonWriter(void* writer, void* stream);
+    JsonWriter();
     ~JsonWriter();
 
     /// Obtains the serialized JSON string.
@@ -148,20 +148,6 @@ JsonReader& operator>>(JsonReader& ar, T& s) {
 template <typename T>
 JsonWriter& operator<<(JsonWriter& ar, T& s) {
     return ar & s;
-}
-
-template<unsigned flags = rapidjson::RAPIDJSON_PARSE_DEFAULT_FLAGS>
-JsonReader JsonReaderWithFlag(const char* json) {
-    auto document = new Document;
-    document->Parse<flags>(json);
-    return {reinterpret_cast<void*>(document)};
-}
-
-template<unsigned flags = rapidjson::RAPIDJSON_WRITE_DEFAULT_FLAGS>
-JsonWriter JsonWriterWithFlag() {
-    auto stream = new StringBuffer;
-    void* writer = new Writer<StringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, rapidjson::CrtAllocator, flags>(*stream);
-    return {writer, reinterpret_cast<void*>(stream)};
 }
 
 }  // namespace apiserver

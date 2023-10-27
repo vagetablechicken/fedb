@@ -24,6 +24,7 @@
 #include "butil/logging.h"
 #include "gflags/gflags.h"
 #include "gtest/gtest.h"
+#include "rapidjson/error/en.h"
 #include "rapidjson/rapidjson.h"
 #include "sdk/mini_cluster.h"
 
@@ -117,6 +118,7 @@ class APIServerTest : public ::testing::Test {
 };
 
 TEST_F(APIServerTest, jsonFormat) {
+    // test raw document
     rapidjson::Document document;
 
     // Check the format of put request
@@ -127,7 +129,7 @@ TEST_F(APIServerTest, jsonFormat) {
     ]
     })")
             .HasParseError()) {
-        ASSERT_TRUE(false) << "json parse failed with code " << document.GetParseError();
+        ASSERT_TRUE(false) << "json parse failed: " << rapidjson::GetParseError_En(document.GetParseError());
     }
 
     hybridse::sdk::Status status;
@@ -144,25 +146,73 @@ TEST_F(APIServerTest, jsonFormat) {
     ASSERT_EQ(rapidjson::kTrueType, arr[5].GetType());
     ASSERT_EQ(rapidjson::kNullType, arr[6].GetType());
 
+    // raw document with default flags can't parse unquoted nan&inf
+    ASSERT_TRUE(document.Parse("[NaN,Infinity]").HasParseError());
+    ASSERT_EQ(rapidjson::kParseErrorValueInvalid, document.GetParseError()) << document.GetParseError();
+
+    // test json reader
+    // can read inf number to inf
+    {
+        JsonReader reader("1.797693134862316e308");
+        ASSERT_TRUE(reader);
+        double d_res = -1.0;
+        reader >> d_res;
+        ASSERT_EQ(0x7ff0000000000000, *reinterpret_cast<uint64_t*>(&d_res))
+            << std::hex << std::setprecision(16) << *reinterpret_cast<uint64_t*>(&d_res);
+        ASSERT_TRUE(std::isinf(d_res));
+    }
+
+    // read unquoted inf&nan, legal words
+    {
+        JsonReader reader("[NaN, Inf, -Inf, Infinity, -Infinity]");
+        ASSERT_TRUE(reader);
+        double d_res = -1.0;
+        reader.StartArray();
+        reader >> d_res;
+        ASSERT_TRUE(std::isnan(d_res));
+        // nan hex
+        reader >> d_res;
+        ASSERT_TRUE(std::isinf(d_res));
+        reader >> d_res;
+        ASSERT_TRUE(std::isinf(d_res));
+        reader >> d_res;
+        ASSERT_TRUE(std::isinf(d_res));
+        reader >> d_res;
+        ASSERT_TRUE(std::isinf(d_res));
+    }
+    {  // illegal words
+        JsonReader reader("nan");
+        ASSERT_FALSE(reader);
+    }
+    {  // illegal words
+        JsonReader reader("+Inf");
+        ASSERT_FALSE(reader);
+    }
+    {  // string, not double
+        JsonReader reader("\"NaN\"");
+        ASSERT_TRUE(reader);
+        double d = -1.0;
+        reader >> d;
+        ASSERT_FALSE(reader);      // get double failed
+        ASSERT_FLOAT_EQ(d, -1.0);  // won't change
+    }
+    // StringBuffer buffer;
+    // rapidjson::Writer<StringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, rapidjson::CrtAllocator,
+    //                      rapidjson::kWriteNanAndInfFlag> writerr(buffer);
+    // writerr.Double(std::numeric_limits<double>::quiet_NaN());
+    // LOG(INFO) << buffer.GetString();
+    // test json writer
+    JsonWriter writer;
     // about double nan, inf
-    double nan = std::nan("");
+    double nan = std::numeric_limits<double>::quiet_NaN();
     double inf = std::numeric_limits<double>::infinity();
-    uint64_t temp;
-    memcpy(&temp, &inf, sizeof(temp));
-    ASSERT_EQ(0x7ff0000000000000, temp);
-    // std::hex << std::setprecision(16) << *reinterpret_cast<uint64_t *>(&my_double)
-    double rapid_json_inf = 0.0;
-    auto reader = JsonReaderWithFlag("1.797693134862316e308");
-    reader >> rapid_json_inf;
-    ASSERT_TRUE(std::isinf(rapid_json_inf));
-    ASSERT_EQ(0x7ff0000000000000, *reinterpret_cast<uint64_t*>(&rapid_json_inf));
-    // std::hex << std::showbase << my_double
-    auto writer = JsonWriterWithFlag<rapidjson::kWriteNanAndInfFlag>();
     writer.StartArray();
-    writer& nan;
-    writer& inf;
+    writer << nan;
+    writer << inf;
+    double ninf = -inf;
+writer << ninf;
     writer.EndArray();
-    ASSERT_STREQ("[NaN,Infinity]", writer.GetString());
+    ASSERT_STREQ("[NaN,Infinity,-Infinity]", writer.GetString());
 }
 
 TEST_F(APIServerTest, query) {
@@ -335,7 +385,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -349,7 +399,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -363,7 +413,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -376,7 +426,7 @@ TEST_F(APIServerTest, invalidPut) {
     env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
     ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
     {
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
     }
     ASSERT_EQ(-1, resp.code);
@@ -412,7 +462,7 @@ TEST_F(APIServerTest, validPut) {
         env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         GeneralResp resp;
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(-1, resp.code) << resp.msg;
         ASSERT_STREQ("convertion failed for col field4", resp.msg.c_str());
@@ -431,7 +481,7 @@ TEST_F(APIServerTest, validPut) {
         env->http_channel.CallMethod(NULL, &cntl, NULL, NULL, NULL);
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         GeneralResp resp;
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -483,7 +533,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -501,7 +551,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -520,7 +570,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(-1, resp.code);
     }
@@ -538,7 +588,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());
@@ -557,7 +607,7 @@ TEST_F(APIServerTest, putCase1) {
         ASSERT_FALSE(cntl.Failed()) << cntl.ErrorText();
         LOG(INFO) << cntl.response_attachment().to_string();
         GeneralResp resp;
-        auto reader = JsonReaderWithFlag(cntl.response_attachment().to_string().c_str());
+        JsonReader reader(cntl.response_attachment().to_string().c_str());
         reader >> resp;
         ASSERT_EQ(0, resp.code) << resp.msg;
         ASSERT_STREQ("ok", resp.msg.c_str());

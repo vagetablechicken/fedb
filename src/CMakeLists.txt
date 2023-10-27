@@ -16,7 +16,9 @@
 include_directories(
     ${INCLUDE_DIRECTORIES}
     ${PROJECT_SOURCE_DIR}/src
-    ${CMAKE_BINARY_DIR}/src)
+    ${CMAKE_BINARY_DIR}/src
+    ${PROJECT_SOURCE_DIR}/contrib/rapidjson/include # for json in api server
+    )
 
 add_subdirectory(statistics)
 

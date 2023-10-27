@@ -42,9 +42,10 @@ typedef std::stack<JsonReaderStackItem> JsonReaderStack;
 #define TOP (STACK->top())
 #define CURRENT (*TOP.value)
 
-JsonReader::JsonReader(void* document) : document_(document), stack_(), error_(false) {
-    // document_ = new Document;
-    // DOCUMENT->Parse(json);
+JsonReader::JsonReader(const char* json) : document_(), stack_(), error_(false) {
+    document_ = new Document;
+    // only support unquoted NaN & Inf.., so quoted string won't be parsed wrong
+    DOCUMENT->Parse<rapidjson::kParseNanAndInfFlag>(json);
     if (DOCUMENT->HasParseError()) {
         error_ = true;
     } else {
@@ -265,12 +266,17 @@ void JsonReader::Next() {
 ////////////////////////////////////////////////////////////////////////////////
 // JsonWriter
 // We use Writer instead of PrettyWriter for performance reasons
-#define WRITER (reinterpret_cast<Writer<StringBuffer>*>(writer_))
+#define WRITER                                                                                            \
+    (reinterpret_cast<Writer<StringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, rapidjson::CrtAllocator, \
+                             rapidjson::kWriteNanAndInfFlag>*>(writer_))
 #define STREAM (reinterpret_cast<StringBuffer*>(stream_))
 
-JsonWriter::JsonWriter(void* writer, void* stream):  writer_(writer) , stream_(stream) {
-    // stream_ = new StringBuffer;
-    // writer_ = new Writer<StringBuffer, UTF8<>, UTF8<>, CrtAllocator, flags>(*STREAM);
+// it's ok to set nan/inf flag even if we don't use them when we write them to null
+// if need template, try to use boost::mpl
+JsonWriter::JsonWriter() : writer_(), stream_() {
+    stream_ = new StringBuffer;
+    writer_ = new Writer<StringBuffer, rapidjson::UTF8<>, rapidjson::UTF8<>, rapidjson::CrtAllocator,
+                         rapidjson::kWriteNanAndInfFlag>(*STREAM);
 }
 
 JsonWriter::~JsonWriter() {
