@@ -128,10 +128,14 @@ jobs:
             du -h --max-depth=1
             df -h
 
-      - name: upload built thirdparty(debug)
+      - name: tar thirdparty
+        run: |
+          cd .deps
+          tar czf usr.tar.gz usr/
+      - name: upload built thirdparty
         uses: actions/upload-artifact@v2
         with:
-          path: .deps/usr
+          path: .deps/usr.tar.gz
           name: built-thirdparty
                 
       - name: upload binary
