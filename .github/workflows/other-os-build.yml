@@ -85,8 +85,8 @@ jobs:
             export PATH=$PATH:`pwd`
             source /opt/rh/devtoolset-8/enable
             if [[ "${USE_DEPS_CACHE}" != "true" ]]; then
-              echo "build thirdparty, make opt is better than nproc"
-              make thirdparty CMAKE_INSTALL_PREFIX=${OPENMLDB_PREFIX} BUILD_BUNDLE=ON THIRD_PARTY_CMAKE_FLAGS=-DMAKEOPTS=-j8
+              echo "build thirdparty, configure in centos6_build, make opt is better than nproc"
+              cmake --build $(pwd)/.deps
               # 5.8G	./.deps, avail 8G
               rm -rf .deps/build # GitHub runner disk space is limited
             fi

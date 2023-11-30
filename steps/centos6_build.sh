@@ -71,13 +71,13 @@ if [ -e ".deps/build/src/zetasql-stamp/zetasql-build" ]; then
     echo "zetasql already exists, skip add patch, if you want, rm .deps/build/src/zetasql-stamp/zetasql-build or whole .deps/build/src/zetasql*"
 else
     echo  "modify in .deps needs a make first, download&build zetasql first(build will fail)"
-    cmake -S third-party -B "$(pwd)"/.deps -DSRC_INSTALL_DIR="$(pwd)"/thirdsrc -DDEPS_INSTALL_DIR="$(pwd)"/.deps/usr -DBUILD_BUNDLED=ON
+    cmake -S third-party -B "$(pwd)"/.deps -DSRC_INSTALL_DIR="$(pwd)"/thirdsrc -DDEPS_INSTALL_DIR="$(pwd)"/.deps/usr -DBUILD_BUNDLED=ON -DMAKEOPTS=-j8
     cmake --build "$(pwd)"/.deps --target zetasql
     echo "add patch in .deps zetasql"
-    sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
-    # skip more target to avoid adding -lrt
-    sed -i'' '42s/^/#/' .deps/build/src/zetasql/build_zetasql_parser.sh
-    sed -i'' '6a function realpath () { \n[[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"\n}' .deps/build/src/zetasql/pack_zetasql.sh
+        sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
+        # skip more target to avoid adding -lrt
+        sed -i'' '42s/^/#/' .deps/build/src/zetasql/build_zetasql_parser.sh
+        sed -i'' '6a function realpath () { \n[[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"\n}' .deps/build/src/zetasql/pack_zetasql.sh
     if [ "$OPENMLDB_SOURCE" = "true" ]; then
         echo "add patch, use openmldb.ai download icu4c required by zetasql"
         sed -i'' '911s#],#,"https://openmldb.ai/download/legacy/icu4c-65_1-src.tgz"],#' .deps/build/src/zetasql/bazel/zetasql_deps_step_2.bzl
