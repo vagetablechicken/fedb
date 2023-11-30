@@ -128,6 +128,12 @@ jobs:
             du -h --max-depth=1
             df -h
 
+      - name: upload built thirdparty(debug)
+        uses: actions/upload-artifact@v2
+        with:
+          path: .deps/usr
+          name: built-thirdparty
+                
       - name: upload binary
         uses: actions/upload-artifact@v2
         with:

@@ -71,6 +71,5 @@ else()
     CONFIGURE_COMMAND ""
     BUILD_COMMAND bash build_zetasql_parser.sh
     INSTALL_COMMAND bash pack_zetasql.sh -i ${DEPS_INSTALL_DIR}
-    DEPENDS protobuf
   )
 endif()

@@ -104,6 +104,10 @@ function(init_hybridsql_thirdparty_urls)
   endif()
 endfunction()
 
+if(WITH_ZETASQL)
+  include(FetchZetasql)
+endif()
+
 # Fetch hybridsql asserts
 if(NOT BUILD_BUNDLED)
   init_hybridsql_thirdparty_urls()
@@ -207,9 +211,4 @@ endif()
 
 if (BUILD_BUNDLED_ROCKSDB)
   include(FetchRocksDB)
-endif()
-
-# needs protobuf
-if(WITH_ZETASQL)
-  include(FetchZetasql)
 endif()
