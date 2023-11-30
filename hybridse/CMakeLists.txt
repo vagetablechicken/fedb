@@ -121,6 +121,7 @@ endif ()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.1")
     # GNU implementation prior to 9.1 requires linking with -lstdc++fs
+    message(STATUS "add stdc++fs")
     list(APPEND COMMON_LIBS stdc++fs)
 endif()
 
