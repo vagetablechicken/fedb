@@ -21,6 +21,10 @@ on:
         description: 'The branch, tag or SHA to checkout, otherwise use the branch'
         required: false
         default: ''
+      ZETASQL_LIB_URL:
+        description: 'zetasql lib url, default is built by src, if you want to use prebuilt, set it. Only for centos6'
+        required: false
+        default: ''
 
 env:
   NPROC: 2 # default Parallel build number for GitHub's Linux runner
@@ -75,12 +79,11 @@ jobs:
       - uses: addnab/docker-run-action@v3
         with:
           image: ghcr.io/4paradigm/centos6_gcc7_hybridsql
-          options: -v ${{ github.workspace }}:/root/OpenMLDB -e USE_DEPS_CACHE=${{ steps.deps-cache.outputs.cache-hit }} -e OPENMLDB_PREFIX=${{ env.OPENMLDB_PREFIX }} -e SQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -e SQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }}
+          options: -v ${{ github.workspace }}:/root/OpenMLDB -e USE_DEPS_CACHE=${{ steps.deps-cache.outputs.cache-hit }} -e OPENMLDB_PREFIX=${{ env.OPENMLDB_PREFIX }} -e SQL_PYSDK_ENABLE=${{ env.SQL_PYSDK_ENABLE }} -e SQL_JAVASDK_ENABLE=${{ env.SQL_JAVASDK_ENABLE }} -e ZETASQL_LIB_URL=${{ env.ZETASQL_LIB_URL }}
           shell: bash
           run: |
             cd /root/OpenMLDB
             # centos6_build.sh won't try build zetasql when cache hit(USE_DEPS_CACHE==true)
-            export USE_DEPS_CACHE=false # upload zetasql for debug
             IN_WORKFLOW=true bash steps/centos6_build.sh
             # bazel bin
             export PATH=$PATH:`pwd`
@@ -88,13 +91,16 @@ jobs:
 
             if [[ "${USE_DEPS_CACHE}" != "true" ]]; then
               echo "build thirdparty, configure in centos6_build, make opt is better than nproc"
-              cmake --build $(pwd)/.deps --target zetasql
+              cmake --build $(pwd)/.deps
               # 5.8G	./.deps, avail 8G
               rm -rf .deps/build # GitHub runner disk space is limited
             fi
-            echo "just build zetasql and exit"
-            exit 0
-            echo "build"
+
+            if [[ "${ZETASQL_LIB_URL}" != "" ]]; then
+              echo "replace zetasql lib by ${ZETASQL_LIB_URL}"
+              wget -O .deps/usr/lib/libzetasql.a ${ZETASQL_LIB_URL}
+            fi
+            echo "build openmldb"
             # 1.4G	./.deps, avail 13G
 
             # will failed if openmldb_sdk is on
