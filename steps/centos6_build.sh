@@ -75,8 +75,8 @@ else
     cmake --build "$(pwd)"/.deps --target zetasql
     echo "add patch in .deps zetasql"
     sed -i'' "26s/lm'/lm:-lrt'/" .deps/build/src/zetasql/build_zetasql_parser.sh
-    # skip more target to avoid adding -lrt
-    sed -i'' '42s/^/#/' .deps/build/src/zetasql/build_zetasql_parser.sh
+    # skip more target to avoid adding -lrt # enable test for debug
+    # sed -i'' '42s/^/#/' .deps/build/src/zetasql/build_zetasql_parser.sh
     sed -i'' '6a function realpath () { \n[[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"\n}' .deps/build/src/zetasql/pack_zetasql.sh
     if [ "$OPENMLDB_SOURCE" = "true" ]; then
         echo "add patch, use openmldb.ai download icu4c required by zetasql"
