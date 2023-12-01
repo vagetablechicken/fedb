@@ -79,17 +79,21 @@ jobs:
           shell: bash
           run: |
             cd /root/OpenMLDB
-            # centos6_build.sh will try build zetasql even cache hit, just ignore the failure
+            # centos6_build.sh won't try build zetasql when cache hit(USE_DEPS_CACHE==true)
+            export USE_DEPS_CACHE=false # upload zetasql for debug
             IN_WORKFLOW=true bash steps/centos6_build.sh
             # bazel bin
             export PATH=$PATH:`pwd`
             source /opt/rh/devtoolset-8/enable
+
             if [[ "${USE_DEPS_CACHE}" != "true" ]]; then
               echo "build thirdparty, configure in centos6_build, make opt is better than nproc"
-              cmake --build $(pwd)/.deps
+              cmake --build $(pwd)/.deps --target zetasql
               # 5.8G	./.deps, avail 8G
               rm -rf .deps/build # GitHub runner disk space is limited
             fi
+            echo "just build zetasql and exit"
+            exit 0
             echo "build"
             # 1.4G	./.deps, avail 13G
 
@@ -128,14 +132,14 @@ jobs:
             du -h --max-depth=1
             df -h
 
-      - name: tar thirdparty
-        run: |
-          cd .deps
-          tar czf usr.tar.gz usr/
+      # - name: tar thirdparty
+      #   run: |
+      #     cd .deps
+      #     tar czf usr.tar.gz usr/
       - name: upload built thirdparty
         uses: actions/upload-artifact@v2
         with:
-          path: .deps/usr.tar.gz
+          path: .deps/usr/lib/libzetasql.a
           name: built-thirdparty
                 
       - name: upload binary
