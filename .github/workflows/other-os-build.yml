@@ -39,6 +39,7 @@ jobs:
       OS: linux
       SQL_JAVASDK_ENABLE: ${{ github.event.inputs.JAVA_SDK }}
       SQL_PYSDK_ENABLE: ${{ github.event.inputs.PYTHON_SDK }} # python whl will be built when make, no prerequirement
+      ZETASQL_LIB_URL: ${{ github.event.inputs.ZETASQL_LIB_URL }}
       TESTING_ENABLE: OFF
       NPROC: 8
     steps:
