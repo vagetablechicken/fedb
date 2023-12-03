@@ -99,7 +99,7 @@ jobs:
 
             if [[ "${ZETASQL_LIB_URL}" != "" ]]; then
               echo "replace zetasql lib by ${ZETASQL_LIB_URL}"
-              wget -O .deps/usr/lib/libzetasql.a ${ZETASQL_LIB_URL}
+              curl -SLo .deps/usr/lib/libzetasql.a ${ZETASQL_LIB_URL}
             fi
             echo "build openmldb"
             # 1.4G	./.deps, avail 13G
