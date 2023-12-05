@@ -85,16 +85,21 @@ jobs:
           run: |
             cd /root/OpenMLDB
             # centos6_build.sh will try build zetasql even cache hit, just ignore the failure
+            export USE_DEPS_CACHE=false # debug
             IN_WORKFLOW=true bash steps/centos6_build.sh
             # bazel bin
             export PATH=$PATH:`pwd`
             source /opt/rh/devtoolset-8/enable
             if [[ "${USE_DEPS_CACHE}" != "true" ]]; then
               echo "build thirdparty, make opt is better than nproc?"
-              make thirdparty CMAKE_INSTALL_PREFIX=${OPENMLDB_PREFIX} BUILD_BUNDLE=ON THIRD_PARTY_CMAKE_FLAGS=-DMAKEOPTS=-j8
+              cmake -S third-party -B "$(pwd)"/.deps -DSRC_INSTALL_DIR="$(pwd)"/thirdsrc -DDEPS_INSTALL_DIR="$(pwd)"/.deps/usr -DBUILD_BUNDLED=ON -DMAKEOPTS=-j8
+              cmake --build "$(pwd)"/.deps --target zetasql
+              du -h --max-depth=1
+              df -h
               # 5.8G	./.deps, avail 8G
-              rm -rf .deps/build # GitHub runner disk space is limited
+              # rm -rf .deps/build # GitHub runner disk space is limited # debug
             fi
+            exit 0
             if [[ "${ZETASQL_LIB_URL}" != "" ]]; then
               echo "replace zetasql lib by ${ZETASQL_LIB_URL}"
               curl -SLo .deps/usr/lib/libzetasql.a ${ZETASQL_LIB_URL}
@@ -136,7 +141,11 @@ jobs:
             rm build/hybridse build/src -rf
             du -h --max-depth=1
             df -h
-
+      - name: upload zetasql
+        uses: actions/upload-artifact@v2
+        with:
+          path: .deps/usr/lib/libzetasql.a
+          name: zetasql
       - name: upload binary
         uses: actions/upload-artifact@v2
         with:
