@@ -27,12 +27,9 @@ import org.apache.spark.sql.connector.write.DataWriter;
 import org.apache.spark.sql.connector.write.WriterCommitMessage;
 
 import java.io.IOException;
-import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.sql.Types;
 
 public class OpenmldbDataSingleWriter implements DataWriter<InternalRow> {
     private final int partitionId;
@@ -59,6 +56,7 @@ public class OpenmldbDataSingleWriter implements DataWriter<InternalRow> {
             preparedStatement = executor.getInsertPreparedStmt(dbName, insert.toString());
         } catch (SQLException | SqlException e) {
             e.printStackTrace();
+            throw new RuntimeException("create openmldb writer failed", e);
         }
 
         this.partitionId = partitionId;
@@ -73,6 +71,9 @@ public class OpenmldbDataSingleWriter implements DataWriter<InternalRow> {
             Preconditions.checkState(record.numFields() == metaData.getColumnCount());
             OpenmldbDataWriter.addRow(record, preparedStatement);
             preparedStatement.execute();
+            if(this.partitionId % 10000 == 2) {
+                throw new Exception("test");
+            }
         } catch (Exception e) {
             throw new IOException("write row to openmldb failed on " + record, e);
         }
@@ -80,24 +81,13 @@ public class OpenmldbDataSingleWriter implements DataWriter<InternalRow> {
 
     @Override
     public WriterCommitMessage commit() throws IOException {
-        try {
-            preparedStatement.close();
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new IOException("commit error", e);
-        }
-        // TODO(hw): need to return new WriterCommitMessageImpl(partitionId, taskId); ?
+        // no transaction, no commit
         return null;
     }
 
     @Override
     public void abort() throws IOException {
-        try {
-            preparedStatement.close();
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new IOException("abort error", e);
-        }
+        // no transaction, no abort
     }
 
     @Override

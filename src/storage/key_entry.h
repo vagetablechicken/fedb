@@ -49,6 +49,13 @@ struct DataBlock {
         delete[] data;
         data = nullptr;
     }
+
+    bool EqualWithoutCnt(const DataBlock& other) const {
+        if (size != other.size) {
+            return false;
+        }
+        return memcmp(data, other.data, size) == 0;
+    }
 };
 
 // the desc time comparator

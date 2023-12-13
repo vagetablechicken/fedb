@@ -71,19 +71,17 @@ class Segment {
     ~Segment();
 
     // Put time data
-    void Put(const Slice& key, uint64_t time, const char* data, uint32_t size);
+    void Put(const Slice& key, uint64_t time, const char* data, uint32_t size, bool put_if_absent = false);
 
-    void Put(const Slice& key, uint64_t time, DataBlock* row);
-
-    void PutUnlock(const Slice& key, uint64_t time, DataBlock* row);
+    void Put(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false);
 
     void BulkLoadPut(unsigned int key_entry_id, const Slice& key, uint64_t time, DataBlock* row);
 
-    void Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row);
+    void Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent = false);
 
     bool Delete(const std::optional<uint32_t>& idx, const Slice& key);
-    bool Delete(const std::optional<uint32_t>& idx, const Slice& key,
-            uint64_t ts, const std::optional<uint64_t>& end_ts);
+    bool Delete(const std::optional<uint32_t>& idx, const Slice& key, uint64_t ts,
+                const std::optional<uint64_t>& end_ts);
 
     void Release(StatisticsInfo* statistics_info);
 
@@ -97,12 +95,10 @@ class Segment {
     void GcAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, StatisticsInfo* statistics_info);
 
     MemTableIterator* NewIterator(const Slice& key, Ticket& ticket, type::CompressType compress_type);  // NOLINT
-    MemTableIterator* NewIterator(const Slice& key, uint32_t idx,
-                                  Ticket& ticket, type::CompressType compress_type);  // NOLINT
+    MemTableIterator* NewIterator(const Slice& key, uint32_t idx, Ticket& ticket,
+                                  type::CompressType compress_type);  // NOLINT
 
-    uint64_t GetIdxCnt() const {
-        return idx_cnt_vec_[0]->load(std::memory_order_relaxed);
-    }
+    uint64_t GetIdxCnt() const { return idx_cnt_vec_[0]->load(std::memory_order_relaxed); }
 
     int GetIdxCnt(uint32_t ts_idx, uint64_t& ts_cnt) {  // NOLINT
         uint32_t real_idx = 0;
@@ -145,9 +141,12 @@ class Segment {
     void ReleaseAndCount(const std::vector<size_t>& id_vec, StatisticsInfo* statistics_info);
 
  private:
-    void FreeList(uint32_t ts_idx, ::openmldb::base::Node<uint64_t, DataBlock*>* node,
-        StatisticsInfo* statistics_info);
+    void FreeList(uint32_t ts_idx, ::openmldb::base::Node<uint64_t, DataBlock*>* node, StatisticsInfo* statistics_info);
     void SplitList(KeyEntry* entry, uint64_t ts, ::openmldb::base::Node<uint64_t, DataBlock*>** node);
+
+    bool ListContains(KeyEntry* entry, uint64_t time, DataBlock* row);
+
+    void PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false);
 
  private:
     KeyEntries* entries_;

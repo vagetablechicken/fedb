@@ -139,7 +139,7 @@ bool MemTable::Put(const std::string& pk, uint64_t time, const char* data, uint3
     return true;
 }
 
-bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& dimensions) {
+bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& dimensions, bool put_if_absent) {
     if (dimensions.empty()) {
         PDLOG(WARNING, "empty dimension. tid %u pid %u", id_, pid_);
         return false;
@@ -217,7 +217,7 @@ bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& di
             seg_idx = ::openmldb::base::hash(kv.second.data(), kv.second.size(), SEED) % seg_cnt_;
         }
         Segment* segment = segments_[kv.first][seg_idx];
-        segment->Put(::openmldb::base::Slice(kv.second), iter->second, block);
+        segment->Put(::openmldb::base::Slice(kv.second), iter->second, block, put_if_absent);
     }
     record_byte_size_.fetch_add(GetRecordSize(value.length()));
     return true;

@@ -50,8 +50,8 @@ class Table {
     int InitColumnDesc();
 
     virtual bool Put(const std::string& pk, uint64_t time, const char* data, uint32_t size) = 0;
-
-    virtual bool Put(uint64_t time, const std::string& value, const Dimensions& dimensions) = 0;
+    // DO NOT set different default value in derived class
+    virtual bool Put(uint64_t time, const std::string& value, const Dimensions& dimensions, bool put_if_absent = false) = 0;
 
     bool Put(const ::openmldb::api::LogEntry& entry) {
         return Put(entry.ts(), entry.value(), entry.dimensions());

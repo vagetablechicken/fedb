@@ -747,7 +747,7 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
             return;
         }
         DLOG(INFO) << "put data to tid " << tid << " pid " << pid << " with key " << request->dimensions(0).key();
-        ok = table->Put(entry.ts(), entry.value(), entry.dimensions());
+        ok = table->Put(entry.ts(), entry.value(), entry.dimensions(), request->put_if_absent());
     }
     if (!ok) {
         response->set_code(::openmldb::base::ReturnCode::kPutFailed);

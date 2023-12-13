@@ -59,6 +59,7 @@ public class OpenmldbDataWriter implements DataWriter<InternalRow> {
             preparedStatement = executor.getInsertPreparedStmt(dbName, insert.toString());
         } catch (SQLException | SqlException e) {
             e.printStackTrace();
+            throw new RuntimeException("create openmldb data writer failed", e);
         }
 
         this.partitionId = partitionId;
@@ -146,12 +147,7 @@ public class OpenmldbDataWriter implements DataWriter<InternalRow> {
 
     @Override
     public void abort() throws IOException {
-        try {
-            preparedStatement.close();
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new IOException("abort error", e);
-        }
+        // no transaction, no abort
     }
 
     @Override

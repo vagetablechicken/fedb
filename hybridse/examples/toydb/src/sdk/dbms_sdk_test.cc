@@ -205,7 +205,7 @@ TEST_F(DBMSSdkTest, TableAPITest) {
         std::shared_ptr<TableSet> tablet_set =
             dbms_sdk->GetTables(name, &status);
         ASSERT_EQ(0, static_cast<int>(status.code));
-        ASSERT_EQ(3u, tablet_set->Size());
+        ASSERT_EQ(3, tablet_set->Size());
     }
     {
         // show tables empty
@@ -213,7 +213,7 @@ TEST_F(DBMSSdkTest, TableAPITest) {
         Status status;
         std::shared_ptr<TableSet> ts = dbms_sdk->GetTables(name, &status);
         ASSERT_EQ(0, static_cast<int>(status.code));
-        ASSERT_EQ(0u, ts->Size());
+        ASSERT_EQ(0, ts->Size());
     }
 }
 

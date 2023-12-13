@@ -227,7 +227,8 @@ bool DiskTable::Put(const std::string& pk, uint64_t time, const char* data, uint
     }
 }
 
-bool DiskTable::Put(uint64_t time, const std::string& value, const Dimensions& dimensions) {
+bool DiskTable::Put(uint64_t time, const std::string& value, const Dimensions& dimensions, bool put_if_absent) {
+    // disk table will update if key-time is the same, so no need to handle put_if_absent
     const int8_t* data = reinterpret_cast<const int8_t*>(value.data());
     std::string uncompress_data;
     if (GetCompressType() == openmldb::type::kSnappy) {
