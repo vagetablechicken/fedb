@@ -48,7 +48,8 @@ public class OpenmldbDataSingleWriter implements DataWriter<InternalRow> {
 
             Schema schema = executor.getTableSchema(dbName, tableName);
             // create insert placeholder
-            StringBuilder insert = new StringBuilder("insert into " + tableName + " values(?");
+            String insert_part = config.putIfAbsent? "insert or ignore into " : "insert into ";
+            StringBuilder insert = new StringBuilder(insert_part + tableName + " values(?");
             for (int i = 1; i < schema.getColumnList().size(); i++) {
                 insert.append(",?");
             }

@@ -22,8 +22,8 @@
 #include "base/strings.h"
 #include "common/timer.h"
 #include "gflags/gflags.h"
-#include "storage/segment.h"
 #include "storage/record.h"
+#include "storage/segment.h"
 
 DECLARE_int32(gc_safe_offset);
 DECLARE_uint32(skiplist_max_height);
@@ -132,23 +132,24 @@ void Segment::ReleaseAndCount(const std::vector<size_t>& id_vec, StatisticsInfo*
     }
 }
 
-void Segment::Put(const Slice& key, uint64_t time, const char* data, uint32_t size, bool put_if_absent) {
+void Segment::Put(const Slice& key, uint64_t time, const char* data, uint32_t size, bool put_if_absent,
+                  bool check_all_time) {
     if (ts_cnt_ > 1) {
         return;
     }
     auto* db = new DataBlock(1, data, size);
-    Put(key, time, db, put_if_absent);
+    Put(key, time, db, put_if_absent, check_all_time);
 }
 
-void Segment::Put(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent) {
+void Segment::Put(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time) {
     if (ts_cnt_ > 1) {
         return;
     }
     std::lock_guard<std::mutex> lock(mu_);
-    PutUnlock(key, time, row, put_if_absent);
+    PutUnlock(key, time, row, put_if_absent, check_all_time);
 }
 
-void Segment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent) {
+void Segment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time) {
     void* entry = nullptr;
     uint32_t byte_size = 0;
     // one key just one entry
@@ -163,7 +164,7 @@ void Segment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool pu
         byte_size += GetRecordPkIdxSize(height, key.size(), key_entry_max_height_);
         pk_cnt_.fetch_add(1, std::memory_order_relaxed);
     }
-    if (put_if_absent && ListContains(reinterpret_cast<KeyEntry*>(entry), time, row)) {
+    if (put_if_absent && ListContains(reinterpret_cast<KeyEntry*>(entry), time, row, check_all_time)) {
         return;
     }
 
@@ -210,7 +211,7 @@ void Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, D
     }
     if (ts_cnt_ == 1) {
         if (auto pos = ts_map.find(ts_idx_map_.begin()->first); pos != ts_map.end()) {
-            Put(key, pos->second, row, put_if_absent);
+            Put(key, pos->second, row, put_if_absent, pos->first == DEFUALT_TS_COL_ID);
         }
         return;
     }
@@ -239,7 +240,7 @@ void Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, D
             }
         }
         auto entry = reinterpret_cast<KeyEntry**>(entry_arr)[pos->second];
-        if (put_if_absent && ListContains(entry, kv.second, row)) {
+        if (put_if_absent && ListContains(entry, kv.second, row, pos->first == DEFUALT_TS_COL_ID)) {
             return;
         }
         uint8_t height = entry->entries.Insert(kv.second, row);
@@ -596,20 +597,32 @@ void Segment::SplitList(KeyEntry* entry, uint64_t ts, ::openmldb::base::Node<uin
     }
 }
 
-bool Segment::ListContains(KeyEntry* entry, uint64_t time, DataBlock* row) {
+bool Segment::ListContains(KeyEntry* entry, uint64_t time, DataBlock* row, bool check_all_time) {
     // one key-time may have multi records // TODO: check gc
     auto it = entry->entries.NewIterator();
-    it->Seek(time);  // less than but desc time comparator, so it's <= time(not valid if empty or all > time), and get smaller by next
-    while (it->Valid()) {
-        // key > time is just a protection, normally it should not happen
-        if (it->GetKey() < time || it->GetKey() > time) {
-            VLOG(10) << it->GetKey() << " != " << time;
-            break;  // no entry == time, or all entries == time have been checked
+    if (check_all_time) {
+        it->SeekToFirst();
+        while (it->Valid()) {
+            if (it->GetValue()->EqualWithoutCnt(*row)) {
+                return true;
+            }
+            it->Next();
         }
-        if (it->GetValue()->EqualWithoutCnt(*row)) {
-            return true;
+    } else {
+        // less than but desc time comparator, so it's <= time(not valid if empty or all > time), and get smaller by
+        // next
+        it->Seek(time);
+        while (it->Valid()) {
+            // key > time is just a protection, normally it should not happen
+            if (it->GetKey() < time || it->GetKey() > time) {
+                VLOG(10) << it->GetKey() << " != " << time;
+                break;  // no entry == time, or all entries == time have been checked
+            }
+            if (it->GetValue()->EqualWithoutCnt(*row)) {
+                return true;
+            }
+            it->Next();
         }
-        it->Next();
     }
     return false;
 }

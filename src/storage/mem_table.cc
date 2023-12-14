@@ -217,7 +217,8 @@ bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& di
             seg_idx = ::openmldb::base::hash(kv.second.data(), kv.second.size(), SEED) % seg_cnt_;
         }
         Segment* segment = segments_[kv.first][seg_idx];
-        segment->Put(::openmldb::base::Slice(kv.second), iter->second, block, put_if_absent);
+        // is default ts col?
+        segment->Put(kv.second, iter->second, block, put_if_absent);
     }
     record_byte_size_.fetch_add(GetRecordSize(value.length()));
     return true;
