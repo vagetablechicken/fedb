@@ -253,7 +253,7 @@ object HybridseUtil {
     extraOptions += ("writer_type") -> parseOption(getOptionFromNode(node, "writer_type"), "single",
       getStringOrDefault)
     extraOptions += ("sql" -> parseOption(getOptionFromNode(node, "sql"), "", getStringOrDefault))
-    extraOptions += ("put_if_absent" -> parseOption(getOptionFromNode(node, "put_if_absent"), "true",
+    extraOptions += ("put_if_absent" -> parseOption(getOptionFromNode(node, "put_if_absent"), "false",
       getBoolOrDefault))
 
     // only for select into, "" means N/A

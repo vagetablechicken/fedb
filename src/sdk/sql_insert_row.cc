@@ -79,7 +79,7 @@ SQLInsertRow::SQLInsertRow(std::shared_ptr<::openmldb::nameserver::TableInfo> ta
 SQLInsertRow::SQLInsertRow(std::shared_ptr<::openmldb::nameserver::TableInfo> table_info,
                            std::shared_ptr<hybridse::sdk::Schema> schema, DefaultValueMap default_map,
                            uint32_t default_str_length, std::vector<uint32_t> hole_idx_arr, bool put_if_absent)
-    : SQLInsertRow(std::move(table_info), std::move(schema), std::move(default_map), default_str_length, put_if_absent_) {
+    : SQLInsertRow(std::move(table_info), std::move(schema), std::move(default_map), default_str_length, put_if_absent) {
     hole_idx_arr_ = std::move(hole_idx_arr);
 }
 

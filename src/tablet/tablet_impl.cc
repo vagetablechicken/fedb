@@ -749,9 +749,16 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
         DLOG(INFO) << "put data to tid " << tid << " pid " << pid << " with key " << request->dimensions(0).key();
         ok = table->Put(entry.ts(), entry.value(), entry.dimensions(), request->put_if_absent());
     }
+
     if (!ok) {
-        response->set_code(::openmldb::base::ReturnCode::kPutFailed);
-        response->set_msg("put failed");
+        if (!request->put_if_absent()) {
+            response->set_code(::openmldb::base::ReturnCode::kPutFailed);
+            response->set_msg("put failed");
+        } else {
+            // TODO(hw): don't write log entry, but may leave some dirty data?
+            response->set_code(::openmldb::base::ReturnCode::kOk);
+            response->set_msg("put failed but ignore");
+        }
         return;
     }
 

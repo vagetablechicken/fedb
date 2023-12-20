@@ -148,6 +148,7 @@ bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& di
         PDLOG(WARNING, "invalid value. tid %u pid %u", id_, pid_);
         return false;
     }
+    // inner index pos: -1 means invalid, so it's positive in inner_index_key_map
     std::map<int32_t, Slice> inner_index_key_map;
     for (auto iter = dimensions.begin(); iter != dimensions.end(); iter++) {
         int32_t inner_pos = table_index_.GetInnerIndexPos(iter->idx());
@@ -195,6 +196,7 @@ bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& di
                     PDLOG(WARNING, "ts %ld is negative. tid %u pid %u", ts, id_, pid_);
                     return false;
                 }
+                // TODO(hw): why uint32_t to int32_t?
                 ts_map.emplace(ts_col->GetId(), ts);
                 real_ref_cnt++;
             }
@@ -217,8 +219,10 @@ bool MemTable::Put(uint64_t time, const std::string& value, const Dimensions& di
             seg_idx = ::openmldb::base::hash(kv.second.data(), kv.second.size(), SEED) % seg_cnt_;
         }
         Segment* segment = segments_[kv.first][seg_idx];
-        // is default ts col?
-        segment->Put(kv.second, iter->second, block, put_if_absent);
+        // TODO(hw): original code won't return false if segment put failed, now we should return false?
+        if (!segment->Put(kv.second, iter->second, block, put_if_absent)) {
+            return false; // let caller know the put failed
+        }
     }
     record_byte_size_.fetch_add(GetRecordSize(value.length()));
     return true;
@@ -729,7 +733,7 @@ bool MemTable::DeleteIndex(const std::string& idx_name) {
 ::hybridse::vm::WindowIterator* MemTable::NewWindowIterator(uint32_t index) {
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
-        LOG(WARNING) << "index id " << index << "  not found. tid " << id_ << " pid " << pid_;
+        LOG(WARNING) << "index id " << index << " not found. tid " << id_ << " pid " << pid_;
         return nullptr;
     }
     uint64_t expire_time = 0;

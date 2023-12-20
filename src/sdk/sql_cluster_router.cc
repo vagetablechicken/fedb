@@ -638,6 +638,7 @@ bool SQLClusterRouter::GetInsertInfo(const std::string& db, const std::string& s
         SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "get default value map of " + sql + " failed");
         return false;
     }
+    *put_if_absent = insert_stmt->insert_mode_ == ::hybridse::node::InsertStmt::IGNORE;
     return true;
 }
 

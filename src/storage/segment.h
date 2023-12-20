@@ -73,11 +73,11 @@ class Segment {
     // legacy interface called by memtable and ut
     void Put(const Slice& key, uint64_t time, const char* data, uint32_t size, bool put_if_absent = false, bool check_all_time = false);
 
-    void Put(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false, bool check_all_time = false);
+    bool Put(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false, bool check_all_time = false);
 
     void BulkLoadPut(unsigned int key_entry_id, const Slice& key, uint64_t time, DataBlock* row);
     // main put method
-    void Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent = false);
+    bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent = false);
 
     bool Delete(const std::optional<uint32_t>& idx, const Slice& key);
     bool Delete(const std::optional<uint32_t>& idx, const Slice& key, uint64_t ts,
@@ -146,7 +146,7 @@ class Segment {
 
     bool ListContains(KeyEntry* entry, uint64_t time, DataBlock* row, bool check_all_time);
 
-    void PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false, bool check_all_time = false);
+    bool PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false, bool check_all_time = false);
 
  private:
     KeyEntries* entries_;

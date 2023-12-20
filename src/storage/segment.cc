@@ -141,15 +141,16 @@ void Segment::Put(const Slice& key, uint64_t time, const char* data, uint32_t si
     Put(key, time, db, put_if_absent, check_all_time);
 }
 
-void Segment::Put(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time) {
+bool Segment::Put(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time) {
     if (ts_cnt_ > 1) {
-        return;
+        LOG(ERROR) << "wrong call";
+        return false;
     }
     std::lock_guard<std::mutex> lock(mu_);
-    PutUnlock(key, time, row, put_if_absent, check_all_time);
+    return PutUnlock(key, time, row, put_if_absent, check_all_time);
 }
 
-void Segment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time) {
+bool Segment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time) {
     void* entry = nullptr;
     uint32_t byte_size = 0;
     // one key just one entry
@@ -164,8 +165,9 @@ void Segment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool pu
         byte_size += GetRecordPkIdxSize(height, key.size(), key_entry_max_height_);
         pk_cnt_.fetch_add(1, std::memory_order_relaxed);
     }
+
     if (put_if_absent && ListContains(reinterpret_cast<KeyEntry*>(entry), time, row, check_all_time)) {
-        return;
+        return false;
     }
 
     idx_cnt_vec_[0]->fetch_add(1, std::memory_order_relaxed);
@@ -173,6 +175,7 @@ void Segment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool pu
     reinterpret_cast<KeyEntry*>(entry)->count_.fetch_add(1, std::memory_order_relaxed);
     byte_size += GetRecordTsIdxSize(height);
     idx_byte_size_.fetch_add(byte_size, std::memory_order_relaxed);
+    return true;
 }
 
 void Segment::BulkLoadPut(unsigned int key_entry_id, const Slice& key, uint64_t time, DataBlock* row) {
@@ -204,16 +207,17 @@ void Segment::BulkLoadPut(unsigned int key_entry_id, const Slice& key, uint64_t 
     }
 }
 
-void Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent) {
+bool Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent) {
     uint32_t ts_size = ts_map.size();
     if (ts_size == 0) {
-        return;
+        return false;
     }
     if (ts_cnt_ == 1) {
+        bool ret = true;
         if (auto pos = ts_map.find(ts_idx_map_.begin()->first); pos != ts_map.end()) {
-            Put(key, pos->second, row, put_if_absent, pos->first == DEFUALT_TS_COL_ID);
+            ret &= Put(key, pos->second, row, put_if_absent, pos->first == DEFUALT_TS_COL_ID);
         }
-        return;
+        return ret;
     }
     void* entry_arr = nullptr;
     std::lock_guard<std::mutex> lock(mu_);
@@ -241,7 +245,7 @@ void Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, D
         }
         auto entry = reinterpret_cast<KeyEntry**>(entry_arr)[pos->second];
         if (put_if_absent && ListContains(entry, kv.second, row, pos->first == DEFUALT_TS_COL_ID)) {
-            return;
+            return false;
         }
         uint8_t height = entry->entries.Insert(kv.second, row);
         entry->count_.fetch_add(1, std::memory_order_relaxed);
@@ -249,6 +253,7 @@ void Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, D
         idx_byte_size_.fetch_add(byte_size, std::memory_order_relaxed);
         idx_cnt_vec_[pos->second]->fetch_add(1, std::memory_order_relaxed);
     }
+    return true;
 }
 
 bool Segment::Delete(const std::optional<uint32_t>& idx, const Slice& key) {
