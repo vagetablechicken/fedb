@@ -466,19 +466,19 @@ TEST_F(SegmentTest, PutIfAbsent) {
     }
 
     {
-        // std::map<int32_t, uint64_t>& ts_map contains DEFUALT_TS_COL_ID
-        std::vector<uint32_t> ts_idx_vec = {DEFUALT_TS_COL_ID};
+        // std::map<int32_t, uint64_t>& ts_map contains DEFAULT_TS_COL_ID
+        std::vector<uint32_t> ts_idx_vec = {DEFAULT_TS_COL_ID};
         Segment segment(8, ts_idx_vec);
         ASSERT_EQ(1, (int64_t)segment.GetTsCnt());
         std::string key = "PK";
-        std::map<int32_t, uint64_t> ts_map = {{DEFUALT_TS_COL_ID, 100}};
+        std::map<int32_t, uint64_t> ts_map = {{DEFAULT_TS_COL_ID, 100}};
         auto* block = new DataBlock(1, "test1", 5);
         segment.Put(Slice(key), ts_map, block, true);
-        ASSERT_EQ(1, GetCount(&segment, DEFUALT_TS_COL_ID));
-        ts_map = {{DEFUALT_TS_COL_ID, 200}};
+        ASSERT_EQ(1, GetCount(&segment, DEFAULT_TS_COL_ID));
+        ts_map = {{DEFAULT_TS_COL_ID, 200}};
         block = new DataBlock(1, "test1", 5);
         segment.Put(Slice(key), ts_map, block, true);
-        ASSERT_EQ(1, GetCount(&segment, DEFUALT_TS_COL_ID));
+        ASSERT_EQ(1, GetCount(&segment, DEFAULT_TS_COL_ID));
     }
 }
 

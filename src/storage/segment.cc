@@ -215,7 +215,7 @@ bool Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, D
     if (ts_cnt_ == 1) {
         bool ret = true;
         if (auto pos = ts_map.find(ts_idx_map_.begin()->first); pos != ts_map.end()) {
-            ret &= Put(key, pos->second, row, put_if_absent, pos->first == DEFUALT_TS_COL_ID);
+            ret &= Put(key, pos->second, row, put_if_absent, pos->first == DEFAULT_TS_COL_ID);
         }
         return ret;
     }
@@ -244,7 +244,7 @@ bool Segment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, D
             }
         }
         auto entry = reinterpret_cast<KeyEntry**>(entry_arr)[pos->second];
-        if (put_if_absent && ListContains(entry, kv.second, row, pos->first == DEFUALT_TS_COL_ID)) {
+        if (put_if_absent && ListContains(entry, kv.second, row, pos->first == DEFAULT_TS_COL_ID)) {
             return false;
         }
         uint8_t height = entry->entries.Insert(kv.second, row);

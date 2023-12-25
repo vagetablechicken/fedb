@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "codec/codec.h"
 #include "proto/tablet.pb.h"
 #include "storage/iterator.h"
@@ -51,10 +52,10 @@ class Table {
 
     virtual bool Put(const std::string& pk, uint64_t time, const char* data, uint32_t size) = 0;
     // DO NOT set different default value in derived class
-    virtual bool Put(uint64_t time, const std::string& value, const Dimensions& dimensions, bool put_if_absent = false) = 0;
+    virtual absl::Status Put(uint64_t time, const std::string& value, const Dimensions& dimensions, bool put_if_absent = false) = 0;
 
     bool Put(const ::openmldb::api::LogEntry& entry) {
-        return Put(entry.ts(), entry.value(), entry.dimensions());
+        return Put(entry.ts(), entry.value(), entry.dimensions()).ok();
     }
 
     virtual bool Delete(const ::openmldb::api::LogEntry& entry) = 0;
