@@ -559,7 +559,7 @@ uint64_t MemTable::GetRecordIdxCnt() {
         ts_col_id = ts_col->GetId();
     }
     for (uint32_t i = 0; i < seg_cnt_; i++) {
-        if (inner_index->GetIntdex().size() > 1 && ts_col_id >= 0) {
+        if (inner_index->GetIndex().size() > 1 && ts_col_id >= 0) {
             uint64_t record_cnt = 0;
             segments_[inner_idx][i]->GetIdxCnt(ts_col_id, record_cnt);
             record_idx_cnt += record_cnt;

@@ -136,7 +136,7 @@ TEST_F(DiskTableTest, MultiDimensionPut) {
     d2->set_idx(2);
     std::string value;
     ASSERT_EQ(0, sdk_codec.EncodeRow(row, &value));
-    bool ok = table->Put(1, value, dimensions);
+    bool ok = table->Put(1, value, dimensions).ok();
     ASSERT_TRUE(ok);
     // some functions in disk table need to be implemented.
     // refer to issue #1238
@@ -202,7 +202,7 @@ TEST_F(DiskTableTest, MultiDimensionPut) {
 
     row = {"valuea", "valueb", "valuec"};
     ASSERT_EQ(0, sdk_codec.EncodeRow(row, &value));
-    ASSERT_TRUE(table->Put(2, value, dimensions));
+    ASSERT_TRUE(table->Put(2, value, dimensions).ok());
 
     it = table->NewIterator(0, "key2", ticket);
     it->SeekToFirst();
@@ -297,7 +297,7 @@ TEST_F(DiskTableTest, LongPut) {
         std::string value;
         ASSERT_EQ(0, sdk_codec.EncodeRow(row, &value));
         for (int k = 0; k < 10; k++) {
-            ASSERT_TRUE(table->Put(ts + k, value, dimensions));
+            ASSERT_TRUE(table->Put(ts + k, value, dimensions).ok());
         }
     }
     for (int idx = 0; idx < 10; idx++) {
@@ -818,7 +818,7 @@ TEST_F(DiskTableTest, CompactFilterMulTs) {
                                                 std::to_string(cur_time - i * 60 * 1000)};
                 std::string value;
                 ASSERT_EQ(0, codec.EncodeRow(row, &value));
-                ASSERT_TRUE(table->Put(cur_time - i * 60 * 1000, value, dims));
+                ASSERT_TRUE(table->Put(cur_time - i * 60 * 1000, value, dims).ok());
             }
 
         } else {
@@ -828,7 +828,7 @@ TEST_F(DiskTableTest, CompactFilterMulTs) {
                                                 std::to_string(cur_time - i)};
                 std::string value;
                 ASSERT_EQ(0, codec.EncodeRow(row, &value));
-                ASSERT_TRUE(table->Put(cur_time - i, value, dims));
+                ASSERT_TRUE(table->Put(cur_time - i, value, dims).ok());
             }
         }
     }
@@ -981,7 +981,7 @@ TEST_F(DiskTableTest, GcHeadMulTs) {
                                             std::to_string(cur_time - i), std::to_string(cur_time - i)};
             std::string value;
             ASSERT_EQ(0, codec.EncodeRow(row, &value));
-            ASSERT_TRUE(table->Put(cur_time - i, value, dims));
+            ASSERT_TRUE(table->Put(cur_time - i, value, dims).ok());
         }
     }
     Ticket ticket;

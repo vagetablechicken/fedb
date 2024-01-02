@@ -1119,7 +1119,7 @@ TEST_F(SnapshotTest, MakeSnapshotAbsOrLat) {
         google::protobuf::RepeatedPtrField<::openmldb::api::Dimension> d_list;
         ::openmldb::api::Dimension* d_ptr2 = d_list.Add();
         d_ptr2->CopyFrom(dimensions);
-        ASSERT_EQ(table->Put(i + 1, *result, d_list), true);
+        ASSERT_EQ(table->Put(i + 1, *result, d_list).ok(), true);
     }
 
     table->SchedGc();
