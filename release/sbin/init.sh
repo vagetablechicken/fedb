@@ -90,7 +90,7 @@ function parse_host {
 run_auto() {
   local host=$1
   local cmd=$2
-  if [[ $host = "localhost" || $host = "127.0.0.1" ]]; then
+  if [[ "$OPENMLDB_FORCE_LOCAL" = true || "$host" = "localhost" || "$host" = "127.0.0.1" ]]; then
     local cur_dir
     cur_dir=$(pwd)
     bash -c "$cmd"

@@ -33,7 +33,7 @@ distribute() {
     type=$4
   fi
   local use_ssh=true
-  if [[ $host = "localhost" || $host = "127.0.0.1" ]]; then
+  if [[ "$OPENMLDB_FORCE_LOCAL" = true || "$host" = "localhost" || "$host" = "127.0.0.1" ]]; then
     use_ssh=false
     if [[ "$dest" = "$src" ]]; then
       echo "skip rsync as dest=src: $dest"

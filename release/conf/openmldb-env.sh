@@ -34,3 +34,5 @@ export OPENMLDB_HOME=
 export SPARK_HOME=
 # if CLEAR_OPENMLDB_INSTALL_DIR is set, all files in the WORKDIR will be deleted when running sbin/clear-all.sh
 export CLEAR_OPENMLDB_INSTALL_DIR=false
+
+export OPENMLDB_FORCE_LOCAL=false
