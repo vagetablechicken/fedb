@@ -33,6 +33,9 @@ do
 
   echo "start zookeeper in $dir with endpoint $host:$port "
   cmd="cd $dir && bin/zkServer.sh start"
-  run_auto "$host" "$cmd"
+  # TODO: special for java
+  export JAVA_HOME=/usr/local/openjdk-11
+  env_setup="export PATH=$JAVA_HOME/bin:$PATH"
+  run_auto "$host" "$env_setup && $cmd"
 done
 IFS="$old_IFS"
