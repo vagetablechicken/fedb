@@ -105,7 +105,11 @@ if [ -z "${OPENMLDB_HOME}" ]; then
   export OPENMLDB_HOME
 fi
 
-if [ -z "${SPARK_HOME}" ]; then
+if [ -n "$RUNNER_EXISTING_SPARK_HOME" ]; then
+  echo "use existing spark $RUNNER_EXISTING_SPARK_HOME on runner, overwrite SPARK_HOME"
+  SPARK_HOME="$RUNNER_EXISTING_SPARK_HOME"
+  export SPARK_HOME
+elif [ -z "${SPARK_HOME}" ]; then
   SPARK_HOME=${OPENMLDB_HOME}/spark
   export SPARK_HOME
 fi

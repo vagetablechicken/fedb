@@ -56,7 +56,9 @@ distribute() {
   else
     if [[ "$type" = "taskmanager" ]]; then
       dir_list=(bin sbin conf taskmanager)
-      if [[ "$use_ssh" = true ]]; then
+      if [[ -n "$RUNNER_EXISTING_SPARK_HOME" ]]; then
+        echo "use existing spark $RUNNER_EXISTING_SPARK_HOME on $host, skip deploy spark"
+      elif [[ "$use_ssh" = true ]]; then
         run_auto "$host" "mkdir -p ${SPARK_HOME} > /dev/null 2>&1"
         rsync -arz "${SPARK_HOME}/" "$host:${SPARK_HOME}/"
       fi
@@ -147,6 +149,10 @@ function download_spark {
 
 # deploy taskmanagers
 downloaded=false
+if [[ -n "${RUNNER_EXISTING_SPARK_HOME}" ]]; then
+  echo "use $RUNNER_EXISTING_SPARK_HOME, skip download openmldbspark"
+  downloaded=true
+fi
 for line in $(parse_host conf/hosts taskmanager)
 do
   if ! $downloaded; then
@@ -159,7 +165,7 @@ do
 
   echo "deploy taskmanager to $host:$port $dir"
   distribute "$host" "$dir" "$home" taskmanager
-  cmd="cd $dir && OPENMLDB_VERSION=${OPENMLDB_VERSION} SPARK_HOME=${SPARK_HOME} OPENMLDB_HOST=$host OPENMLDB_TASKMANAGER_PORT=$port OPENMLDB_ZK_CLUSTER=${OPENMLDB_ZK_CLUSTER} OPENMLDB_ZK_ROOT_PATH=${OPENMLDB_ZK_ROOT_PATH} sbin/deploy.sh taskmanager"
+  cmd="cd $dir && SPARK_HOME=${SPARK_HOME} OPENMLDB_HOST=$host OPENMLDB_TASKMANAGER_PORT=$port OPENMLDB_ZK_CLUSTER=${OPENMLDB_ZK_CLUSTER} OPENMLDB_ZK_ROOT_PATH=${OPENMLDB_ZK_ROOT_PATH} sbin/deploy.sh taskmanager"
   run_auto "$host" "$cmd"
 done
 
