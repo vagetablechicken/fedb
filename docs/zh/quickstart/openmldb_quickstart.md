@@ -255,3 +255,7 @@ SELECT c1, c2, sum(c3) OVER w1 AS w1_c3_sum FROM demo_table1 WINDOW w1 AS (PARTI
       aaa   11      66
       ----- ---- -----------
       ```
+
+## 更多
+
+如果流程中出现了问题，请参考[上手必读-错误诊断](beginner_must_read.md#错误诊断)，先进行集群诊断，如果集群状态正常，再检查相应组件的日志。
