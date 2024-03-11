@@ -243,6 +243,8 @@ taskmanager:
     path: /work/taskmanager1
 ```
 
+#### 额外要求
+
 如果是分布式部署，诊断工具需要到部署节点上拉取文件，所以需要添加机器互信免密。设置方法参考[这里](https://www.itzgeek.com/how-tos/linux/centos-how-tos/ssh-passwordless-login-centos-7-rhel-7.html)。
 
 如果hosts/yaml中某些组件没有配置path，将会使用`--default_dir`作为部署目录，默认值为`/work/openmldb`。如果你的部署目录不是这个，可以通过`--default_dir`指定。
@@ -268,9 +270,14 @@ nameserver:
 
 #### 检查示例
 
-在镜像容器中可以这样静态检查：
+镜像容器或本地onebox集群（不需要ssh）：
 ```bash
 openmldb_tool static-check --conf_file=/work/openmldb/conf/hosts -VCL --local
+```
+
+分布式集群（需要ssh）：
+```bash
+openmldb_tool static-check --conf_file=/work/openmldb/conf/hosts -VCL
 ```
 
 ### RPC 接口
