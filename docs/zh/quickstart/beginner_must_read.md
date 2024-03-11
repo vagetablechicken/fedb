@@ -4,7 +4,11 @@
 
 ## 错误诊断
 
-在使用OpenMLDB的过程中，除了SQL语法错误，其他错误信息可能不够直观，但很可能与集群状态有关。所以，错误诊断需要**先确认集群状态**。在发现错误时，请先使用诊断工具的一键诊断功能。一键诊断可以输出全面直观的诊断报告，如果不能使用此工具，可以手动执行`SHOW COMPONENTS;`和`SHOW TABLE STATUS LIKE '%';`提供部分信息。
+在使用OpenMLDB的过程中，除了SQL语法错误，其他错误信息可能不够直观，但很可能与集群状态有关。所以，错误诊断需要**先确认集群状态**。如果诊断结果是健康，请提供与你操作相关的组件配置和日志。
+
+### 确认集群状态
+
+在发现错误时，请先使用诊断工具的一键诊断功能。一键诊断可以输出全面直观的诊断报告，如果不能使用此工具，可以手动执行`SHOW COMPONENTS;`和`SHOW TABLE STATUS LIKE '%';`提供部分信息。
 
 报告将展示集群的组件、在线表等状态，也会提示用户如何修复，请按照报告内容进行操作，详情见[一键inspect](../maintain/diagnose.md#一键inspect)。
 
@@ -14,7 +18,74 @@ openmldb_tool inspect [-c=0.0.0.0:2181/openmldb]
 
 需要注意，由于离线存储只会在执行离线job时被读取，而离线job也不是一个持续的状态，所以，一键诊断只能展示TaskManager组件状态，不会诊断离线存储，也无法诊断离线job的执行错误，离线job诊断见[离线SQL执行](#集群版离线-SQL-执行注意事项)。
 
-如果诊断报告认为集群健康，但仍然无法解决问题，请提供错误和诊断报告给我们。
+如果诊断报告认为集群健康，但仍然无法解决问题，请继续阅读下文。
+
+### 提供配置与日志
+
+如果你执行离线命令出错，请检查job状态，`SHOW JOB <id>`：
+- 如果job状态为FAILED，是该job自身出现问题，可以通过`SHOW JOBLOG <id>`查看日志，注意是否有Exception（可以使用`openmldb_tool inspect job --id x`来过滤）。
+- 如果job状态为LOST等不寻常的状态，可能是管理job的TaskManager出现问题，需要提供TaskManager的日志。
+
+如果你执行在线命令（包括在线SQL，所有DDL）出错，通常来讲，返回的Error信息会提供一些线索，可以使用关键词在文档中搜索，尤其是FAQ文档，可能有相关问题与解决方法。如果不足够，请提供NameServer和TabletServer在**对应时间**中的日志，请勿带入太多其他时间的日志。一般的，应先查WARN日志，如果信息不足，则提供INFO日志，供我们分析。
+
+如果你发送HTTP请求出现问题，返回的msg不足够时，请查看APIServer的日志。
+
+#### 日志位置
+
+如果情况允许，可以使用openmldb-tool来收集日志到本地，见[诊断工具-检查内容](../maintain/diagnose.md#检查内容)。
+
+手动查找，需要先确认你的部署方式，见[部署工具说明](#部署工具说明)。特别注意：快速上手中的OpenMLDB镜像是sbin部署方式。
+
+确认部署方式后，两步找到日志地址：
+1. 组件在哪里运行，即运行目录，我们记为`<host>:<base_dir>`。
+2. 组件配置文件中指定的日志地址，我们记为`<log_dir>`（一般是相对地址），默认均为`./logs`。
+
+完整日志目录就是`<host>:<base_dir>/<log_dir>`。（如果你将`<log_dir>`设置为绝对路径，则是`<host>:<log_dir>`。）
+
+##### sbin部署
+
+1. 运行目录
+
+    sbin部署方式中，组件的运行目录在`conf/hosts`中找到，默认为`$OPENMLDB_HOME`。
+    ```config
+    # conf/hosts
+    [tablet]
+    host1:10921 /tmp/openmldb/tablet-1
+    host2:10922
+    ```
+    上面这个例子中，第一个tablet的运行目录就是`host1:/tmp/openmldb/tablet-1`，第二个tablet运行目录就是`host2:$OPENMLDB_HOME`。
+
+2. 配置文件中的日志地址
+
+    NameServer、TabletServer和APIServer的日志配置项在`conf/<component>.flags.template`中的`openmldb_log_dir`，默认为`./logs`。
+
+    TaskManager是Java程序，它的运行路径与前面几个组件不同，不是`<base_dir>`，而是`<base_dir>/taskmanager/bin`。而且它的日志目录，也不在template配置中，而是`$OPENMLDB_HOME/taskmanager/conf/log4j.properties`中的`log4j.appender.file.file`，默认仍为`./logs/`。
+
+    离线Job通常使用`SHOW JOBLOG <id>`来查询，如果只能检查日志文件，需要知道其日志地址。它的运行目录就是TaskManager的目录，配置是TaskManager的配置文件`conf/taskmanager.properties.template`中的`job.log.path`。
+
+##### sbin部署-举例说明
+
+- 下面的配置文件中，TabletServer运行目录是`localhost:/tmp/openmldb/tablet-1`，而日志配置项`conf/tablet.flags.template`中`openmldb_log_dir`配置项，默认为`./logs`，那么，日志在`localhost:/tmp/openmldb/tablet-1/logs`。
+
+```config
+# conf/hosts
+[tablet]
+localhost:10921 /tmp/openmldb/tablet-1
+```
+
+- 下面的配置文件中， TaskManager不指定目录，运行目录是`localhost:$OPENMLDB_HOME`，但其运行路径还要补充，所以是`localhost:$OPENMLDB_HOME/taskmanager/bin/`。`$OPENMLDB_HOME/taskmanager/conf/log4j.properties`（注意不在`conf/`中）中的`log4j.appender.file.file`，默认为`./logs/`，那么，日志在`localhost:$OPENMLDB_HOME/taskmanager/bin/logs`。
+
+```config
+# conf/hosts
+[taskmanager]
+localhost:9902
+```
+
+- 离线Job的运行目录就是TaskManager的运行目录，通过上文方式获得。日志配置是TaskManager配置文件`$OPENMLDB_HOME/conf/taskmanager.properties.template`中的`job.log.path`，默认为`./logs/`。并且，我们规定job日志以job开头，所以，日志是`localhost:$OPENMLDB_HOME/taskmanager/bin/logs/job_x.log`和`job_x_error.log`。
+
+##### 手动部署
+
+运行目录是你执行`bin/start.sh`的目录，日志配置项在`conf/`中的配置文件中找到，无template后缀。NameServer、TabletServer和APIServer的配置文件为`<component>.flags`，目录配置项为`openmldb_log_dir`，默认为`./logs`。TaskManager的配置文件为`taskmanager.properties`，job目录配置项为`job.log.path`，默认为`./logs`，TaskManager日志配置项同上。
 
 ## 创建OpenMLDB与连接
 
