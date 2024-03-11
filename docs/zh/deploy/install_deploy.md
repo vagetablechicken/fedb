@@ -304,11 +304,9 @@ copy /work/openmldb/zookeeper to localhost:/tmp/openmldb/zk-1
 
 对环境变量有疑问，注意日志`OPENMLDB envs:`的打印结果。
 
-- 配置
-deploy不支持对单个组件的配置更新，更改单个组件也需要使用`deploy-all.sh`。如果你在部署host上单独修改，需要修改`xx.flags`/`taskmanager.properties`而不是template配置，而且`deploy-all.sh`将对该配置进行覆盖，请谨慎配置。检查配置时以host的运行目录中的`xx.flags`/`taskmanager.properties`为准。
+需要注意，**deploy不支持对单个组件的配置更新**，更改单个组件也需要使用`deploy-all.sh`。如果你在部署host上单独修改了`xx.flags`/`taskmanager.properties`而不是template配置，再次执行`deploy-all.sh`时，将对该配置进行覆盖，请谨慎操作。检查配置时以host的运行目录中的`xx.flags`/`taskmanager.properties`为准。
 
-- 日志
-相应的，各个节点的日志也在各自的运行目录中，具体位置参考[部署方式二：手动部署](#部署方式二手动部署)中各个组件的日志位置说明。
+各个节点的日志地址需要结合两个变量来确认，组件运行目录和组件配置文件中的日志地址。快速定位日志位置，参考[快速上手-日志位置](../quickstart/beginner_must_read.md#日志位置)。[部署方式二：手动部署](#部署方式二手动部署)中，还有关于启动失败后如何查看日志的说明。
 
 收集日志与配置，可以使用诊断工具[检查内容](../maintain/diagnose.md#检查内容)，默认将各个节点的配置和日志都收集到`/tmp/diag_collect`目录中，可以统一查看。
 
