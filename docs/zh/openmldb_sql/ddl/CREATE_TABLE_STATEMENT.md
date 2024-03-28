@@ -237,8 +237,9 @@ IndexOption ::=
 | `ABSANDLAT` | 配置过期时间和最大存活条数。配置值是一个2元组，形如`(100m, 10), (1d, 1)`。最大可以配置`(15768000m, 1000)`。 | 当记录过期**且**记录超过最大条数时，记录会被淘汰。   | `INDEX(key=c1, ts=c6, ttl=(120m, 100), ttl_type=absandlat)`。当记录超过100条，**而且**记录过期时，会被淘汰 |
 
 ```{note}
-最大过期时间和最大存活条数的限制，是出于性能考虑。如果你一定要配置更大的TTL值，请使用UpdateTTL来增大（可无视max限制），或者调整nameserver配置`absolute_ttl_max`和`latest_ttl_max`，重启生效。
+最大过期时间和最大存活条数的限制，是出于性能考虑。如果你一定要配置更大的TTL值，可先创建表时临时使用合规的TTL值，然后使用nameserver的UpdateTTL接口来调整到所需的值（可无视max限制），生效需要经过一个gc时间；或者，调整nameserver配置`absolute_ttl_max`和`latest_ttl_max`，重启生效后再创建表。
 ```
+
 #### Example
 **示例1：创建一张带单列索引的表**
 
