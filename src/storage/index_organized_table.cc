@@ -58,7 +58,6 @@ IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, uint32_t idx, Ti
     ticket.Push(entry);
     return new IOTIterator(entry->entries.NewIterator(), compress_type, std::move(cidx_iter));
 }
-
 // TODO(hw): iot iterator needs schema for test, delete later
 TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::string& pk, Ticket& ticket) {
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
