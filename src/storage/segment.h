@@ -46,6 +46,7 @@ class MemTableIterator : public TableIterator {
     void Seek(const uint64_t time) override;
     bool Valid() override;
     void Next() override;
+    // GetXXX will core if it_==nullptr, don't use it without valid
     openmldb::base::Slice GetValue() const override;
     uint64_t GetKey() const override;
     void SeekToFirst() override;
@@ -68,7 +69,7 @@ class Segment {
  public:
     explicit Segment(uint8_t height);
     Segment(uint8_t height, const std::vector<uint32_t>& ts_idx_vec);
-    ~Segment();
+    virtual ~Segment();
 
     // legacy interface called by memtable and ut
     void Put(const Slice& key, uint64_t time, const char* data, uint32_t size, bool put_if_absent = false,
@@ -78,7 +79,7 @@ class Segment {
 
     void BulkLoadPut(unsigned int key_entry_id, const Slice& key, uint64_t time, DataBlock* row);
     // main put method
-    bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent = false);
+    virtual bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent = false);
 
     bool Delete(const std::optional<uint32_t>& idx, const Slice& key);
     bool Delete(const std::optional<uint32_t>& idx, const Slice& key,
@@ -141,17 +142,17 @@ class Segment {
 
     void ReleaseAndCount(const std::vector<size_t>& id_vec, StatisticsInfo* statistics_info);
 
- private:
+ protected:
     void FreeList(uint32_t ts_idx, ::openmldb::base::Node<uint64_t, DataBlock*>* node, StatisticsInfo* statistics_info);
     void SplitList(KeyEntry* entry, uint64_t ts, ::openmldb::base::Node<uint64_t, DataBlock*>** node);
     bool GetTsIdx(const std::optional<uint32_t>& idx, uint32_t* ts_idx);
 
     bool ListContains(KeyEntry* entry, uint64_t time, DataBlock* row, bool check_all_time);
 
-    bool PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false,
+    virtual bool PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false,
                    bool check_all_time = false);
 
- private:
+ protected:
     KeyEntries* entries_;
     std::mutex mu_;
     std::atomic<uint64_t> idx_byte_size_;

@@ -3822,6 +3822,7 @@ void NameServerImpl::CreateTable(RpcController* controller, const CreateTableReq
         table_info->set_partition_num(1);
         table_info->set_replica_num(1);
     }
+    // TODO(hw): valid index pattern 1. all covering 2. clustered + secondary/covering(only one clustered and it should be the first one)
     auto status = schema::SchemaAdapter::CheckTableMeta(*table_info);
     if (!status.OK()) {
         PDLOG(WARNING, status.msg.c_str());
