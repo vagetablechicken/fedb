@@ -195,7 +195,8 @@ int TableIndex::ParseFromMeta(const ::openmldb::api::TableMeta& table_meta) {
                 }
             }
         }
-        uint32_t key_idx = 0;
+
+        // pos == idx
         for (int pos = 0; pos < table_meta.column_key_size(); pos++) {
             const auto& column_key = table_meta.column_key(pos);
             std::string name = column_key.index_name();
@@ -209,8 +210,10 @@ int TableIndex::ParseFromMeta(const ::openmldb::api::TableMeta& table_meta) {
             for (const auto& cur_col_name : column_key.col_name()) {
                 col_vec.push_back(*(col_map[cur_col_name]));
             }
-            auto index = std::make_shared<IndexDef>(column_key.index_name(), key_idx, status,
-                                                    ::openmldb::type::IndexType::kTimeSerise, col_vec);
+            // index type is optional
+            common::IndexType index_type = column_key.has_type() ? column_key.type() : common::IndexType::kCovering;
+            auto index = std::make_shared<IndexDef>(column_key.index_name(), pos, status,
+                                                    ::openmldb::type::IndexType::kTimeSerise, col_vec, index_type);
             if (!column_key.ts_name().empty()) {
                 const std::string& ts_name = column_key.ts_name();
                 index->SetTsColumn(col_map[ts_name]);
@@ -226,7 +229,6 @@ int TableIndex::ParseFromMeta(const ::openmldb::api::TableMeta& table_meta) {
                 DLOG(WARNING) << "add index failed";
                 return -1;
             }
-            key_idx++;
         }
     }
     // add default dimension
