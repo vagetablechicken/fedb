@@ -46,6 +46,7 @@ class MemTableIterator : public TableIterator {
     void Seek(const uint64_t time) override;
     bool Valid() override;
     void Next() override;
+    // GetXXX will core if it_==nullptr, don't use it without valid
     openmldb::base::Slice GetValue() const override;
     uint64_t GetKey() const override;
     void SeekToFirst() override;

@@ -632,6 +632,13 @@ bool MemTable::AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) {
     return true;
 }
 
+uint32_t MemTable::SegIdx(const std::string& pk) {
+    if (seg_cnt_ > 1) {
+        return ::openmldb::base::hash(pk.c_str(), pk.length(), SEED) % seg_cnt_;
+    }
+    return 0;
+}
+
 ::hybridse::vm::WindowIterator* MemTable::NewWindowIterator(uint32_t index) {
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
