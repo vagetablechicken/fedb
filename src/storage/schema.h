@@ -234,6 +234,11 @@ class IndexDef {
     IndexDef(const std::string& name, uint32_t id, IndexStatus status);
     IndexDef(const std::string& name, uint32_t id, const IndexStatus& status, ::openmldb::type::IndexType type,
              const std::vector<ColumnDef>& column_idx_map);
+    IndexDef(const std::string& name, uint32_t id, const IndexStatus& status, ::openmldb::type::IndexType type,
+             const std::vector<ColumnDef>& column_idx_map, common::IndexType index_type)
+        : IndexDef(name, id, status, type, column_idx_map) {
+        index_type_ = index_type;
+    }
     const std::string& GetName() const { return name_; }
     inline const std::shared_ptr<ColumnDef>& GetTsColumn() const { return ts_column_; }
     void SetTsColumn(const std::shared_ptr<ColumnDef>& ts_column) { ts_column_ = ts_column; }
@@ -250,15 +255,20 @@ class IndexDef {
     inline uint32_t GetInnerPos() const { return inner_pos_; }
     ::openmldb::common::ColumnKey GenColumnKey();
 
+    bool IsSecondaryIndex() { return index_type_ == common::IndexType::kSecondary;}
+
  private:
     std::string name_;
     uint32_t index_id_;
     uint32_t inner_pos_;
     std::atomic<IndexStatus> status_;
+    // for compatible, type is only kTimeSerise
     ::openmldb::type::IndexType type_;
     std::vector<ColumnDef> columns_;
     std::shared_ptr<TTLSt> ttl_st_;
     std::shared_ptr<ColumnDef> ts_column_;
+    // 0 covering, 1 clustered, 2 secondary, default 0
+    common::IndexType index_type_ = common::IndexType::kCovering;
 };
 
 class InnerIndexSt {

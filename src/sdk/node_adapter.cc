@@ -383,6 +383,14 @@ bool NodeAdapter::TransformToTableDef(::hybridse::node::CreatePlanNode* create_n
                 if (!TransformToColumnKey(column_index, column_names, index, status)) {
                     return false;
                 }
+                // TODO(hw): test way
+                if (index_names.size() == 1) {
+                    // the clustered key
+                    index->set_type(common::IndexType::kClustered);
+                } else {
+                    index->set_type(common::IndexType::kSecondary);
+                }
+                LOG(WARNING) << "hw test mock index";
                 break;
             }
 

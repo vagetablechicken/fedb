@@ -3959,6 +3959,24 @@ int TabletImpl::UpdateTableMeta(const std::string& path, ::openmldb::api::TableM
     return UpdateTableMeta(path, table_meta, false);
 }
 
+bool IsIOT(const ::openmldb::api::TableMeta* table_meta) {
+    auto cks = table_meta->column_key();
+    if (cks.empty()) {
+        LOG(WARNING) << "no index in meta";
+        return false;
+    }
+    if (cks[0].has_type() && cks[0].type() == 1) {
+        // check other indexes
+        for (int i = 1; i < cks.size(); i++) {
+            if (cks[i].has_type() && cks[i].type() == 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 int TabletImpl::CreateTableInternal(const ::openmldb::api::TableMeta* table_meta, std::string& msg) {
     uint32_t tid = table_meta->tid();
     uint32_t pid = table_meta->pid();
@@ -3988,7 +4006,11 @@ int TabletImpl::CreateTableInternal(const ::openmldb::api::TableMeta* table_meta
     }
     std::string table_db_path = GetDBPath(db_root_path, tid, pid);
     if (table_meta->storage_mode() == openmldb::common::kMemory) {
-        table = std::make_shared<MemTable>(*table_meta);
+        if (IsIOT(table_meta)) {
+            table = std::make_shared<storage::IndexOrganizedTable>(*table_meta, catalog_);
+        } else {
+            table = std::make_shared<MemTable>(*table_meta);
+        }
     } else {
         table = std::make_shared<DiskTable>(*table_meta, table_db_path);
     }

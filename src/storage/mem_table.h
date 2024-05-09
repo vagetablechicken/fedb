@@ -68,7 +68,7 @@ class MemTable : public Table {
 
     TraverseIterator* NewTraverseIterator(uint32_t index) override;
 
-    ::hybridse::vm::WindowIterator* NewWindowIterator(uint32_t index);
+    ::hybridse::vm::WindowIterator* NewWindowIterator(uint32_t index) override;
 
     // release all memory allocated
     uint64_t Release();
@@ -103,6 +103,12 @@ class MemTable : public Table {
 
  protected:
     bool AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) override;
+
+    uint32_t SegIdx(const std::string& pk);
+
+    Segment* GetSegment(uint32_t real_idx, uint32_t seg_idx) {
+      return segments_[real_idx][seg_idx];
+    }
 
  private:
     bool CheckAbsolute(const TTLSt& ttl, uint64_t ts);

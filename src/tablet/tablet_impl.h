@@ -37,6 +37,7 @@
 #include "statistics/query_response_time/deployment_metric_collector.h"
 #include "storage/aggregator.h"
 #include "storage/mem_table.h"
+#include "storage/index_organized_table.h"
 #include "storage/mem_table_snapshot.h"
 #include "tablet/bulk_load_mgr.h"
 #include "tablet/combine_iterator.h"
