@@ -27,7 +27,7 @@ IOTIterator* NewNullIterator() {
 
 // TODO(hw): temp func to create iot iterator
 IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, Ticket& ticket, type::CompressType compress_type,
-                              std::unique_ptr<hybridse::codec::WindowIterator> cidx_iter) {
+                            std::unique_ptr<hybridse::codec::WindowIterator> cidx_iter) {
     void* entry = nullptr;
     auto entries = segment->GetKeyEntries();
     if (entries == nullptr || segment->GetTsCnt() > 1 || entries->Get(key, entry) < 0 || entry == nullptr) {
@@ -39,8 +39,8 @@ IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, Ticket& ticket, 
 }
 
 IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, uint32_t idx, Ticket& ticket,
-                              type::CompressType compress_type,
-                              std::unique_ptr<hybridse::codec::WindowIterator> cidx_iter) {
+                            type::CompressType compress_type,
+                            std::unique_ptr<hybridse::codec::WindowIterator> cidx_iter) {
     auto ts_idx_map = segment->GetTsIdxMap();
     auto pos = ts_idx_map.find(idx);
     if (pos == ts_idx_map.end()) {
@@ -58,8 +58,10 @@ IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, uint32_t idx, Ti
     ticket.Push(entry);
     return new IOTIterator(entry->entries.NewIterator(), compress_type, std::move(cidx_iter));
 }
+
 // TODO(hw): iot iterator needs schema for test, delete later
 TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::string& pk, Ticket& ticket) {
+    LOG(INFO) << "hw test new iter for index and pk";
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
         LOG(WARNING) << "index is invalid";
@@ -86,9 +88,9 @@ TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::strin
                 return nullptr;
             }
             // TODO(hw): iter may be invalid if catalog updated
-            auto iter = NewIOTIterator(
-                segment, spk, ts_col->GetId(), ticket, GetCompressType(),
-                std::move(tablet_table_handler->GetWindowIterator(table_index_.GetIndex(0)->GetName())));
+            auto iter =
+                NewIOTIterator(segment, spk, ts_col->GetId(), ticket, GetCompressType(),
+                               std::move(tablet_table_handler->GetWindowIterator(table_index_.GetIndex(0)->GetName())));
             // schema, pkeys cols, ts col
             iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
             return iter;
@@ -100,7 +102,92 @@ TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::strin
     return segment->NewIterator(spk, ticket, GetCompressType());
 }
 
-TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {return nullptr;}
+TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
+    LOG(INFO) << "hw test new traverse iter for index";
+    std::shared_ptr<IndexDef> index_def = GetIndex(index);
+    if (!index_def || !index_def->IsReady()) {
+        PDLOG(WARNING, "index %u not found. tid %u pid %u", index, id_, pid_);
+        return nullptr;
+    }
+    uint64_t expire_time = 0;
+    uint64_t expire_cnt = 0;
+    auto ttl = index_def->GetTTL();
+    if (GetExpireStatus()) {  // gc enabled
+        expire_time = GetExpireTime(*ttl);
+        expire_cnt = ttl->lat_ttl;
+    }
+    uint32_t real_idx = index_def->GetInnerPos();
+    auto ts_col = index_def->GetTsColumn();
+    if (ts_col) {
+        // if secondary, use iot iterator
+        if (index_def->IsSecondaryIndex()) {
+            // get clustered index iter for secondary index
+            auto handler = catalog_->GetTable(GetDB(), GetName());
+            if (!handler) {
+                LOG(WARNING) << "no TableHandler for " << GetDB() << "." << GetName();
+                return nullptr;
+            }
+            auto tablet_table_handler = std::dynamic_pointer_cast<catalog::TabletTableHandler>(handler);
+            if (!tablet_table_handler) {
+                LOG(WARNING) << "convert TabletTableHandler failed for " << GetDB() << "." << GetName();
+                return nullptr;
+            }
+            // TODO(hw): iter may be invalid if catalog updated
+            auto iter = new IOTTraverseIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt,
+                                            ts_col->GetId(), GetCompressType());
+            // schema, pkeys cols, ts col
+            iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
+            return iter;
+        }
+        return new MemTableTraverseIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt,
+                                            ts_col->GetId(), GetCompressType());
+    }
+    return new MemTableTraverseIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, 0,
+                                        GetCompressType());
+}
 
-::hybridse::vm::WindowIterator* IndexOrganizedTable::NewWindowIterator(uint32_t index) {return nullptr;}
+::hybridse::vm::WindowIterator* IndexOrganizedTable::NewWindowIterator(uint32_t index) {
+    LOG(INFO) << "hw test new window iter for index";
+    std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
+    if (!index_def || !index_def->IsReady()) {
+        LOG(WARNING) << "index id " << index << " not found. tid " << id_ << " pid " << pid_;
+        return nullptr;
+    }
+    uint64_t expire_time = 0;
+    uint64_t expire_cnt = 0;
+    auto ttl = index_def->GetTTL();
+    if (GetExpireStatus()) {
+        expire_time = GetExpireTime(*ttl);
+        expire_cnt = ttl->lat_ttl;
+    }
+    uint32_t real_idx = index_def->GetInnerPos();
+    auto ts_col = index_def->GetTsColumn();
+    uint32_t ts_idx = 0;
+    if (ts_col) {
+        ts_idx = ts_col->GetId();
+    }
+    // if secondary, use iot iterator
+    if (index_def->IsSecondaryIndex()) {
+        // get clustered index iter for secondary index
+        auto handler = catalog_->GetTable(GetDB(), GetName());
+        if (!handler) {
+            LOG(WARNING) << "no TableHandler for " << GetDB() << "." << GetName();
+            return nullptr;
+        }
+        auto tablet_table_handler = std::dynamic_pointer_cast<catalog::TabletTableHandler>(handler);
+        if (!tablet_table_handler) {
+            LOG(WARNING) << "convert TabletTableHandler failed for " << GetDB() << "." << GetName();
+            return nullptr;
+        }
+        // TODO(hw): iter may be invalid if catalog updated
+        auto iter =
+            new (GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_idx,
+                                   GetCompressType());
+        // schema, pkeys cols, ts col
+        iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
+        return iter;
+    }
+    return new MemTableKeyIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_idx,
+                                   GetCompressType());
+}
 }  // namespace openmldb::storage
