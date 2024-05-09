@@ -109,6 +109,9 @@ class MemTable : public Table {
     Segment* GetSegment(uint32_t real_idx, uint32_t seg_idx) {
       return segments_[real_idx][seg_idx];
     }
+    Segment** GetSegments(uint32_t real_idx) {
+      return segments_[real_idx];
+    }
 
  private:
     bool CheckAbsolute(const TTLSt& ttl, uint64_t ts);
