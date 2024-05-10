@@ -61,7 +61,6 @@ IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, uint32_t idx, Ti
 
 // TODO(hw): iot iterator needs schema for test, delete later
 TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::string& pk, Ticket& ticket) {
-    LOG(INFO) << "hw test new iter for index and pk";
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
         LOG(WARNING) << "index is invalid";
