@@ -26,7 +26,7 @@ namespace openmldb::storage {
 class IndexOrganizedTable : public MemTable {
  public:
     IndexOrganizedTable(const ::openmldb::api::TableMeta& table_meta, std::shared_ptr<catalog::TabletCatalog> catalog)
-        : MemTable(table_meta), catalog_(HYBRIDSE_INCLUDE_VM_CATALOG_H_) {}
+        : MemTable(table_meta), catalog_(catalog) {}
 
     TableIterator* NewIterator(uint32_t index, const std::string& pk, Ticket& ticket) override;
 

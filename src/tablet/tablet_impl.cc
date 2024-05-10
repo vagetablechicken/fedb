@@ -4008,6 +4008,7 @@ int TabletImpl::CreateTableInternal(const ::openmldb::api::TableMeta* table_meta
     std::string table_db_path = GetDBPath(db_root_path, tid, pid);
     if (table_meta->storage_mode() == openmldb::common::kMemory) {
         if (IsIOT(table_meta)) {
+            LOG(INFO) << "create iot table " << tid << "." << pid;
             table = std::make_shared<storage::IndexOrganizedTable>(*table_meta, catalog_);
         } else {
             table = std::make_shared<MemTable>(*table_meta);
