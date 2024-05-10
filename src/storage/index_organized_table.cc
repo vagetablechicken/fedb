@@ -61,12 +61,12 @@ IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, uint32_t idx, Ti
 
 // TODO(hw): iot iterator needs schema for test, delete later
 TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::string& pk, Ticket& ticket) {
-    LOG(INFO) << "hw test new iter for index and pk";
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
         LOG(WARNING) << "index is invalid";
         return nullptr;
     }
+    LOG(INFO) << "hw test new iter for index and pk " << index << " name " << index_def->GetName();
     uint32_t seg_idx = SegIdx(pk);
     Slice spk(pk);
     uint32_t real_idx = index_def->GetInnerPos();
@@ -87,6 +87,7 @@ TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::strin
                 LOG(WARNING) << "convert TabletTableHandler failed for " << GetDB() << "." << GetName();
                 return nullptr;
             }
+            LOG(INFO) << "create iot iterator for pk";
             // TODO(hw): iter may be invalid if catalog updated
             auto iter =
                 NewIOTIterator(segment, spk, ts_col->GetId(), ticket, GetCompressType(),
@@ -103,12 +104,12 @@ TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::strin
 }
 
 TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
-    LOG(INFO) << "hw test new traverse iter for index";
     std::shared_ptr<IndexDef> index_def = GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
         PDLOG(WARNING, "index %u not found. tid %u pid %u", index, id_, pid_);
         return nullptr;
     }
+    LOG(INFO) << "hw test new traverse iter for index " << index << " name " << index_def->GetName();
     uint64_t expire_time = 0;
     uint64_t expire_cnt = 0;
     auto ttl = index_def->GetTTL();
@@ -132,9 +133,12 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
                 LOG(WARNING) << "convert TabletTableHandler failed for " << GetDB() << "." << GetName();
                 return nullptr;
             }
+            LOG(INFO) << "create iot traverse iterator for traverse";
             // TODO(hw): iter may be invalid if catalog updated
-            auto iter = new IOTTraverseIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt,
-                                            ts_col->GetId(), GetCompressType());
+            auto iter = new IOTTraverseIterator(
+                GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_col->GetId(),
+                GetCompressType(),
+                std::move(tablet_table_handler->GetWindowIterator(table_index_.GetIndex(0)->GetName())));
             // schema, pkeys cols, ts col
             iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
             return iter;
@@ -147,12 +151,12 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
 }
 
 ::hybridse::vm::WindowIterator* IndexOrganizedTable::NewWindowIterator(uint32_t index) {
-    LOG(INFO) << "hw test new window iter for index";
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
         LOG(WARNING) << "index id " << index << " not found. tid " << id_ << " pid " << pid_;
         return nullptr;
     }
+    LOG(INFO) << "hw test new window iter for index " << index << " name " << index_def->GetName();
     uint64_t expire_time = 0;
     uint64_t expire_cnt = 0;
     auto ttl = index_def->GetTTL();
@@ -179,10 +183,11 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
             LOG(WARNING) << "convert TabletTableHandler failed for " << GetDB() << "." << GetName();
             return nullptr;
         }
+        LOG(INFO) << "create iot key traverse iterator for window";
         // TODO(hw): iter may be invalid if catalog updated
         auto iter =
-            new (GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_idx,
-                                   GetCompressType());
+            new IOTKeyIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_idx,
+                               GetCompressType(), tablet_table_handler, table_index_.GetIndex(0)->GetName());
         // schema, pkeys cols, ts col
         iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
         return iter;
