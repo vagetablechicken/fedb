@@ -2137,10 +2137,10 @@ base::Status ValidateTableInfo(const nameserver::TableInfo& table_info) {
                 return {base::ReturnCode::kInvalidArgs, "index " + std::to_string(i) + " should not be clustered"};
             }
         }
-
     } else {
         return {base::ReturnCode::kInvalidArgs, "index 0 should be clustered or covering"};
     }
+    return {};
 }
 
 base::Status SQLClusterRouter::HandleSQLCreateTable(hybridse::node::CreatePlanNode* create_node, const std::string& db,

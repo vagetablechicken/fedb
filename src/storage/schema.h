@@ -35,13 +35,7 @@ static constexpr uint32_t MAX_INDEX_NUM = 200;
 static constexpr uint32_t DEFAULT_TS_COL_ID = UINT32_MAX;
 static constexpr const char* DEFAULT_TS_COL_NAME = "___default_ts___";
 
-enum TTLType {
-    kAbsoluteTime = 1,
-    kRelativeTime = 2,
-    kLatestTime = 3,
-    kAbsAndLat = 4,
-    kAbsOrLat = 5
-};
+enum TTLType { kAbsoluteTime = 1, kRelativeTime = 2, kLatestTime = 3, kAbsAndLat = 4, kAbsOrLat = 5 };
 
 // ttl unit: millisecond
 struct TTLSt {
@@ -147,8 +141,7 @@ struct TTLSt {
 };
 
 struct ExpiredChecker {
-    ExpiredChecker(uint64_t abs, uint64_t lat, TTLType type) :
-        abs_expired_ttl(abs), lat_ttl(lat), ttl_type(type) {}
+    ExpiredChecker(uint64_t abs, uint64_t lat, TTLType type) : abs_expired_ttl(abs), lat_ttl(lat), ttl_type(type) {}
     bool IsExpired(uint64_t abs, uint32_t record_idx) const {
         switch (ttl_type) {
             case TTLType::kAbsoluteTime:
@@ -255,7 +248,8 @@ class IndexDef {
     inline uint32_t GetInnerPos() const { return inner_pos_; }
     ::openmldb::common::ColumnKey GenColumnKey();
 
-    bool IsSecondaryIndex() { return index_type_ == common::IndexType::kSecondary;}
+    bool IsSecondaryIndex() { return index_type_ == common::IndexType::kSecondary; }
+    bool IsClusteredIndex() { return index_type_ == common::IndexType::kClustered; }
 
  private:
     std::string name_;

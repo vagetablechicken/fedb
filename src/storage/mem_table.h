@@ -54,10 +54,10 @@ class MemTable : public Table {
     absl::Status Put(uint64_t time, const std::string& value, const Dimensions& dimensions,
                      bool put_if_absent) override;
 
-    bool GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response);
+    virtual bool GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response);
 
-    bool BulkLoad(const std::vector<DataBlock*>& data_blocks,
-                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
+    virtual bool BulkLoad(const std::vector<DataBlock*>& data_blocks,
+                          const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes);
 
     bool Delete(const ::openmldb::api::LogEntry& entry) override;
 
@@ -107,19 +107,19 @@ class MemTable : public Table {
     uint32_t SegIdx(const std::string& pk);
 
     Segment* GetSegment(uint32_t real_idx, uint32_t seg_idx) {
-      return segments_[real_idx][seg_idx];
+        // TODO(hw): protect
+        return segments_[real_idx][seg_idx];
     }
-    Segment** GetSegments(uint32_t real_idx) {
-      return segments_[real_idx];
-    }
+    Segment** GetSegments(uint32_t real_idx) { return segments_[real_idx]; }
+    std::atomic<uint64_t> record_byte_size_;
 
  private:
     bool CheckAbsolute(const TTLSt& ttl, uint64_t ts);
 
     bool CheckLatest(uint32_t index_id, const std::string& key, uint64_t ts);
 
-    bool Delete(uint32_t idx, const std::string& key,
-            const std::optional<uint64_t>& start_ts, const std::optional<uint64_t>& end_ts);
+    bool Delete(uint32_t idx, const std::string& key, const std::optional<uint64_t>& start_ts,
+                const std::optional<uint64_t>& end_ts);
 
  private:
     uint32_t seg_cnt_;
@@ -127,7 +127,7 @@ class MemTable : public Table {
     std::atomic<bool> enable_gc_;
     uint64_t ttl_offset_;
     bool segment_released_;
-    std::atomic<uint64_t> record_byte_size_;
+
     uint32_t key_entry_max_height_;
 };
 

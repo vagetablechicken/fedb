@@ -16,6 +16,8 @@
 
 #include "storage/index_organized_table.h"
 
+#include <snappy.h>
+
 #include "storage/iot_segment.h"
 
 namespace openmldb::storage {
@@ -195,4 +197,137 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
     return new MemTableKeyIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_idx,
                                    GetCompressType());
 }
+
+bool IndexOrganizedTable::Put(const std::string& pk, uint64_t time, const char* data, uint32_t size) {
+    uint32_t seg_idx = SegIdx(pk);
+    Segment* segment = GetSegment(0, seg_idx);
+    if (segment == nullptr) {
+        return false;
+    }
+    Slice spk(pk);
+    segment->Put(spk, time, data, size);
+    record_byte_size_.fetch_add(GetRecordSize(size));
+    return true;
+}
+
+absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, const Dimensions& dimensions,
+                                      bool put_if_absent) {
+    if (dimensions.empty()) {
+        PDLOG(WARNING, "empty dimension. tid %u pid %u", id_, pid_);
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": empty dimension"));
+    }
+    // inner index pos: -1 means invalid, so it's positive in inner_index_key_map
+    std::map<int32_t, Slice> inner_index_key_map;
+    std::pair<int32_t, std::string> inner_pkeys_pair;
+    std::vector<int32_t> secondary_inners;
+
+    for (auto iter = dimensions.begin(); iter != dimensions.end(); iter++) {
+        int32_t inner_pos = table_index_.GetInnerIndexPos(iter->idx());
+        if (inner_pos < 0) {
+            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid dimension idx ", iter->idx()));
+        }
+        if (iter->idx() == 0) {
+            inner_pkeys_pair = {inner_pos, iter->key()};
+        }
+        inner_index_key_map.emplace(inner_pos, iter->key());
+    }
+
+    const int8_t* data = reinterpret_cast<const int8_t*>(value.data());
+    std::string uncompress_data;
+    uint32_t data_length = value.length();
+    if (GetCompressType() == openmldb::type::kSnappy) {
+        snappy::Uncompress(value.data(), value.size(), &uncompress_data);
+        data = reinterpret_cast<const int8_t*>(uncompress_data.data());
+        data_length = uncompress_data.length();
+    }
+    if (data_length < codec::HEADER_LENGTH) {
+        PDLOG(WARNING, "invalid value. tid %u pid %u", id_, pid_);
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid value"));
+    }
+    uint8_t version = codec::RowView::GetSchemaVersion(data);
+    auto decoder = GetVersionDecoder(version);
+    if (decoder == nullptr) {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid schema version ", version));
+    }
+
+    uint64_t clustered_tsv = 0;
+    std::map<uint32_t, std::map<int32_t, uint64_t>> ts_value_map;
+    // we need two ref cnt
+    // 1. clustered and covering: put row ->DataBlock(i)
+    // 2. secondary: put pkeys+pts -> DataBlock(j)
+    uint32_t real_ref_cnt = 0, secondary_ref_cnt = 0;
+    // inner_pkeys_pair can get the clustered index
+    for (const auto& kv : inner_index_key_map) {
+        auto inner_index = table_index_.GetInnerIndex(kv.first);
+        if (!inner_index) {
+            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid inner index pos ", kv.first));
+        }
+        std::map<int32_t, uint64_t> ts_map;
+        for (const auto& index_def : inner_index->GetIndex()) {
+            if (!index_def->IsReady()) {
+                continue;
+            }
+            auto ts_col = index_def->GetTsColumn();
+            if (ts_col) {
+                int64_t ts = 0;
+                if (ts_col->IsAutoGenTs()) {
+                    // clustered index don't use current time to be ts TODO(hw): current time to ttl?
+                    if (kv.first == inner_pkeys_pair.first) {
+                        ts = 0;
+                    } else {
+                        ts = time;
+                    }
+                } else if (decoder->GetInteger(data, ts_col->GetId(), ts_col->GetType(), &ts) != 0) {
+                    return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": get ts failed"));
+                }
+                if (ts < 0) {
+                    return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": ts is negative ", ts));
+                }
+                // TODO(hw): why uint32_t to int32_t?
+                ts_map.emplace(ts_col->GetId(), ts);
+
+                if (index_def->IsSecondaryIndex()) {
+                    secondary_ref_cnt++;
+                } else {
+                    real_ref_cnt++;
+                }
+                if (index_def->IsClusteredIndex()) {
+                    clustered_tsv = ts;
+                }
+            }
+        }
+        if (!ts_map.empty()) {
+            ts_value_map.emplace(kv.first, std::move(ts_map));
+        }
+    }
+    if (ts_value_map.empty()) {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": empty ts value map"));
+    }
+    // get pkeys+pts
+    auto pts = ts_value_map.find(inner_pkeys_pair.first);
+    if (pts == ts_value_map.end()) {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": no pts for clustered index"));
+    }
+    auto pkeys_pts = PackPkeysAndPts(inner_pkeys_pair.second, clustered_tsv);
+    auto* row_block = new DataBlock(real_ref_cnt, value.c_str(), value.length());
+    auto* pblock = new DataBlock(secondary_ref_cnt, pkeys_pts.c_str(), pkeys_pts.length());
+    for (const auto& kv : inner_index_key_map) {
+        auto iter = ts_value_map.find(kv.first);
+        if (iter == ts_value_map.end()) {
+            continue;
+        }
+        uint32_t seg_idx = SegIdx(kv.second.ToString());  // TODO(hw):
+        Segment* segment = GetSegment(kv.first, seg_idx);
+        // clustered index put row
+        auto blk = kv.first == inner_pkeys_pair.first ? row_block : pblock;
+        DLOG(INFO) << "don't support put if absent";
+        // clustered segment should be dedup and update will trigger all index update like delete TODO
+        if (!segment->Put(kv.second, iter->second, blk, false)) {
+            return absl::AlreadyExistsError("data exists");  // let caller know exists
+        }
+    }
+    record_byte_size_.fetch_add(GetRecordSize(value.length()));
+    return absl::OkStatus();
+}
+
 }  // namespace openmldb::storage
