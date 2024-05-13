@@ -1282,7 +1282,7 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& s
 
     std::vector<size_t> fails;
     if (!codegen_rows.empty()) {
-        for (size_t i = 0 ; i < codegen_rows.size(); ++i) {
+        for (size_t i = 0; i < codegen_rows.size(); ++i) {
             auto r = codegen_rows[i];
             auto row = std::make_shared<SQLInsertRow>(table_info, schema, r, put_if_absent);
             if (!PutRow(table_info->tid(), row, tablets, status)) {
@@ -1697,7 +1697,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::HandleSQLCmd(const h
         }
 
         case hybridse::node::kCmdShowUser: {
-            std::vector<std::string> value = { options_->user };
+            std::vector<std::string> value = {options_->user};
             return ResultSetSQL::MakeResultSet({"User"}, {value}, status);
         }
 
@@ -2118,6 +2118,31 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::HandleSQLCmd(const h
     return {};
 }
 
+base::Status ValidateTableInfo(const nameserver::TableInfo& table_info) {
+    auto& indexs = table_info.column_key();
+    if (indexs.empty()) {
+        return {base::ReturnCode::kInvalidArgs, "no index specified"};
+    }
+    if (indexs[0].type() == common::IndexType::kCovering) {
+        // MemTable, all other indexs should be covering
+        for (int i = 1; i < indexs.size(); i++) {
+            if (indexs[i].type() != common::IndexType::kCovering) {
+                return {base::ReturnCode::kInvalidArgs, "index " + std::to_string(i) + " should be covering"};
+            }
+        }
+    } else if (indexs[0].type() == common::IndexType::kClustered) {
+        // IOT, no more clustered index, secondary and covering are valid
+        for (int i = 1; i < indexs.size(); i++) {
+            if (indexs[i].type() == common::IndexType::kClustered) {
+                return {base::ReturnCode::kInvalidArgs, "index " + std::to_string(i) + " should not be clustered"};
+            }
+        }
+
+    } else {
+        return {base::ReturnCode::kInvalidArgs, "index 0 should be clustered or covering"};
+    }
+}
+
 base::Status SQLClusterRouter::HandleSQLCreateTable(hybridse::node::CreatePlanNode* create_node, const std::string& db,
                                                     std::shared_ptr<::openmldb::client::NsClient> ns_ptr) {
     return HandleSQLCreateTable(create_node, db, ns_ptr, "");
@@ -2146,11 +2171,14 @@ base::Status SQLClusterRouter::HandleSQLCreateTable(hybridse::node::CreatePlanNo
 
         hybridse::base::Status sql_status;
         bool is_cluster_mode = cluster_sdk_->IsClusterMode();
-        // TODO(hw): support MemTable and IOT, just force use IOT for test
         ::openmldb::sdk::NodeAdapter::TransformToTableDef(create_node, &table_info, default_replica_num,
                                                           is_cluster_mode, &sql_status);
         if (sql_status.code != 0) {
             return base::Status(sql_status.code, sql_status.msg);
+        }
+        // clustered should be the first index, user should set it, we don't adjust it
+        if (auto st = ValidateTableInfo(table_info); !st.OK()) {
+            return st;
         }
         std::string msg;
         if (!ns_ptr->CreateTable(table_info, create_node->GetIfNotExist(), msg)) {
@@ -2743,7 +2771,8 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQL(
         }
         case hybridse::node::kPlanTypeCreateUser: {
             auto create_node = dynamic_cast<hybridse::node::CreateUserPlanNode*>(node);
-            UserInfo user_info;;
+            UserInfo user_info;
+            ;
             auto result = GetUser(create_node->Name(), &user_info);
             if (!result.ok()) {
                 *status = {StatusCode::kCmdError, result.status().message()};
@@ -2962,7 +2991,7 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::ExecuteSQL(
                 if (is_online_mode) {
                     // Handle in online mode
                     config.emplace("spark.insert_memory_usage_limit",
-                            std::to_string(insert_memory_usage_limit_.load(std::memory_order_relaxed)));
+                                   std::to_string(insert_memory_usage_limit_.load(std::memory_order_relaxed)));
                     base_status = ImportOnlineData(sql, config, database, is_sync_job, offline_job_timeout, &job_info);
                 } else {
                     // Handle in offline mode
@@ -4882,10 +4911,10 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::GetNameServerJobResu
 }
 
 absl::StatusOr<bool> SQLClusterRouter::GetUser(const std::string& name, UserInfo* user_info) {
-    std::string sql = absl::StrCat("select * from ",  nameserver::USER_INFO_NAME);
+    std::string sql = absl::StrCat("select * from ", nameserver::USER_INFO_NAME);
     hybridse::sdk::Status status;
-    auto rs = ExecuteSQLParameterized(nameserver::INTERNAL_DB, sql,
-            std::shared_ptr<openmldb::sdk::SQLRequestRow>(), &status);
+    auto rs =
+        ExecuteSQLParameterized(nameserver::INTERNAL_DB, sql, std::shared_ptr<openmldb::sdk::SQLRequestRow>(), &status);
     if (rs == nullptr) {
         return absl::InternalError(status.msg);
     }
@@ -4905,17 +4934,17 @@ hybridse::sdk::Status SQLClusterRouter::AddUser(const std::string& name, const s
     auto real_password = password.empty() ? password : codec::Encrypt(password);
     uint64_t cur_ts = ::baidu::common::timer::get_micros() / 1000;
     std::string sql = absl::StrCat("insert into ", nameserver::USER_INFO_NAME, " values (",
-            "'%',",                 // host
-            "'", name, "','",       // user
-            real_password, "',",    // password
-            cur_ts, ",",            // password_last_changed
-            "0,",                   // password_expired_time
-            cur_ts, ", ",           // create_time
-            cur_ts, ",",            // update_time
-            1,                      // account_type
-            ",'',",                 // privileges
-            "null"                  // extra_info
-            ");");
+                                   "'%',",               // host
+                                   "'", name, "','",     // user
+                                   real_password, "',",  // password
+                                   cur_ts, ",",          // password_last_changed
+                                   "0,",                 // password_expired_time
+                                   cur_ts, ", ",         // create_time
+                                   cur_ts, ",",          // update_time
+                                   1,                    // account_type
+                                   ",'',",               // privileges
+                                   "null"                // extra_info
+                                   ");");
     hybridse::sdk::Status status;
     ExecuteInsert(nameserver::INTERNAL_DB, sql, &status);
     return status;
@@ -4925,25 +4954,25 @@ hybridse::sdk::Status SQLClusterRouter::UpdateUser(const UserInfo& user_info, co
     auto real_password = password.empty() ? password : codec::Encrypt(password);
     uint64_t cur_ts = ::baidu::common::timer::get_micros() / 1000;
     std::string sql = absl::StrCat("insert into ", nameserver::USER_INFO_NAME, " values (",
-            "'%',",                           // host
-            "'", user_info.name, "','",       // user
-            real_password, "',",              // password
-            cur_ts, ",",                      // password_last_changed
-            "0,",                             // password_expired_time
-            user_info.create_time, ", ",      // create_time
-            cur_ts, ",",                      // update_time
-            1,                                // account_type
-            ",'", user_info.privileges, "',", // privileges
-            "null"                            // extra_info
-            ");");
+                                   "'%',",                            // host
+                                   "'", user_info.name, "','",        // user
+                                   real_password, "',",               // password
+                                   cur_ts, ",",                       // password_last_changed
+                                   "0,",                              // password_expired_time
+                                   user_info.create_time, ", ",       // create_time
+                                   cur_ts, ",",                       // update_time
+                                   1,                                 // account_type
+                                   ",'", user_info.privileges, "',",  // privileges
+                                   "null"                             // extra_info
+                                   ");");
     hybridse::sdk::Status status;
     ExecuteInsert(nameserver::INTERNAL_DB, sql, &status);
     return status;
 }
 
 hybridse::sdk::Status SQLClusterRouter::DeleteUser(const std::string& name) {
-    std::string sql = absl::StrCat("delete from ", nameserver::USER_INFO_NAME,
-            " where host = '%' and user = '", name, "';");
+    std::string sql =
+        absl::StrCat("delete from ", nameserver::USER_INFO_NAME, " where host = '%' and user = '", name, "';");
     hybridse::sdk::Status status;
     ExecuteSQL(nameserver::INTERNAL_DB, sql, &status);
     return status;
@@ -4956,12 +4985,10 @@ void SQLClusterRouter::AddUserToConfig(std::map<std::string, std::string>* confi
     }
 }
 
-::hybridse::sdk::Status SQLClusterRouter::RevertPut(const nameserver::TableInfo& table_info,
-        uint32_t end_pid,
-        const std::map<uint32_t, std::vector<std::pair<std::string, uint32_t>>>& dimensions,
-        uint64_t ts,
-        const base::Slice& value,
-        const std::vector<std::shared_ptr<::openmldb::catalog::TabletAccessor>>& tablets) {
+::hybridse::sdk::Status SQLClusterRouter::RevertPut(
+    const nameserver::TableInfo& table_info, uint32_t end_pid,
+    const std::map<uint32_t, std::vector<std::pair<std::string, uint32_t>>>& dimensions, uint64_t ts,
+    const base::Slice& value, const std::vector<std::shared_ptr<::openmldb::catalog::TabletAccessor>>& tablets) {
     codec::RowView row_view(table_info.column_desc());
     std::map<std::string, uint32_t> column_map;
     for (int32_t i = 0; i < table_info.column_desc_size(); i++) {
