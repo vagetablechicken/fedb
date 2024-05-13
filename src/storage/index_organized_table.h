@@ -17,9 +17,8 @@
 #ifndef SRC_STORAGE_INDEX_ORGANIZED_TABLE_H_
 #define SRC_STORAGE_INDEX_ORGANIZED_TABLE_H_
 
-#include "storage/mem_table.h"
-
 #include "catalog/tablet_catalog.h"
+#include "storage/mem_table.h"
 
 namespace openmldb::storage {
 
@@ -33,6 +32,18 @@ class IndexOrganizedTable : public MemTable {
     TraverseIterator* NewTraverseIterator(uint32_t index) override;
 
     ::hybridse::vm::WindowIterator* NewWindowIterator(uint32_t index) override;
+
+    bool Put(const std::string& pk, uint64_t time, const char* data, uint32_t size) override;
+
+    absl::Status Put(uint64_t time, const std::string& value, const Dimensions& dimensions,
+                     bool put_if_absent) override;
+
+    // TODO(hw): iot bulk load
+    bool GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response) { return false; }
+    bool BulkLoad(const std::vector<DataBlock*>& data_blocks,
+                  const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
+        return false;
+    }
 
  private:
     // to get current distribute iterator

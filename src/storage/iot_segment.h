@@ -39,6 +39,11 @@ base::Slice RowToSlice(const ::hybridse::codec::Row& row) {
     LOG(WARNING) << "convert row to slice failed";
     return {};
 }
+
+// [pkeys_size, pkeys, pts_size, ts_id, tsv, ...]
+std::string PackPkeysAndPts(const std::string& pkeys, uint64_t pts);
+bool UnpackPkeysAndPts(const std::string& block, std::string* pkeys, uint64_t* pts);
+
 // secondary index iterator
 // GetValue will lookup, and it may trigger rpc
 class IOTIterator : public MemTableIterator {
@@ -141,10 +146,11 @@ class IOTTraverseIterator : public MemTableTraverseIterator {
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
             // seek to ts
-            auto ts_iter = cidx_iter_->GetValue();
-            ts_iter->Seek(ts);
-            if (ts_iter->Valid()) {
-                return RowToSlice(ts_iter->GetValue());
+            auto ts_iter_ = cidx_iter_->GetValue();
+            ts_iter_->Seek(ts);
+            if (ts_iter_->Valid()) {
+                // TODO(hw): hard copy, or hold ts_iter to store value? IOTIterator should be the same.
+                return RowToSlice(ts_iter_->GetValue());
             }
         }
         LOG(WARNING) << "no suitable iter";
@@ -153,6 +159,7 @@ class IOTTraverseIterator : public MemTableTraverseIterator {
 
  private:
     std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter_;
+    std::unique_ptr<hybridse::codec::RowIterator> ts_iter_;
     // test
     codec::Schema schema_;
     std::vector<int> pkeys_idx_;
@@ -173,40 +180,19 @@ class IOTWindowIterator : public MemTableWindowIterator {
         if (ts_idx_ != -1) {
             ts_type_ = schema_.Get(ts_idx_).data_type();
         }
+        row_view_.reset(new codec::RowView(schema_));
     }
     const ::hybridse::codec::Row& GetValue() override {
         auto pkeys_pts = MemTableWindowIterator::GetValue();
         // unpack the row and get pkeys+pts
         // Row -> cols
-        codec::RowView row_view(schema_, pkeys_pts.buf(), pkeys_pts.size());
-        std::string pkeys, key;  // RowView Get will assign output, no need to clear
-        for (auto pkey_idx : pkeys_idx_) {
-            if (!pkeys.empty()) {
-                pkeys += "|";
-            }
-            // TODO(hw): if null, append to key?
-            auto ret = row_view.GetStrValue(pkey_idx, &key);
-            if (ret == -1) {
-                LOG(WARNING) << "get pkey failed";
-                return dummy;
-            }
-            pkeys += key.empty() ? hybridse::codec::EMPTY_STRING : key;
-            DLOG(INFO) << pkey_idx << "=" << key;
+        std::string pkeys;
+        uint64_t ts;
+        if (UnpackPkeysAndPts(pkeys_pts.ToString(), &pkeys, &ts)) {
+            LOG(WARNING) << "unpack pkeys and pts failed";
+            return dummy;
         }
-        // TODO(hw): what if no ts?
-        uint64_t ts = 0;
-        if (ts_idx_ != -1) {
-            int64_t tsv = 0;
-            auto ret = row_view.GetInteger(pkeys_pts.buf(), ts_idx_, ts_type_, &tsv);
-            if (ret == -1) {
-                LOG(WARNING) << "get ts failed";
-                return dummy;  // TODO(hw): right?
-            } else if (ret == 1) {
-                LOG(INFO) << "ts is null"; // TODO(hw): ts col can be null?
-            } else {
-                ts = tsv;
-            }
-        }
+        // TODO(hw): what if no ts? it'll be 0 for temp
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
             // seek to ts
@@ -214,7 +200,9 @@ class IOTWindowIterator : public MemTableWindowIterator {
             // hold the row iterator to avoid invalidation
             cidx_ts_iter_ = std::move(cidx_iter_->GetValue());
             cidx_ts_iter_->Seek(ts);
+            // must be the same keys+ts
             if (cidx_ts_iter_->Valid()) {
+                DLOG(INFO) << "valid, is the same value? " << GetKeys(cidx_ts_iter_->GetValue());
                 return cidx_ts_iter_->GetValue();
             }
         }
@@ -223,10 +211,45 @@ class IOTWindowIterator : public MemTableWindowIterator {
     }
 
  private:
+    std::string GetKeys(const hybridse::codec::Row& pkeys_pts) {
+        std::string pkeys, key;  // RowView Get will assign output, no need to clear
+        for (auto pkey_idx : pkeys_idx_) {
+            if (!pkeys.empty()) {
+                pkeys += "|";
+            }
+            // TODO(hw): if null, append to key?
+            auto ret = row_view_->GetStrValue(pkeys_pts.buf(), pkey_idx, &key);
+            if (ret == -1) {
+                LOG(WARNING) << "get pkey failed";
+                return {};
+            }
+            pkeys += key.empty() ? hybridse::codec::EMPTY_STRING : key;
+            DLOG(INFO) << pkey_idx << "=" << key;
+        }
+        return pkeys;
+    }
+    // -2: invalid, -1: no ts or null, >=0: valid
+    int64_t GetTs(const hybridse::codec::Row& pkeys_pts) {
+        int64_t tsv = -1;
+        if (ts_idx_ != -1) {
+            int64_t tsv = 0;
+            auto ret = row_view_->GetInteger(pkeys_pts.buf(), ts_idx_, ts_type_, &tsv);
+            if (ret == -1) {
+                LOG(WARNING) << "get ts failed";
+                return -2;  // TODO(hw): right?
+            } else if (ret == 1) {
+                LOG(INFO) << "ts is null";  // TODO(hw): ts col can be null?
+            }
+        }
+        return tsv;
+    }
+
+ private:
     std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter_;
     std::unique_ptr<hybridse::codec::RowIterator> cidx_ts_iter_;
     // test
     codec::Schema schema_;
+    std::unique_ptr<codec::RowView> row_view_;
     std::vector<int> pkeys_idx_;
     int ts_idx_ = -1;
     type::DataType ts_type_;

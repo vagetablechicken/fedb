@@ -17,5 +17,23 @@
 #include "storage/iot_segment.h"
 
 namespace openmldb::storage {
-
+std::string PackPkeysAndPts(const std::string& pkeys, uint64_t pts) {
+    std::string buf;
+    uint32_t pkeys_size = pkeys.size();
+    buf.append(reinterpret_cast<const char*>(&pkeys_size), sizeof(uint32_t));
+    buf.append(pkeys);
+    buf.append(reinterpret_cast<const char*>(&pts), sizeof(uint64_t));
+    return buf;
 }
+
+bool UnpackPkeysAndPts(const std::string& block, std::string* pkeys, uint64_t* pts) {
+    uint32_t offset = 0;
+    uint32_t pkeys_size = *reinterpret_cast<const uint32_t*>(block.data() + offset);
+    offset += sizeof(uint32_t);
+    pkeys->assign(block.data() + offset, pkeys_size);
+    offset += pkeys_size;
+    *pts = *reinterpret_cast<const uint64_t*>(block.data() + offset);
+    return true;
+}
+
+}  // namespace openmldb::storage
