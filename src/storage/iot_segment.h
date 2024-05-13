@@ -32,7 +32,7 @@ base::Slice RowToSlice(const ::hybridse::codec::Row& row) {
     size_t size;
     if (codec::EncodeRpcRow(row, &buf, &size)) {
         auto r = new char[buf.size()];
-        buf.copy_to(r); // TODO(hw): don't copy, move it to slice
+        buf.copy_to(r);  // TODO(hw): don't copy, move it to slice
         // slice own the new r
         return {r, size, true};
     }
@@ -170,30 +170,52 @@ class IOTWindowIterator : public MemTableWindowIterator {
         schema_ = schema;
         pkeys_idx_ = pkeys_idx;
         ts_idx_ = ts_idx;
+        if (ts_idx_ != -1) {
+            ts_type_ = schema_.Get(ts_idx_).data_type();
+        }
     }
     const ::hybridse::codec::Row& GetValue() override {
         auto pkeys_pts = MemTableWindowIterator::GetValue();
         // unpack the row and get pkeys+pts
         // Row -> cols
-        codec::RowView row_view(schema_);
+        codec::RowView row_view(schema_, pkeys_pts.buf(), pkeys_pts.size());
         std::string pkeys, key;  // RowView Get will assign output, no need to clear
         for (auto pkey_idx : pkeys_idx_) {
             if (!pkeys.empty()) {
                 pkeys += "|";
             }
-            row_view.GetStrValue(pkey_idx, &key);
+            // TODO(hw): if null, append to key?
+            auto ret = row_view.GetStrValue(pkey_idx, &key);
+            if (ret == -1) {
+                LOG(WARNING) << "get pkey failed";
+                return dummy;
+            }
             pkeys += key.empty() ? hybridse::codec::EMPTY_STRING : key;
+            DLOG(INFO) << pkey_idx << "=" << key;
         }
-
-        row_view.GetStrValue(ts_idx_, &key);
-        uint64_t ts = std::stoull(key);
+        // TODO(hw): what if no ts?
+        uint64_t ts = 0;
+        if (ts_idx_ != -1) {
+            int64_t tsv = 0;
+            auto ret = row_view.GetInteger(pkeys_pts.buf(), ts_idx_, ts_type_, &tsv);
+            if (ret == -1) {
+                LOG(WARNING) << "get ts failed";
+                return dummy;  // TODO(hw): right?
+            } else if (ret == 1) {
+                LOG(INFO) << "ts is null"; // TODO(hw): ts col can be null?
+            } else {
+                ts = tsv;
+            }
+        }
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
             // seek to ts
-            auto ts_iter = cidx_iter_->GetValue();
-            ts_iter->Seek(ts);
-            if (ts_iter->Valid()) {
-                return ts_iter->GetValue();
+            DLOG(INFO) << "seek to ts " << ts;
+            // hold the row iterator to avoid invalidation
+            cidx_ts_iter_ = std::move(cidx_iter_->GetValue());
+            cidx_ts_iter_->Seek(ts);
+            if (cidx_ts_iter_->Valid()) {
+                return cidx_ts_iter_->GetValue();
             }
         }
         // Valid() to check row data? what if only one entry invalid?
@@ -202,11 +224,12 @@ class IOTWindowIterator : public MemTableWindowIterator {
 
  private:
     std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter_;
+    std::unique_ptr<hybridse::codec::RowIterator> cidx_ts_iter_;
     // test
     codec::Schema schema_;
     std::vector<int> pkeys_idx_;
-    int ts_idx_;
-
+    int ts_idx_ = -1;
+    type::DataType ts_type_;
     ::hybridse::codec::Row dummy;
 };
 
