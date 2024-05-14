@@ -18,8 +18,8 @@
 
 #include <snappy.h>
 
+#include "absl/strings/str_join.h"  // dlog
 #include "storage/iot_segment.h"
-
 namespace openmldb::storage {
 
 IOTIterator* NewNullIterator() {
@@ -218,7 +218,7 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     }
     // inner index pos: -1 means invalid, so it's positive in inner_index_key_map
     std::map<int32_t, Slice> inner_index_key_map;
-    std::pair<int32_t, std::string> inner_pkeys_pair;
+    std::pair<int32_t, std::string> cidx_inner_key_pair;
     std::vector<int32_t> secondary_inners;
 
     for (auto iter = dimensions.begin(); iter != dimensions.end(); iter++) {
@@ -227,7 +227,7 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
             return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid dimension idx ", iter->idx()));
         }
         if (iter->idx() == 0) {
-            inner_pkeys_pair = {inner_pos, iter->key()};
+            cidx_inner_key_pair = {inner_pos, iter->key()};
         }
         inner_index_key_map.emplace(inner_pos, iter->key());
     }
@@ -256,7 +256,7 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     // 1. clustered and covering: put row ->DataBlock(i)
     // 2. secondary: put pkeys+pts -> DataBlock(j)
     uint32_t real_ref_cnt = 0, secondary_ref_cnt = 0;
-    // inner_pkeys_pair can get the clustered index
+    // cidx_inner_key_pair can get the clustered index
     for (const auto& kv : inner_index_key_map) {
         auto inner_index = table_index_.GetInnerIndex(kv.first);
         if (!inner_index) {
@@ -272,7 +272,7 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
                 int64_t ts = 0;
                 if (ts_col->IsAutoGenTs()) {
                     // clustered index don't use current time to be ts TODO(hw): current time to ttl?
-                    if (kv.first == inner_pkeys_pair.first) {
+                    if (index_def->IsClusteredIndex()) {
                         ts = 0;
                     } else {
                         ts = time;
@@ -303,14 +303,21 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     if (ts_value_map.empty()) {
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": empty ts value map"));
     }
-    // get pkeys+pts
-    auto pts = ts_value_map.find(inner_pkeys_pair.first);
-    if (pts == ts_value_map.end()) {
-        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": no pts for clustered index"));
+    // it's ok to have no clustered/covering put or no secondary put, put will be applyed on other pid
+    // but if no clustered/covering put and no secondary put, it's invalid, check it in put-loop
+    DataBlock* rblock = nullptr;
+    DataBlock* pblock = nullptr;
+    if (real_ref_cnt > 0) {
+        // auto pts = ts_value_map.find(cidx_inner_key_pair.first);
+        // pts will == ts_value_map.end()
+        rblock = new DataBlock(real_ref_cnt, value.c_str(), value.length());  // hard copy
     }
-    auto pkeys_pts = PackPkeysAndPts(inner_pkeys_pair.second, clustered_tsv);
-    auto* row_block = new DataBlock(real_ref_cnt, value.c_str(), value.length());
-    auto* pblock = new DataBlock(secondary_ref_cnt, pkeys_pts.c_str(), pkeys_pts.length());
+    if (secondary_ref_cnt > 0) {
+        auto pkeys_pts = PackPkeysAndPts(cidx_inner_key_pair.second, clustered_tsv);
+        // TODO(hw): compress?
+        pblock = new DataBlock(secondary_ref_cnt, pkeys_pts.c_str(), pkeys_pts.length());  // hard copy
+    }
+
     for (const auto& kv : inner_index_key_map) {
         auto iter = ts_value_map.find(kv.first);
         if (iter == ts_value_map.end()) {
@@ -319,7 +326,10 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
         uint32_t seg_idx = SegIdx(kv.second.ToString());  // TODO(hw):
         Segment* segment = GetSegment(kv.first, seg_idx);
         // clustered index put row
-        auto blk = kv.first == inner_pkeys_pair.first ? row_block : pblock;
+        auto blk = kv.first == cidx_inner_key_pair.first ? rblock : pblock;
+        if (blk == nullptr) {
+            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": block is null, dims are mismatch"));
+        }
         DLOG(INFO) << "don't support put if absent";
         // clustered segment should be dedup and update will trigger all index update like delete TODO
         if (!segment->Put(kv.second, iter->second, blk, false)) {

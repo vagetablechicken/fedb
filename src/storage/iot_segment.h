@@ -27,18 +27,7 @@
 
 namespace openmldb::storage {
 
-base::Slice RowToSlice(const ::hybridse::codec::Row& row) {
-    butil::IOBuf buf;
-    size_t size;
-    if (codec::EncodeRpcRow(row, &buf, &size)) {
-        auto r = new char[buf.size()];
-        buf.copy_to(r);  // TODO(hw): don't copy, move it to slice
-        // slice own the new r
-        return {r, size, true};
-    }
-    LOG(WARNING) << "convert row to slice failed";
-    return {};
-}
+base::Slice RowToSlice(const ::hybridse::codec::Row& row);
 
 // [pkeys_size, pkeys, pts_size, ts_id, tsv, ...]
 std::string PackPkeysAndPts(const std::string& pkeys, uint64_t pts);
@@ -70,19 +59,12 @@ class IOTIterator : public MemTableIterator {
     }
     openmldb::base::Slice GetValue() const override {
         auto pkeys_pts = MemTableIterator::GetValue();
-        // TODO(hw): secondary index is covering index for test, unpack the row and get pkeys+pts
-        // fix this after secondary index value is pkeys+pts
-        std::vector<std::string> vec;
-        codec::RowCodec::DecodeRow(schema_, pkeys_pts, vec);
         std::string pkeys;
-        for (auto pkey_idx : pkeys_idx_) {
-            if (!pkeys.empty()) {
-                pkeys += "|";
-            }
-            auto& key = vec[pkey_idx];
-            pkeys += key.empty() ? hybridse::codec::EMPTY_STRING : key;
+        uint64_t ts;
+        if (!UnpackPkeysAndPts(pkeys_pts.ToString(), &pkeys, &ts)) {
+            LOG(WARNING) << "unpack pkeys and pts failed";
+            return "";
         }
-        uint64_t ts = std::stoull(vec[ts_idx_]);
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
             // seek to ts
@@ -129,19 +111,12 @@ class IOTTraverseIterator : public MemTableTraverseIterator {
     }
     openmldb::base::Slice GetValue() const override {
         auto pkeys_pts = MemTableTraverseIterator::GetValue();
-        // TODO(hw): secondary index is covering index for test, unpack the row and get pkeys+pts
-        // fix this after secondary index value is pkeys+pts
-        std::vector<std::string> vec;
-        codec::RowCodec::DecodeRow(schema_, pkeys_pts, vec);
         std::string pkeys;
-        for (auto pkey_idx : pkeys_idx_) {
-            if (!pkeys.empty()) {
-                pkeys += "|";
-            }
-            auto& key = vec[pkey_idx];
-            pkeys += key.empty() ? hybridse::codec::EMPTY_STRING : key;
+        uint64_t ts;
+        if (!UnpackPkeysAndPts(pkeys_pts.ToString(), &pkeys, &ts)) {
+            LOG(WARNING) << "unpack pkeys and pts failed";
+            return "";
         }
-        uint64_t ts = std::stoull(vec[ts_idx_]);
         // distribute cidx iter should seek to (key, ts)
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
@@ -188,7 +163,7 @@ class IOTWindowIterator : public MemTableWindowIterator {
         // Row -> cols
         std::string pkeys;
         uint64_t ts;
-        if (UnpackPkeysAndPts(pkeys_pts.ToString(), &pkeys, &ts)) {
+        if (!UnpackPkeysAndPts(pkeys_pts.ToString(), &pkeys, &ts)) {
             LOG(WARNING) << "unpack pkeys and pts failed";
             return dummy;
         }

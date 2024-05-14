@@ -17,6 +17,19 @@
 #include "storage/iot_segment.h"
 
 namespace openmldb::storage {
+base::Slice RowToSlice(const ::hybridse::codec::Row& row) {
+    butil::IOBuf buf;
+    size_t size;
+    if (codec::EncodeRpcRow(row, &buf, &size)) {
+        auto r = new char[buf.size()];
+        buf.copy_to(r);  // TODO(hw): don't copy, move it to slice
+        // slice own the new r
+        return {r, size, true};
+    }
+    LOG(WARNING) << "convert row to slice failed";
+    return {};
+}
+
 std::string PackPkeysAndPts(const std::string& pkeys, uint64_t pts) {
     std::string buf;
     uint32_t pkeys_size = pkeys.size();
