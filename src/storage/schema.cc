@@ -129,6 +129,21 @@ uint32_t InnerIndexSt::GetKeyEntryMaxHeight(uint32_t abs_max_height, uint32_t la
     return max_height;
 }
 
+int64_t InnerIndexSt::ClusteredTsId() {
+    int64_t id = -1;
+    for (const auto& cur_index : index_) {
+        if (cur_index->IsClusteredIndex()) {
+            auto ts_col = cur_index->GetTsColumn();
+            DLOG_ASSERT(ts_col) << "clustered index should have ts column, even auto gen";
+            if (ts_col) {
+                id = ts_col->GetId();
+            }
+        }
+    }
+    return id;
+}
+
+
 TableIndex::TableIndex() {
     indexs_ = std::make_shared<std::vector<std::shared_ptr<IndexDef>>>();
     inner_indexs_ = std::make_shared<std::vector<std::shared_ptr<InnerIndexSt>>>();

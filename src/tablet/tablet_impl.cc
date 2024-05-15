@@ -3966,10 +3966,11 @@ bool IsIOT(const ::openmldb::api::TableMeta* table_meta) {
         LOG(WARNING) << "no index in meta";
         return false;
     }
-    if (cks[0].has_type() && cks[0].type() == 1) {
+    if (cks[0].has_type() && cks[0].type() == common::IndexType::kClustered) {
         // check other indexes
         for (int i = 1; i < cks.size(); i++) {
-            if (cks[i].has_type() && cks[i].type() == 1) {
+            if (cks[i].has_type() && cks[i].type() == common::IndexType::kClustered) {
+                LOG(WARNING) << "should be only one clustered index";
                 return false;
             }
         }

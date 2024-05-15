@@ -33,18 +33,20 @@ class IndexOrganizedTable : public MemTable {
 
     ::hybridse::vm::WindowIterator* NewWindowIterator(uint32_t index) override;
 
+    bool Init() override;
+
     bool Put(const std::string& pk, uint64_t time, const char* data, uint32_t size) override;
 
     absl::Status Put(uint64_t time, const std::string& value, const Dimensions& dimensions,
                      bool put_if_absent) override;
 
-    // TODO(hw): iot bulk load
+    // TODO(hw): iot bulk load unsupported
     bool GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response) { return false; }
     bool BulkLoad(const std::vector<DataBlock*>& data_blocks,
                   const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
         return false;
     }
-
+    bool AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) override {return false;}
  private:
     // to get current distribute iterator
     std::shared_ptr<catalog::TabletCatalog> catalog_;

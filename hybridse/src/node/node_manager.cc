@@ -451,8 +451,7 @@ SqlNode *NodeManager::MakeColumnIndexNode(SqlNodeList *index_item_list) {
             switch (node_ptr->GetType()) {
                 case kIndexKey:
                     index_ptr->SetKey(dynamic_cast<IndexKeyNode *>(node_ptr)->GetKey());
-                    index_ptr->SetType(dynamic_cast<IndexKeyNode *>(node_ptr)->GetType());
-                    LOG(WARNING) << index_ptr->GetType();
+                    index_ptr->SetIndexType(dynamic_cast<IndexKeyNode *>(node_ptr)->GetIndexType());
                     break;
                 case kIndexTs:
                     index_ptr->SetTs(dynamic_cast<IndexTsNode *>(node_ptr)->GetColumnName());

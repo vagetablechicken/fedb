@@ -277,5 +277,22 @@ class IOTKeyIterator : public MemTableKeyIterator {
     int ts_idx_;
 };
 
+class IOTSegment : public Segment {
+ public:
+    explicit IOTSegment(uint8_t height) : Segment(height) {}
+    IOTSegment(uint8_t height, const std::vector<uint32_t>& ts_idx_vec, int64_t clustered_ts_id)
+        : Segment(height, ts_idx_vec), clustered_ts_id_(clustered_ts_id) {}
+    ~IOTSegment() override {}
+
+    bool PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time);
+    bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row,
+             bool put_if_absent = false) override;
+
+    bool IsClusteredTs(uint64_t ts) {
+        return clustered_ts_id_ < 0 ? false : ts == static_cast<uint64_t>(clustered_ts_id_);
+    }
+    int64_t clustered_ts_id_ = -1;
+};
+
 }  // namespace openmldb::storage
 #endif  // SRC_STORAGE_IOT_SEGMENT_H_
