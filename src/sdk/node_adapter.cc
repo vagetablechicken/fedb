@@ -472,7 +472,7 @@ bool NodeAdapter::TransformToColumnKey(hybridse::node::ColumnIndexNode* column_i
     for (const auto& key : column_index->GetKey()) {
         index->add_col_name(key);
     }
-    auto& type = column_index->GetType();
+    auto& type = column_index->GetIndexType();
     if (type == "skey") {
         index->set_type(common::IndexType::kSecondary);
     } else if (type == "ckey") {

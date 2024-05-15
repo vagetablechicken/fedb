@@ -279,6 +279,8 @@ class InnerIndexSt {
     inline const std::vector<uint32_t>& GetTsIdx() const { return ts_; }
     inline const std::vector<std::shared_ptr<IndexDef>>& GetIndex() const { return index_; }
     uint32_t GetKeyEntryMaxHeight(uint32_t abs_max_height, uint32_t lat_max_height) const;
+    // -1 means no clustered idx in here, it's safe to cvt to uint32_t when id >= 0
+    int64_t ClusteredTsId();
 
  private:
     const uint32_t id_;

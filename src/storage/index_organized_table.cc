@@ -19,6 +19,7 @@
 #include <snappy.h>
 
 #include "absl/strings/str_join.h"  // dlog
+#include "index_organized_table.h"
 #include "storage/iot_segment.h"
 namespace openmldb::storage {
 
@@ -198,6 +199,39 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
                                    GetCompressType());
 }
 
+bool IndexOrganizedTable::Init() {
+    if (!InitMeta()) {
+        LOG(WARNING) << "init meta failed. tid " << id_ << " pid " << pid_;
+        return false;
+    }
+    // IOTSegment should know which is the cidx, sidx and covering idx are both duplicate(even the values are different)
+    auto inner_indexs = table_index_.GetAllInnerIndex();
+    for (uint32_t i = 0; i < inner_indexs->size(); i++) {
+        const std::vector<uint32_t>& ts_vec = inner_indexs->at(i)->GetTsIdx();
+        uint32_t cur_key_entry_max_height = KeyEntryMaxHeight(inner_indexs->at(i));
+
+        Segment** seg_arr = new Segment*[seg_cnt_];
+        DLOG_ASSERT(!ts_vec.empty()) << "must have ts, include auto gen ts";
+        if (!ts_vec.empty()) {
+            for (uint32_t j = 0; j < seg_cnt_; j++) {
+                // which one is cidx
+                seg_arr[j] = new IOTSegment(cur_key_entry_max_height, ts_vec, inner_indexs->at(i)->ClusteredTsId());
+                PDLOG(INFO, "init %u, %u segment. height %u, ts col num %u. tid %u pid %u", i, j,
+                      cur_key_entry_max_height, ts_vec.size(), id_, pid_);
+            }
+        } else {
+            for (uint32_t j = 0; j < seg_cnt_; j++) {
+                seg_arr[j] = new IOTSegment(cur_key_entry_max_height);
+                PDLOG(INFO, "init %u, %u segment. height %u tid %u pid %u", i, j, cur_key_entry_max_height, id_, pid_);
+            }
+        }
+        segments_[i] = seg_arr;
+        key_entry_max_height_ = cur_key_entry_max_height;
+    }
+    LOG(INFO) << "init iot table name " << name_ << ", id " << id_ << ", pid " << pid_ << ", seg_cnt " << seg_cnt_;
+    return true;
+}
+
 bool IndexOrganizedTable::Put(const std::string& pk, uint64_t time, const char* data, uint32_t size) {
     uint32_t seg_idx = SegIdx(pk);
     Segment* segment = GetSegment(0, seg_idx);
@@ -308,14 +342,17 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     DataBlock* rblock = nullptr;
     DataBlock* pblock = nullptr;
     if (real_ref_cnt > 0) {
-        // auto pts = ts_value_map.find(cidx_inner_key_pair.first);
-        // pts will == ts_value_map.end()
         rblock = new DataBlock(real_ref_cnt, value.c_str(), value.length());  // hard copy
     }
     if (secondary_ref_cnt > 0) {
         auto pkeys_pts = PackPkeysAndPts(cidx_inner_key_pair.second, clustered_tsv);
-        // TODO(hw): compress?
-        pblock = new DataBlock(secondary_ref_cnt, pkeys_pts.c_str(), pkeys_pts.length());  // hard copy
+        if (GetCompressType() == type::kSnappy) {  // sidx iterator will uncompress when getting pkeys+pts
+            std::string val;
+            ::snappy::Compress(pkeys_pts.c_str(), pkeys_pts.length(), &val);
+            pblock = new DataBlock(secondary_ref_cnt, val.c_str(), val.length());
+        } else {
+            pblock = new DataBlock(secondary_ref_cnt, pkeys_pts.c_str(), pkeys_pts.length());  // hard copy
+        }
     }
 
     for (const auto& kv : inner_index_key_map) {
@@ -323,14 +360,17 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
         if (iter == ts_value_map.end()) {
             continue;
         }
-        uint32_t seg_idx = SegIdx(kv.second.ToString());  // TODO(hw):
+        uint32_t seg_idx = SegIdx(kv.second.ToString());
         Segment* segment = GetSegment(kv.first, seg_idx);
         // clustered index put row
         auto blk = kv.first == cidx_inner_key_pair.first ? rblock : pblock;
         if (blk == nullptr) {
             return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": block is null, dims are mismatch"));
         }
-        DLOG(INFO) << "don't support put if absent";
+        // TODO(hw): put if absent unsupportted
+        if (put_if_absent) {
+            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": iot put if absent is not supported"));
+        }
         // clustered segment should be dedup and update will trigger all index update like delete TODO
         if (!segment->Put(kv.second, iter->second, blk, false)) {
             return absl::AlreadyExistsError("data exists");  // let caller know exists

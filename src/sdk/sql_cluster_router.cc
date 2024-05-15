@@ -1321,12 +1321,116 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& s
     return true;
 }
 
+bool IsIOT(const nameserver::TableInfo& table_info) {
+    auto& cks = table_info.column_key();
+    if (cks.empty()) {
+        LOG(WARNING) << "no index in meta";
+        return false;
+    }
+    if (cks[0].has_type() && cks[0].type() == common::IndexType::kClustered) {
+        // check other indexes
+        for (int i = 1; i < cks.size(); i++) {
+            if (cks[i].has_type() && cks[i].type() == common::IndexType::kClustered) {
+                LOG(WARNING) << "should be only one clustered index";
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>& row,
                               const std::vector<std::shared_ptr<::openmldb::catalog::TabletAccessor>>& tablets,
                               ::hybridse::sdk::Status* status) {
     RET_FALSE_IF_NULL_AND_WARN(status, "output status is nullptr");
     const auto& dimensions = row->GetDimensions();
     uint64_t cur_ts = ::baidu::common::timer::get_micros() / 1000;
+    // if iot, check if primary key exists in cidx
+    if (IsIOT(row->GetTableInfo())) {
+        // dimensions map<pid,vector<keystr,idxid>>, find the idxid == 0
+        bool valid = false;
+        std::string exists_value;  // if empty, no primary key exists
+
+        auto cols = row->GetTableInfo().column_desc();  // copy
+        codec::RowView row_view(cols);
+        for (const auto& kv : dimensions) {
+            uint32_t pid = kv.first;
+            for (auto& pair : kv.second) {
+                if (pair.second == 0) {
+                    // check if primary key exists on tablet
+                    auto tablet = tablets[pid];
+                    if (tablet) {
+                        auto client = tablet->GetClient();
+                        if (client) {
+                            int64_t get_ts = 0;
+                            if (row->GetTableInfo().column_key(0).has_ts_name() &&
+                                row->GetTableInfo().column_key(0).ts_name() != storage::DEFAULT_TS_COL_NAME) {
+                                auto ts_name = row->GetTableInfo().column_key(0).ts_name();
+                                for (int i = 0; i < cols.size(); i++) {
+                                    if (cols.Get(i).name() == ts_name) {
+                                        row_view.GetInteger(reinterpret_cast<const int8_t*>(row->GetRow().c_str()), i,
+                                                            cols.Get(i).data_type(), &get_ts);
+                                        break;
+                                    }
+                                }
+                            }
+                            DLOG(INFO) << "get key " << pair.first << ", ts " << get_ts;
+                            if (get_ts < 0) {
+                                SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                                                    "invalid ts " + std::to_string(get_ts));
+                                return false;
+                            }
+                            // TODO(hw): if cidx no ts, won't use cur_ts? But what if cidx has ts?
+                            std::string value;
+                            uint64_t ts;
+                            auto st = client->Get(tid, pid, pair.first, get_ts,
+                                                  row->GetTableInfo().column_key(0).index_name(), value, ts);
+                            if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
+                                APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
+                                return false;
+                            }
+                            valid = true;
+                            // check result
+                            DLOG(INFO) << "check primary key on iot table, pid " << pid << ", key " << pair.first
+                                       << ", value(unreadable), ts " << ts;
+                            if (st.OK() && ts == (uint64_t)get_ts) {
+                                DLOG(INFO) << "primary key exist on iot table, pid " << pid << ", key " << pair.first
+                                           << ", ts " << ts;
+                                exists_value = value;
+                                // ts already set
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (!valid) {
+            SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                                "can't check primary key on iot table, meta/connection error");
+            return false;
+        }
+        if (!exists_value.empty()) {
+            // delete old data then insert new data, no concurrency control, be careful
+            // revertput or SQLDeleteRow is not easy to use here, so make a sql?
+            std::string sql =
+                absl::StrCat("delete from ", row->GetTableInfo().db(), ".", row->GetTableInfo().name(), " where ");
+            std::string val;
+            for (int i = 0; i < cols.size(); i++) {
+                if (i > 0) {
+                    absl::StrAppend(&sql, " and ");
+                }
+                absl::StrAppend(&sql, cols.Get(i).name(), "=",
+                                row_view.GetStrValue(reinterpret_cast<const int8_t*>(exists_value.c_str()), i, &val));
+            }
+            // TODO(hw): if delete failed, we can't revert. And if sidx skeys+sts doesn't change, no need to delete and
+            // then insert
+            ExecuteSQL(sql, status);
+            if (status->code != 0) {
+                return false;
+            }
+        }
+    }
     for (const auto& kv : dimensions) {
         uint32_t pid = kv.first;
         if (pid < tablets.size()) {
@@ -2121,7 +2225,8 @@ std::shared_ptr<hybridse::sdk::ResultSet> SQLClusterRouter::HandleSQLCmd(const h
 base::Status ValidateTableInfo(const nameserver::TableInfo& table_info) {
     auto& indexs = table_info.column_key();
     if (indexs.empty()) {
-        return {base::ReturnCode::kInvalidArgs, "no index specified"};
+        LOG(INFO) << "no index specified, it'll add default index later";
+        return {};
     }
     if (indexs[0].type() == common::IndexType::kCovering) {
         // MemTable, all other indexs should be covering

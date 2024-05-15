@@ -113,6 +113,9 @@ class MemTable : public Table {
     Segment** GetSegments(uint32_t real_idx) { return segments_[real_idx]; }
     std::atomic<uint64_t> record_byte_size_;
 
+    bool InitMeta();
+    uint32_t KeyEntryMaxHeight(const std::shared_ptr<InnerIndexSt>& inner_idx);
+
  private:
     bool CheckAbsolute(const TTLSt& ttl, uint64_t ts);
 
@@ -121,7 +124,7 @@ class MemTable : public Table {
     bool Delete(uint32_t idx, const std::string& key, const std::optional<uint64_t>& start_ts,
                 const std::optional<uint64_t>& end_ts);
 
- private:
+ protected:
     uint32_t seg_cnt_;
     std::vector<Segment**> segments_;
     std::atomic<bool> enable_gc_;
