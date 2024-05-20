@@ -1340,9 +1340,9 @@ bool IsIOT(const nameserver::TableInfo& table_info) {
     return false;
 }
 
-bool IsClusteredIndexIdx(const std::pair<std::string, uint32_t>& dim_index) {
-    return dim_index.second == 0;  // clustered index idx must be 0
-}
+// clustered index idx must be 0
+bool IsClusteredIndexIdx(const openmldb::api::Dimension& dim_index) { return dim_index.idx() == 0; }
+bool IsClusteredIndexIdx(const std::pair<std::string, uint32_t>& dim_index) { return dim_index.second == 0; }
 
 std::string ClusteredIndexTsName(const nameserver::TableInfo& table_info) {
     auto& cks = table_info.column_key();
@@ -1365,6 +1365,10 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
     uint64_t cur_ts = ::baidu::common::timer::get_micros() / 1000;
     // if iot, check if primary key exists in cidx
     if (IsIOT(row->GetTableInfo())) {
+        if (row->IsPutIfAbsent()) {
+            SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "put_if_absent is not supported for iot table");
+            return false;
+        }
         // dimensions map<pid,vector<keystr,idxid>>, find the idxid == 0
         bool valid = false;
         uint64_t ts = 0;
@@ -1408,7 +1412,7 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                     } else {
                         DLOG(INFO) << "no ts column in cidx";
                     }
-                    // if get_ts == 0, may be cidx without ts column
+                    // if get_ts == 0, cidx may be without ts column
                     DLOG(INFO) << "get key " << pair.first << ", ts " << get_ts;
 
                     // TODO(hw): if cidx no ts, won't use cur_ts? But what if cidx has ts?
@@ -1424,8 +1428,7 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                     DLOG(INFO) << "check primary key on iot table, pid " << pid << ", key " << pair.first
                                << ", value(unreadable), ts " << ts;
                     if (st.OK() && ts == (uint64_t)get_ts) {
-                        DLOG(INFO) << "primary key exist on iot table, pid " << pid << ", key " << pair.first << ", ts "
-                                   << ts;
+                        DLOG(INFO) << "primary key exist on iot table";
                         exists_value = pair.first;
                         // ts already set
                     }
@@ -1582,7 +1585,7 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
     std::vector<std::shared_ptr<::openmldb::catalog::TabletAccessor>> tablets;
     bool ret = cluster_sdk_->GetTablet(db, name, &tablets);
     if (!ret || tablets.empty()) {
-        status->msg = "fail to get table " + name + " tablet";
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "fail to get table " + name + " tablet");
         return false;
     }
     std::map<uint32_t, ::google::protobuf::RepeatedPtrField<::openmldb::api::Dimension>> dimensions_map;
@@ -1605,6 +1608,132 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
     }
     base::Slice row_value(value, len);
     uint64_t cur_ts = ::baidu::common::timer::get_micros() / 1000;
+    // TODO(hw): refactor with PutRow
+    // if iot, check if primary key exists in cidx
+    auto table_info = cluster_sdk_->GetTableInfo(db, name);
+    if (!table_info) {
+        SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "fail to get table info");
+        return false;
+    }
+    if (IsIOT(*table_info)) {
+        if (put_if_absent) {
+            SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "put_if_absent is not supported for iot table");
+            return false;
+        }
+        // dimensions map<pid,vector<keystr,idxid>>, find the idxid == 0
+        bool valid = false;
+        uint64_t ts = 0;
+        std::string exists_value;  // if empty, no primary key exists
+
+        auto cols = table_info->column_desc();  // copy
+        codec::RowView row_view(cols);
+        for (const auto& kv : dimensions_map) {
+            uint32_t pid = kv.first;
+            for (auto& pair : kv.second) {
+                if (IsClusteredIndexIdx(pair)) {
+                    // check if primary key exists on tablet
+                    auto tablet = tablets[pid];
+                    if (!tablet) {
+                        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                                            "tablet accessor is nullptr, can't check clustered index");
+                        return false;
+                    }
+                    auto client = tablet->GetClient();
+                    if (!client) {
+                        SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                                            "tablet client is nullptr, can't check clustered index");
+                        return false;
+                    }
+                    int64_t get_ts = 0;
+                    if (auto ts_name = ClusteredIndexTsName(*table_info); !ts_name.empty()) {
+                        bool found = false;
+                        for (int i = 0; i < cols.size(); i++) {
+                            if (cols.Get(i).name() == ts_name) {
+                                row_view.GetInteger(reinterpret_cast<const int8_t*>(value), i, cols.Get(i).data_type(),
+                                                    &get_ts);
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found || get_ts < 0) {
+                            SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                                                found ? "invalid ts" + std::to_string(get_ts) : "get ts column failed");
+                            return false;
+                        }
+                    } else {
+                        DLOG(INFO) << "no ts column in cidx";
+                    }
+                    // if get_ts == 0, may be cidx without ts column
+                    DLOG(INFO) << "get key " << pair.key() << ", ts " << get_ts;
+
+                    // TODO(hw): if cidx no ts, won't use cur_ts? But what if cidx has ts?
+                    std::string value;
+                    auto st =
+                        client->Get(tid, pid, pair.key(), get_ts, table_info->column_key(0).index_name(), value, ts);
+                    if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
+                        APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
+                        return false;
+                    }
+                    valid = true;
+                    // check result, won't set exists_value if key not found
+                    DLOG(INFO) << "check primary key on iot table, pid " << pid << ", key " << pair.key()
+                               << ", value(unreadable), ts " << ts;
+                    if (st.OK() && ts == (uint64_t)get_ts) {
+                        DLOG(INFO) << "primary key exist on iot table, pid " << pid << ", key " << pair.key() << ", ts "
+                                   << ts;
+                        exists_value = pair.key();
+                        // ts already set
+                    }
+                }
+            }
+        }
+        if (!valid) {
+            SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
+                                "can't check primary key on iot table, meta/connection error");
+            return false;
+        }
+        DLOG_IF(INFO, exists_value.empty()) << "primary key not exists, safe to insert";
+        if (!exists_value.empty()) {
+            // delete old data then insert new data, no concurrency control, be careful
+            // revertput or SQLDeleteRow is not easy to use here, so make a sql?
+            DLOG(INFO) << "primary key exists, delete old data then insert new data";
+            // just where primary key, not all columns(redundant condition)
+            std::string sql = absl::StrCat("delete from ", db, ".", name, " where ");
+            std::string cond;
+            // exists_value -> exists pkeys, but no pkey column name, get it from table info
+            std::vector<std::string> key_values = absl::StrSplit(exists_value, '|');
+            if (table_info->column_key(0).col_name().size() != key_values.size()) {
+                SET_STATUS_AND_WARN(status, -1, "primary key value size not match");
+                return false;
+            }
+            for (int i = 0; i < table_info->column_key(0).col_name().size(); i++) {
+                // append primary keys, pkeys in dimension are encoded, so we should get them from raw value?or just
+                // split?
+                if (!cond.empty()) {
+                    absl::StrAppend(&cond, " and ");
+                }
+                // TODO(hw): string should add quotes
+                absl::StrAppend(&cond, table_info->column_key(0).col_name().Get(i), "=", key_values[i]);
+            }
+            // TODO(hw): ts condition
+            if (table_info->column_key(0).ts_name() != storage::DEFAULT_TS_COL_NAME) {
+                if (!cond.empty()) {
+                    absl::StrAppend(&cond, " and ");
+                }
+                absl::StrAppend(&cond, table_info->column_key(0).ts_name(), "=", std::to_string(ts));
+            }
+            absl::StrAppend(&sql, cond, ";");
+            // TODO(hw): if delete failed, we can't revert. And if sidx skeys+sts doesn't change, no need to delete and
+            // then insert
+            DLOG(INFO) << "delete sql " << sql;
+            ExecuteSQL(sql, status);
+            if (status->code != 0) {
+                PREPEND_AND_WARN(status, "delete old data failed");
+                return false;
+            }
+        }
+    }
+
     for (auto& kv : dimensions_map) {
         uint32_t pid = kv.first;
         if (pid < tablets.size()) {
@@ -1612,17 +1741,13 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
             if (tablet) {
                 auto client = tablet->GetClient();
                 if (client) {
-                    DLOG(INFO) << "put data to endpoint " << client->GetEndpoint() << " with dimensions size "
-                               << kv.second.size();
+                    DVLOG(3) << "put data to endpoint " << client->GetEndpoint() << " with dimensions size "
+                             << kv.second.size();
                     auto ret = client->Put(tid, pid, cur_ts, row_value, &kv.second,
                                            insert_memory_usage_limit_.load(std::memory_order_relaxed), put_if_absent);
                     if (!ret.OK()) {
                         // TODO(hw): show put failed row(readable)? ::hybridse::codec::RowView::GetRowString?
-                        APPEND_FROM_BASE(status, ret,
-                                         "INSERT failed, tid " + std::to_string(tid) +
-                                             ". Note that data might have been partially inserted. "
-                                             "You are encouraged to perform DELETE to remove any partially "
-                                             "inserted data before trying INSERT again.");
+                        APPEND_FROM_BASE(status, ret, "INSERT failed, tid " + std::to_string(tid));
                         std::map<uint32_t, std::vector<std::pair<std::string, uint32_t>>> dimensions;
                         for (const auto& val : dimensions_map) {
                             std::vector<std::pair<std::string, uint32_t>> vec;
@@ -1631,15 +1756,14 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
                             }
                             dimensions.emplace(val.first, std::move(vec));
                         }
-                        auto table_info = cluster_sdk_->GetTableInfo(db, name);
-                        if (!table_info) {
-                            return false;
-                        }
+
                         // TODO(hw): better to return absl::Status
                         if (auto rp = RevertPut(*table_info, pid, dimensions, cur_ts, row_value, tablets); rp.IsOK()) {
                             APPEND_AND_WARN(status, "revert ok");
                         } else {
-                            APPEND_AND_WARN(status, "revert failed");
+                            APPEND_AND_WARN(status,
+                                            "revert failed. You are encouraged to perform DELETE to remove any "
+                                            "partially inserted data before trying INSERT again.");
                         }
                         return false;
                     }

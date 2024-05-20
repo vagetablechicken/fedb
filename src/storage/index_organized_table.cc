@@ -75,7 +75,6 @@ TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::strin
     uint32_t real_idx = index_def->GetInnerPos();
     Segment* segment = GetSegment(real_idx, seg_idx);
     auto ts_col = index_def->GetTsColumn();
-    // TODO(hw): no IOT Segment now, impl later
     if (ts_col) {
         // if secondary, use iot iterator
         if (index_def->IsSecondaryIndex()) {
@@ -102,7 +101,8 @@ TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::strin
         // clsutered and covering still use old iterator
         return segment->NewIterator(spk, ts_col->GetId(), ticket, GetCompressType());
     }
-    // TODO(hw): secondary index support no ts? ts is current time or const?
+    // cidx without ts
+    // TODO(hw): sidx without ts?
     return segment->NewIterator(spk, ticket, GetCompressType());
 }
 
@@ -214,7 +214,7 @@ bool IndexOrganizedTable::Init() {
         DLOG_ASSERT(!ts_vec.empty()) << "must have ts, include auto gen ts";
         if (!ts_vec.empty()) {
             for (uint32_t j = 0; j < seg_cnt_; j++) {
-                // which one is cidx
+                // let segment know whether it is cidx
                 seg_arr[j] = new IOTSegment(cur_key_entry_max_height, ts_vec, inner_indexs->at(i)->ClusteredTsId());
                 PDLOG(INFO, "init %u, %u segment. height %u, ts col num %u. tid %u pid %u", i, j,
                       cur_key_entry_max_height, ts_vec.size(), id_, pid_);
@@ -378,6 +378,125 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     }
     record_byte_size_.fetch_add(GetRecordSize(value.length()));
     return absl::OkStatus();
+}
+
+// index gc should try to do ExecuteGc for each waiting segment, but if some segments are gc before, we should release
+// them so it will be a little complex
+absl::Status IndexOrganizedTable::ClusteredIndexGC() {
+    auto cidx_inner = table_index_.GetInnerIndex(0);
+    auto ts_idx = cidx_inner->ClusteredTsId();
+    if (ts_idx < 0) {
+        LOG(DFATAL) << "no cidx for iot table " << id_ << "." << pid_;
+        return absl::InternalError("no cidx");  // no clustered ts id means no cidx, it's immpoosible
+    }
+    auto cur_index = cidx_inner->GetIndex()[ts_idx];
+    auto ts_col = cur_index->GetTsColumn();
+    if (!ts_col) {
+        LOG(DFATAL) << "no ts col for cidx for iot table " << id_ << "." << pid_;
+        return absl::InternalError("no ts col");  // current time ts can be get too
+    }
+    // clustered index grep all entries or less to delete(it's simpler to run delete sql)
+    // not the real gc, so don't change index status
+    auto i = cur_index->GetId();
+    std::map<uint32_t, TTLSt> ttl_st_map;
+    // only set cidx
+    ttl_st_map.emplace(ts_col->GetId(), *cur_index->GetTTL());
+    for (uint32_t j = 0; j < seg_cnt_; j++) {
+        uint64_t seg_gc_time = ::baidu::common::timer::get_micros() / 1000;
+        Segment* segment = segments_[i][j];
+        auto iot_segment = dynamic_cast<IOTSegment*>(segment);
+        GCEntryInfo info;
+        iot_segment->GrepGCEntry(ttl_st_map, &info);
+        seg_gc_time = ::baidu::common::timer::get_micros() / 1000 - seg_gc_time;
+        PDLOG(INFO, "grep cidx segment[%u][%u] gc entries done consumed %lu for table %s tid %u pid %u", i, j,
+              seg_gc_time, name_.c_str(), id_, pid_);
+    }
+}
+
+// TODO(hw): don't refactor with MemTable, make MemTable stable
+void IndexOrganizedTable::SchedGc() {
+    uint64_t consumed = ::baidu::common::timer::get_micros();
+    PDLOG(INFO, "start making gc for iot table %s, tid %u, pid %u", name_.c_str(), id_, pid_);
+    // gc cidx first, it'll delete on all indexes
+    ClusteredIndexGC();
+    // TODO(hw): skip cidx execute gc(to avoid delete some entries in cidx, but don't delete in other idx)???
+    auto inner_indexs = table_index_.GetAllInnerIndex();
+    uint64_t gc_idx_cnt = 0;
+    uint64_t gc_record_byte_size = 0;
+    for (uint32_t i = 0; i < inner_indexs->size(); i++) {
+        const std::vector<std::shared_ptr<IndexDef>>& real_index = inner_indexs->at(i)->GetIndex();
+        std::map<uint32_t, TTLSt> ttl_st_map;
+        bool need_gc = true;
+        size_t deleted_num = 0;
+        std::vector<size_t> deleting_pos;
+        for (size_t pos = 0; pos < real_index.size(); pos++) {
+            auto cur_index = real_index[pos];
+            auto ts_col = cur_index->GetTsColumn();
+            if (ts_col) {
+                // skip execute gc(ttl_st_map loop), but release works?
+                if (cur_index->IsClusteredIndex()) {
+                    continue;
+                }
+                ttl_st_map.emplace(ts_col->GetId(), *(cur_index->GetTTL()));
+            }
+            if (cur_index->GetStatus() == IndexStatus::kWaiting) {
+                cur_index->SetStatus(IndexStatus::kDeleting);
+                need_gc = false;
+            } else if (cur_index->GetStatus() == IndexStatus::kDeleting) {
+                deleting_pos.push_back(pos);
+            } else if (cur_index->GetStatus() == IndexStatus::kDeleted) {
+                deleted_num++;
+            }
+        }
+        if (!deleting_pos.empty()) {
+            if (segments_[i] != nullptr) {
+                for (uint32_t k = 0; k < seg_cnt_; k++) {
+                    if (segments_[i][k] != nullptr) {
+                        StatisticsInfo statistics_info(segments_[i][k]->GetTsCnt());
+                        if (real_index.size() == 1 || deleting_pos.size() + deleted_num == real_index.size()) {
+                            segments_[i][k]->ReleaseAndCount(&statistics_info);
+                        } else {
+                            segments_[i][k]->ReleaseAndCount(deleting_pos, &statistics_info);
+                        }
+                        gc_idx_cnt += statistics_info.GetTotalCnt();
+                        gc_record_byte_size += statistics_info.record_byte_size;
+                    }
+                }
+            }
+            for (auto pos : deleting_pos) {
+                real_index[pos]->SetStatus(IndexStatus::kDeleted);
+            }
+            deleted_num += deleting_pos.size();
+        }
+        if (!enable_gc_.load(std::memory_order_relaxed) || !need_gc) {
+            continue;
+        }
+        if (deleted_num == real_index.size() || ttl_st_map.empty()) {
+            continue;
+        }
+        for (uint32_t j = 0; j < seg_cnt_; j++) {
+            uint64_t seg_gc_time = ::baidu::common::timer::get_micros() / 1000;
+            Segment* segment = segments_[i][j];
+            StatisticsInfo statistics_info(segment->GetTsCnt());
+            segment->IncrGcVersion();
+            segment->GcFreeList(&statistics_info);
+            if (ttl_st_map.size() == 1) {
+                segment->ExecuteGc(ttl_st_map.begin()->second, &statistics_info);
+            } else {
+                segment->ExecuteGc(ttl_st_map, &statistics_info);
+            }
+            gc_idx_cnt += statistics_info.GetTotalCnt();
+            gc_record_byte_size += statistics_info.record_byte_size;
+            seg_gc_time = ::baidu::common::timer::get_micros() / 1000 - seg_gc_time;
+            PDLOG(INFO, "gc segment[%u][%u] done consumed %lu for table %s tid %u pid %u", i, j, seg_gc_time,
+                  name_.c_str(), id_, pid_);
+        }
+    }
+    consumed = ::baidu::common::timer::get_micros() - consumed;
+    record_byte_size_.fetch_sub(gc_record_byte_size, std::memory_order_relaxed);
+    PDLOG(INFO, "gc finished, gc_idx_cnt %lu, consumed %lu ms for table %s tid %u pid %u", gc_idx_cnt, consumed / 1000,
+          name_.c_str(), id_, pid_);
+    UpdateTTL();
 }
 
 }  // namespace openmldb::storage

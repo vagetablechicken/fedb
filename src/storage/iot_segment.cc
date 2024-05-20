@@ -157,4 +157,77 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
     return true;
 }
 
+void IOTSegment::GrepGCEntry(const TTLSt& ttl_st, GCEntryInfo* gc_entry_info) {}
+
+void IOTSegment::GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info) {
+    if (ttl_st_map.empty()) {
+        return;
+    }
+    if (ts_cnt_ <= 1) {
+        GrepGCEntry(ttl_st_map.begin()->second, gc_entry_info);
+        return;
+    }
+    bool need_gc = false;
+    for (const auto& kv : ttl_st_map) {
+        if (ts_idx_map_.find(kv.first) == ts_idx_map_.end()) {
+            return;
+        }
+        if (kv.second.NeedGc()) {
+            need_gc = true;
+        }
+    }
+    if (!need_gc) {
+        return;
+    }
+    GrepGCAllType(ttl_st_map, gc_entry_info);
+}
+
+// actually only one ttl for cidx, clean up later
+void IOTSegment::GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info) {
+    uint64_t consumed = ::baidu::common::timer::get_micros();
+    std::unique_ptr<KeyEntries::Iterator> it(entries_->NewIterator());
+    it->SeekToFirst();
+    while (it->Valid()) {
+        KeyEntry** entry_arr = reinterpret_cast<KeyEntry**>(it->GetValue());
+        Slice key = it->GetKey();
+        it->Next();
+        uint32_t empty_cnt = 0;
+        // just one type
+        for (const auto& kv : ttl_st_map) {
+            // check ifneed gc in ttl
+            if (!kv.second.NeedGc()) {
+                continue;
+            }
+            auto pos = ts_idx_map_.find(kv.first);
+            if (pos == ts_idx_map_.end() || pos->second >= ts_cnt_) {
+                continue;
+            }
+            // time series :[(ts, row), ...], so get key means get ts
+            KeyEntry* entry = entry_arr[pos->second];
+            ::openmldb::base::Node<uint64_t, DataBlock*>* node = nullptr;
+            bool continue_flag = false;
+            switch (kv.second.ttl_type) {
+                case ::openmldb::storage::TTLType::kAbsoluteTime: {
+                    auto iter = entry->entries.NewIterator();
+                    iter->Seek(kv.second.abs_ttl);
+                    // delete [abs_ttl, last]
+
+                    break;
+                }
+                case ::openmldb::storage::TTLType::kLatestTime: {
+                    break;
+                }
+                case ::openmldb::storage::TTLType::kAbsAndLat: {
+                    break;
+                }
+                case ::openmldb::storage::TTLType::kAbsOrLat: {
+                    break;
+                }
+                default:
+                    return;
+            }
+        }
+    }
+    DLOG(INFO) << "[GcAll] segment gc consumed " << (::baidu::common::timer::get_micros() - consumed) / 1000;
+}
 }  // namespace openmldb::storage

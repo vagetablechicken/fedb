@@ -277,6 +277,8 @@ class IOTKeyIterator : public MemTableKeyIterator {
     int ts_idx_;
 };
 
+class GCEntryInfo {};
+
 class IOTSegment : public Segment {
  public:
     explicit IOTSegment(uint8_t height) : Segment(height) {}
@@ -291,7 +293,13 @@ class IOTSegment : public Segment {
     bool IsClusteredTs(uint64_t ts) {
         return clustered_ts_id_ < 0 ? false : ts == static_cast<uint64_t>(clustered_ts_id_);
     }
+
+    void GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
     int64_t clustered_ts_id_ = -1;
+
+ private:
+    void GrepGCEntry(const TTLSt& ttl_st, GCEntryInfo* gc_entry_info);
+    void GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
 };
 
 }  // namespace openmldb::storage

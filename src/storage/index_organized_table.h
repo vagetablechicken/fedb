@@ -46,7 +46,13 @@ class IndexOrganizedTable : public MemTable {
                   const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
         return false;
     }
-    bool AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) override {return false;}
+    bool AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) override { return false; }
+
+    void SchedGc() override;
+
+ private:
+    absl::Status ClusteredIndexGC();
+
  private:
     // to get current distribute iterator
     std::shared_ptr<catalog::TabletCatalog> catalog_;

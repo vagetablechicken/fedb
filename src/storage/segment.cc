@@ -313,8 +313,8 @@ bool Segment::GetTsIdx(const std::optional<uint32_t>& idx, uint32_t* ts_idx) {
     return true;
 }
 
-bool Segment::Delete(const std::optional<uint32_t>& idx, const Slice& key,
-            uint64_t ts, const std::optional<uint64_t>& end_ts) {
+bool Segment::Delete(const std::optional<uint32_t>& idx, const Slice& key, uint64_t ts,
+                     const std::optional<uint64_t>& end_ts) {
     uint32_t ts_idx = 0;
     if (!GetTsIdx(idx, &ts_idx)) {
         return false;
@@ -354,7 +354,7 @@ bool Segment::Delete(const std::optional<uint32_t>& idx, const Slice& key,
     {
         std::lock_guard<std::mutex> lock(mu_);
         data_node = key_entry->entries.Split(ts);
-        DLOG(INFO) << "entry " << key.ToString() << " split by " << ts;
+        DLOG(INFO) << "after delete, entry " << key.ToString() << " split by " << ts;
     }
     if (data_node != nullptr) {
         node_cache_.AddValueNodeList(ts_idx, gc_version_.load(std::memory_order_relaxed), data_node);
@@ -490,6 +490,10 @@ void Segment::GcAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, StatisticsI
     uint64_t consumed = ::baidu::common::timer::get_micros();
     std::unique_ptr<KeyEntries::Iterator> it(entries_->NewIterator());
     it->SeekToFirst();
+    for (auto [ts, ttl_st] : ttl_st_map) {
+        DLOG(INFO) << "ts " << ts << " ttl_st " << ttl_st.ToString() << " it will be current time - ttl?";
+    }
+
     while (it->Valid()) {
         KeyEntry** entry_arr = reinterpret_cast<KeyEntry**>(it->GetValue());
         Slice key = it->GetKey();
