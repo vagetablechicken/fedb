@@ -464,7 +464,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
                              const std::map<int32_t, std::shared_ptr<Schema>>& vers_schema, CombineIterator* it,
                              std::string* value, uint64_t* ts) {
     if (it == nullptr || value == nullptr || ts == nullptr) {
-        PDLOG(WARNING, "invalid args");
+       LOG(WARNING) <<  "invalid args";
         return -1;
     }
     uint64_t st = request->ts();
@@ -472,6 +472,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
     uint64_t et = request->et();
     const openmldb::api::GetType& et_type = request->et_type();
     if (st_type == ::openmldb::api::kSubKeyEq && et_type == ::openmldb::api::kSubKeyEq && st != et) {
+        LOG(WARNING) << "invalid args for st " << st << " not equal to et " << et;
         return -1;
     }
     ::openmldb::api::GetType real_et_type = et_type;
@@ -489,13 +490,15 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
     if (request->projection().size() > 0) {
         bool ok = row_project.Init();
         if (!ok) {
-            PDLOG(WARNING, "invalid project list");
+            LOG(WARNING) <<  "invalid project list";
             return -1;
         }
         enable_project = true;
     }
+    // it's ok to when st < et, we should return 0 rows cuz no valid data for this range
+    // but we have set the code -1, don't change the return code, accept it.
     if (st > 0 && st < et) {
-        DEBUGLOG("invalid args for st %lu less than et %lu or expire time %lu", st, et, expire_time);
+        DLOG(WARNING) << "invalid args for st " << st << " less than et " << et << " or expire time " << expire_time;
         return -1;
     }
     if (it->Valid()) {
@@ -513,7 +516,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
                 const int8_t* row_ptr = reinterpret_cast<const int8_t*>(data.data());
                 bool ok = row_project.Project(row_ptr, data.size(), &ptr, &size);
                 if (!ok) {
-                    PDLOG(WARNING, "fail to make a projection");
+                    LOG(WARNING) <<  "fail to make a projection";
                     return -4;
                 }
                 value->assign(reinterpret_cast<char*>(ptr), size);
@@ -543,7 +546,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
                 break;
 
             default:
-                PDLOG(WARNING, "invalid et type %s", ::openmldb::api::GetType_Name(et_type).c_str());
+                LOG(WARNING) <<  "invalid et type " << ::openmldb::api::GetType_Name(et_type).c_str();
                 return -2;
         }
         if (jump_out) {
@@ -556,7 +559,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
             const int8_t* row_ptr = reinterpret_cast<const int8_t*>(data.data());
             bool ok = row_project.Project(row_ptr, data.size(), &ptr, &size);
             if (!ok) {
-                PDLOG(WARNING, "fail to make a projection");
+                LOG(WARNING) <<  "fail to make a projection";
                 return -4;
             }
             value->assign(reinterpret_cast<char*>(ptr), size);
@@ -670,6 +673,7 @@ void TabletImpl::Get(RpcController* controller, const ::openmldb::api::GetReques
     int32_t code = GetIndex(request, *table_meta, vers_schema, &combine_it, value, &ts);
     response->set_ts(ts);
     response->set_code(code);
+    DLOG(WARNING) << "get key " << request->key() << " value " << *value << " ts " << ts << " code " << code;
     uint64_t end_time = ::baidu::common::timer::get_micros();
     if (start_time + FLAGS_query_slow_log_threshold < end_time) {
         std::string index_name;
@@ -4254,7 +4258,7 @@ void TabletImpl::GcTable(uint32_t tid, uint32_t pid, bool execute_once) {
     if (table) {
         int32_t gc_interval = table->GetStorageMode() == common::kMemory ? FLAGS_gc_interval : FLAGS_disk_gc_interval;
         if (auto iot = std::dynamic_pointer_cast<storage::IndexOrganizedTable>(table); iot) {
-            iot->SchedGc(); // some params
+            iot->SchedGc();  // some params
         } else {
             table->SchedGc();
         }

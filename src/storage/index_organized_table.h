@@ -51,7 +51,7 @@ class IndexOrganizedTable : public MemTable {
     void SchedGc() override;
 
  private:
-    absl::Status ClusteredIndexGC();
+    absl::Status ClusteredIndexGCByDelete();
 
  private:
     // to get current distribute iterator

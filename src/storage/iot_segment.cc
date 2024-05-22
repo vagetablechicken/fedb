@@ -157,19 +157,16 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
     return true;
 }
 
-void IOTSegment::GrepGCEntry(const TTLSt& ttl_st, GCEntryInfo* gc_entry_info) {}
-
 void IOTSegment::GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info) {
     if (ttl_st_map.empty()) {
+        DLOG(INFO) << "ttl map is empty, skip gc";
         return;
     }
-    if (ts_cnt_ <= 1) {
-        GrepGCEntry(ttl_st_map.begin()->second, gc_entry_info);
-        return;
-    }
+
     bool need_gc = false;
     for (const auto& kv : ttl_st_map) {
         if (ts_idx_map_.find(kv.first) == ts_idx_map_.end()) {
+            LOG(WARNING) << "ts idx " << kv.first << " not found";
             return;
         }
         if (kv.second.NeedGc()) {
@@ -177,14 +174,61 @@ void IOTSegment::GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntr
         }
     }
     if (!need_gc) {
+        DLOG(INFO) << "no need gc, skip gc";
         return;
     }
     GrepGCAllType(ttl_st_map, gc_entry_info);
 }
 
+void GrepGC4Abs(KeyEntry* entry, const Slice& key, const TTLSt& ttl, uint64_t cur_time, uint64_t ttl_offset,
+                GCEntryInfo* gc_entry_info) {
+    if (ttl.abs_ttl == 0) {
+        return;  // never expire
+    }
+    uint64_t expire_time = cur_time - ttl_offset - ttl.abs_ttl;
+    auto iter = entry->entries.NewIterator();
+    iter->Seek(expire_time);
+    // delete (expire, last]
+    while (iter->Valid()) {
+        if (iter->GetKey() > expire_time) {
+            break;
+        }
+        // expire_time has offset, so we don't need to check if equal
+        // if (iter->GetKey() == expire_time) {
+        //     continue;  // save ==, don't gc
+        // }
+        gc_entry_info->AddEntry(key, iter->GetKey());
+        iter->Next();
+    }
+}
+
+void GrepGC4Lat(KeyEntry* entry, const Slice& key, const TTLSt& ttl, GCEntryInfo* gc_entry_info) {
+    auto keep_cnt = ttl.lat_ttl;
+    if (keep_cnt == 0) {
+        return;  // never exipre
+    }
+
+    auto iter = entry->entries.NewIterator();
+    iter->SeekToFirst();
+    while (iter->Valid()) {
+        if (keep_cnt > 0) {
+            keep_cnt--;
+        } else {
+            gc_entry_info->AddEntry(key, iter->GetKey());
+        }
+        iter->Next();
+    }
+}
+
+void GrepGC4AbsAndLat(KeyEntry* entry, const Slice& key, const TTLSt& ttl, uint64_t cur_time, uint64_t ttl_offset,
+                      GCEntryInfo* gc_entry_info) {}
+void GrepGC4AbsOrLat(KeyEntry* entry, const Slice& key, const TTLSt& ttl, uint64_t cur_time, uint64_t ttl_offset,
+                     GCEntryInfo* gc_entry_info) {}
+
 // actually only one ttl for cidx, clean up later
 void IOTSegment::GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info) {
     uint64_t consumed = ::baidu::common::timer::get_micros();
+    uint64_t cur_time = consumed / 1000;
     std::unique_ptr<KeyEntries::Iterator> it(entries_->NewIterator());
     it->SeekToFirst();
     while (it->Valid()) {
@@ -194,6 +238,7 @@ void IOTSegment::GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEn
         uint32_t empty_cnt = 0;
         // just one type
         for (const auto& kv : ttl_st_map) {
+            DLOG(INFO) << "key " << key.ToString() << ", ts idx " << kv.first << ", ttl " << kv.second.ToString();
             // check ifneed gc in ttl
             if (!kv.second.NeedGc()) {
                 continue;
@@ -208,19 +253,50 @@ void IOTSegment::GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEn
             bool continue_flag = false;
             switch (kv.second.ttl_type) {
                 case ::openmldb::storage::TTLType::kAbsoluteTime: {
-                    auto iter = entry->entries.NewIterator();
-                    iter->Seek(kv.second.abs_ttl);
-                    // delete [abs_ttl, last]
-
+                    GrepGC4Abs(entry, key, kv.second, cur_time, ttl_offset_, gc_entry_info);
                     break;
                 }
                 case ::openmldb::storage::TTLType::kLatestTime: {
+                    GrepGC4Lat(entry, key, kv.second, gc_entry_info);
                     break;
                 }
                 case ::openmldb::storage::TTLType::kAbsAndLat: {
+                    if (kv.second.abs_ttl == 0 || kv.second.lat_ttl == 0) {
+                        continue;  // all green
+                    }
+                    // keep both
+                    uint64_t expire_time = cur_time - ttl_offset_ - kv.second.abs_ttl;
+                    auto keep_cnt = kv.second.lat_ttl;
+                    auto iter = entry->entries.NewIterator();
+                    iter->SeekToFirst();
+                    // delete (expire, last] but leave last lat_ttl
+                    while (iter->Valid()) {
+                        if (keep_cnt > 0) {
+                            keep_cnt--;
+                        } else if (iter->GetKey() < expire_time) {
+                            gc_entry_info->AddEntry(key, iter->GetKey());
+                        }
+                        iter->Next();
+                    }
                     break;
                 }
                 case ::openmldb::storage::TTLType::kAbsOrLat: {
+                    // if < expire time or > keep cnt, delete
+                    if (kv.second.abs_ttl == 0 && kv.second.lat_ttl == 0) {
+                        continue;
+                    }
+                    uint64_t expire_time = kv.second.abs_ttl == 0 ? 0 : cur_time - ttl_offset_ - kv.second.abs_ttl;
+                    auto keep_cnt = kv.second.lat_ttl;
+                    auto iter = entry->entries.NewIterator();
+                    iter->SeekToFirst();
+                    while (iter->Valid()) {
+                        if (iter->GetKey() < expire_time || keep_cnt == 0) {
+                            gc_entry_info->AddEntry(key, iter->GetKey());
+                        } else {
+                            keep_cnt--;
+                        }
+                        iter->Next();
+                    }
                     break;
                 }
                 default:
@@ -228,6 +304,7 @@ void IOTSegment::GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEn
             }
         }
     }
-    DLOG(INFO) << "[GcAll] segment gc consumed " << (::baidu::common::timer::get_micros() - consumed) / 1000;
+    DLOG(INFO) << "[GC ts map] iot segment gc consumed " << (::baidu::common::timer::get_micros() - consumed) / 1000
+               << "ms";
 }
 }  // namespace openmldb::storage

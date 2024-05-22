@@ -277,7 +277,13 @@ class IOTKeyIterator : public MemTableKeyIterator {
     int ts_idx_;
 };
 
-class GCEntryInfo {};
+class GCEntryInfo {
+ public:
+    void AddEntry(const Slice& keys, uint64_t ts) { entries_.emplace_back(keys, ts); }
+
+ private:
+    std::vector<std::pair<Slice, uint64_t>> entries_;
+};
 
 class IOTSegment : public Segment {
  public:

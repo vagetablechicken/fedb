@@ -820,6 +820,31 @@ base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk
     return {response.code(), response.msg()};
 }
 
+base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk, uint64_t stime, uint64_t etime,
+                               const std::string& idx_name, std::string& value, uint64_t& ts) {
+    ::openmldb::api::GetRequest request;
+    ::openmldb::api::GetResponse response;
+    request.set_tid(tid);
+    request.set_pid(pid);
+    request.set_key(pk);
+    request.set_ts(stime);
+    request.set_et(etime);
+    if (!idx_name.empty()) {
+        request.set_idx_name(idx_name);
+    }
+    auto st = client_.SendRequestSt(&::openmldb::api::TabletServer_Stub::Get, &request, &response,
+                                    FLAGS_request_timeout_ms, 1);
+    if (!st.OK()) {
+        return st;
+    }
+
+    if (response.code() == 0) {
+        value.swap(*response.mutable_value());
+        ts = response.ts();
+    }
+    return {response.code(), response.msg()};
+}
+
 bool TabletClient::Delete(uint32_t tid, uint32_t pid, const std::string& pk, const std::string& idx_name,
                           std::string& msg) {
     ::openmldb::api::DeleteRequest request;

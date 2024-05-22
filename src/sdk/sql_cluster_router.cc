@@ -1405,8 +1405,9 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                             }
                         }
                         if (!found || get_ts < 0) {
-                            SET_STATUS_AND_WARN(status, StatusCode::kCmdError,
-                                                found ? "invalid ts" + std::to_string(get_ts) : "get ts column failed");
+                            SET_STATUS_AND_WARN(
+                                status, StatusCode::kCmdError,
+                                found ? "invalid ts " + std::to_string(get_ts) : "get ts column failed");
                             return false;
                         }
                     } else {
@@ -1415,11 +1416,12 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                     // if get_ts == 0, cidx may be without ts column
                     DLOG(INFO) << "get key " << pair.first << ", ts " << get_ts;
 
-                    // TODO(hw): if cidx no ts, won't use cur_ts? But what if cidx has ts?
+                    // Get exactly ts
                     std::string value;
-                    auto st = client->Get(tid, pid, pair.first, get_ts, row->GetTableInfo().column_key(0).index_name(),
-                                          value, ts);
-                    if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
+                    auto st = client->Get(tid, pid, pair.first, get_ts, get_ts,
+                                          row->GetTableInfo().column_key(0).index_name(), value, ts);
+                    if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound &&
+                        st.GetCode() != base::ReturnCode::kInvalidParameter) {
                         APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
                         return false;
                     }
@@ -3772,10 +3774,11 @@ hybridse::sdk::Status SQLClusterRouter::LoadDataMultipleFile(int id, int step, c
                                                              const std::vector<std::string>& file_list,
                                                              const openmldb::sdk::LoadOptionsMapParser& options_parser,
                                                              uint64_t* count) {
+    *count = 0;
     for (const auto& file : file_list) {
         uint64_t cur_count = 0;
         auto status = LoadDataSingleFile(id, step, database, table, file, options_parser, &cur_count);
-        DLOG(INFO) << "[thread " << id << "] Loaded " << count << " rows in " << file;
+        DLOG(INFO) << "[thread " << id << "] Loaded " << cur_count << " rows in " << file;
         if (!status.IsOK()) {
             return status;
         }

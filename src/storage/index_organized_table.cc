@@ -382,18 +382,24 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
 
 // index gc should try to do ExecuteGc for each waiting segment, but if some segments are gc before, we should release
 // them so it will be a little complex
-absl::Status IndexOrganizedTable::ClusteredIndexGC() {
-    auto cidx_inner = table_index_.GetInnerIndex(0);
-    auto ts_idx = cidx_inner->ClusteredTsId();
-    if (ts_idx < 0) {
-        LOG(DFATAL) << "no cidx for iot table " << id_ << "." << pid_;
-        return absl::InternalError("no cidx");  // no clustered ts id means no cidx, it's immpoosible
+absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete() {
+    auto cur_index = table_index_.GetIndex(0);
+    if (!cur_index) {
+        return absl::FailedPreconditionError(
+            absl::StrCat("cidx def is null for ", id_, ".", pid_));  // why index is null?
     }
-    auto cur_index = cidx_inner->GetIndex()[ts_idx];
-    auto ts_col = cur_index->GetTsColumn();
+    if (!cur_index->IsClusteredIndex()) {
+        return absl::InternalError(absl::StrCat("cidx is not clustered for ", id_, ".", pid_));  // immpossible
+    }
+    if (!cur_index->IsReady()) {
+        return absl::FailedPreconditionError(
+            absl::StrCat("cidx is not ready for ", id_, ".", pid_, ", status ", cur_index->GetStatus()));
+    }
+    auto& ts_col = cur_index->GetTsColumn();
+    // sometimes index def is valid, but ts_col is nullptr? protect it
     if (!ts_col) {
-        LOG(DFATAL) << "no ts col for cidx for iot table " << id_ << "." << pid_;
-        return absl::InternalError("no ts col");  // current time ts can be get too
+        return absl::FailedPreconditionError(
+            absl::StrCat("no ts col of cidx for ", id_, ".", pid_));  // current time ts can be get too
     }
     // clustered index grep all entries or less to delete(it's simpler to run delete sql)
     // not the real gc, so don't change index status
@@ -411,6 +417,10 @@ absl::Status IndexOrganizedTable::ClusteredIndexGC() {
         PDLOG(INFO, "grep cidx segment[%u][%u] gc entries done consumed %lu for table %s tid %u pid %u", i, j,
               seg_gc_time, name_.c_str(), id_, pid_);
     }
+
+    // delete entries by sql
+
+    return absl::OkStatus();
 }
 
 // TODO(hw): don't refactor with MemTable, make MemTable stable
@@ -418,7 +428,10 @@ void IndexOrganizedTable::SchedGc() {
     uint64_t consumed = ::baidu::common::timer::get_micros();
     PDLOG(INFO, "start making gc for iot table %s, tid %u, pid %u", name_.c_str(), id_, pid_);
     // gc cidx first, it'll delete on all indexes
-    ClusteredIndexGC();
+    auto st = ClusteredIndexGCByDelete();
+    if (!st.ok()) {
+        LOG(WARNING) << "cidx gc by delete error: " << st.ToString();
+    }
     // TODO(hw): skip cidx execute gc(to avoid delete some entries in cidx, but don't delete in other idx)???
     auto inner_indexs = table_index_.GetAllInnerIndex();
     uint64_t gc_idx_cnt = 0;

@@ -600,8 +600,8 @@ void Segment::GcAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, StatisticsI
             }
         }
     }
-    DEBUGLOG("[GcAll] segment gc consumed %lu, count %lu", (::baidu::common::timer::get_micros() - consumed) / 1000,
-             statistics_info->GetTotalCnt() - old);
+    DLOG(INFO) << "[GcAll] segment gc consumed " << (::baidu::common::timer::get_micros() - consumed) / 1000
+               << "ms, count " << statistics_info->GetTotalCnt() - old;
 }
 
 void Segment::SplitList(KeyEntry* entry, uint64_t ts, ::openmldb::base::Node<uint64_t, DataBlock*>** node) {
