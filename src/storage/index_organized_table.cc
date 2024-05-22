@@ -19,8 +19,11 @@
 #include <snappy.h>
 
 #include "absl/strings/str_join.h"  // dlog
+#include "absl/strings/str_split.h"
 #include "index_organized_table.h"
+#include "sdk/sql_router.h"
 #include "storage/iot_segment.h"
+
 namespace openmldb::storage {
 
 IOTIterator* NewNullIterator() {
@@ -382,7 +385,7 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
 
 // index gc should try to do ExecuteGc for each waiting segment, but if some segments are gc before, we should release
 // them so it will be a little complex
-absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete() {
+absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router) {
     auto cur_index = table_index_.GetIndex(0);
     if (!cur_index) {
         return absl::FailedPreconditionError(
@@ -407,108 +410,86 @@ absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete() {
     std::map<uint32_t, TTLSt> ttl_st_map;
     // only set cidx
     ttl_st_map.emplace(ts_col->GetId(), *cur_index->GetTTL());
+    GCEntryInfo info;  // not thread safe
     for (uint32_t j = 0; j < seg_cnt_; j++) {
         uint64_t seg_gc_time = ::baidu::common::timer::get_micros() / 1000;
         Segment* segment = segments_[i][j];
         auto iot_segment = dynamic_cast<IOTSegment*>(segment);
-        GCEntryInfo info;
         iot_segment->GrepGCEntry(ttl_st_map, &info);
         seg_gc_time = ::baidu::common::timer::get_micros() / 1000 - seg_gc_time;
         PDLOG(INFO, "grep cidx segment[%u][%u] gc entries done consumed %lu for table %s tid %u pid %u", i, j,
               seg_gc_time, name_.c_str(), id_, pid_);
     }
-
     // delete entries by sql
+    if (info.Size() > 0) {
+        DLOG(INFO) << "delete cidx " << info.Size() << " entries by sql";
+        auto sql_prefix = absl::StrCat("delete from ", GetDB(), ".", GetName(), " where ");
+        auto meta = GetTableMeta();
+        for (size_t i = 0; i < info.Size(); i++) {
+            auto& keys_ts = info.GetEntries()[i];
+            auto keys = keys_ts.first.ToString();
+            auto ts = keys_ts.second;
+            std::string cond;
+            // exists_value -> exists pkeys, but no pkey column name, get it from table info
+            std::vector<std::string> key_values = absl::StrSplit(keys, '|');
+            if (meta->column_key(0).col_name().size() != key_values.size()) {
+                return absl::InternalError("primary key value size not match");
+            }
+            for (int i = 0; i < meta->column_key(0).col_name().size(); i++) {
+                // append primary keys, pkeys in dimension are encoded, so we should get them from raw value?or just
+                // split?
+                if (!cond.empty()) {
+                    absl::StrAppend(&cond, " and ");
+                }
+                // TODO(hw): string should add quotes
+                absl::StrAppend(&cond, meta->column_key(0).col_name().Get(i), "=", key_values[i]);
+            }
+            // TODO(hw): ts condition, string should add quotes
+            if (meta->column_key(0).ts_name() != storage::DEFAULT_TS_COL_NAME) {
+                if (!cond.empty()) {
+                    absl::StrAppend(&cond, " and ");
+                }
+                absl::StrAppend(&cond, meta->column_key(0).ts_name(), "=", std::to_string(ts));
+            }
+            auto sql = absl::StrCat(sql_prefix, cond, ";");
+            // TODO(hw): if delete failed, we can't revert. And if sidx skeys+sts doesn't change, no need to delete and
+            // then insert
+            DLOG(INFO) << "delete sql " << sql;
+            hybridse::sdk::Status status;
+            router->ExecuteSQL(sql, &status);
+            if (!status.IsOK()) {
+                return absl::InternalError("execute sql failed " + status.ToString());
+            }
+        }
+    }
 
     return absl::OkStatus();
 }
 
 // TODO(hw): don't refactor with MemTable, make MemTable stable
-void IndexOrganizedTable::SchedGc() {
+void IndexOrganizedTable::SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router) {
     uint64_t consumed = ::baidu::common::timer::get_micros();
     PDLOG(INFO, "start making gc for iot table %s, tid %u, pid %u", name_.c_str(), id_, pid_);
     // gc cidx first, it'll delete on all indexes
-    auto st = ClusteredIndexGCByDelete();
+    auto st = ClusteredIndexGCByDelete(router);
     if (!st.ok()) {
         LOG(WARNING) << "cidx gc by delete error: " << st.ToString();
     }
-    // TODO(hw): skip cidx execute gc(to avoid delete some entries in cidx, but don't delete in other idx)???
+    // TODO(hw): don't gc sidx or covering index?
+    // may core on GcFreeList?
+    // but record cnt in segment and tablet status can't change if no gc or free
+    // for all index, only do free? don't do gc TODO how to check the record cnt?
     auto inner_indexs = table_index_.GetAllInnerIndex();
-    uint64_t gc_idx_cnt = 0;
-    uint64_t gc_record_byte_size = 0;
     for (uint32_t i = 0; i < inner_indexs->size(); i++) {
         const std::vector<std::shared_ptr<IndexDef>>& real_index = inner_indexs->at(i)->GetIndex();
-        std::map<uint32_t, TTLSt> ttl_st_map;
-        bool need_gc = true;
-        size_t deleted_num = 0;
-        std::vector<size_t> deleting_pos;
-        for (size_t pos = 0; pos < real_index.size(); pos++) {
-            auto cur_index = real_index[pos];
-            auto ts_col = cur_index->GetTsColumn();
-            if (ts_col) {
-                // skip execute gc(ttl_st_map loop), but release works?
-                if (cur_index->IsClusteredIndex()) {
-                    continue;
-                }
-                ttl_st_map.emplace(ts_col->GetId(), *(cur_index->GetTTL()));
-            }
-            if (cur_index->GetStatus() == IndexStatus::kWaiting) {
-                cur_index->SetStatus(IndexStatus::kDeleting);
-                need_gc = false;
-            } else if (cur_index->GetStatus() == IndexStatus::kDeleting) {
-                deleting_pos.push_back(pos);
-            } else if (cur_index->GetStatus() == IndexStatus::kDeleted) {
-                deleted_num++;
-            }
-        }
-        if (!deleting_pos.empty()) {
-            if (segments_[i] != nullptr) {
-                for (uint32_t k = 0; k < seg_cnt_; k++) {
-                    if (segments_[i][k] != nullptr) {
-                        StatisticsInfo statistics_info(segments_[i][k]->GetTsCnt());
-                        if (real_index.size() == 1 || deleting_pos.size() + deleted_num == real_index.size()) {
-                            segments_[i][k]->ReleaseAndCount(&statistics_info);
-                        } else {
-                            segments_[i][k]->ReleaseAndCount(deleting_pos, &statistics_info);
-                        }
-                        gc_idx_cnt += statistics_info.GetTotalCnt();
-                        gc_record_byte_size += statistics_info.record_byte_size;
-                    }
-                }
-            }
-            for (auto pos : deleting_pos) {
-                real_index[pos]->SetStatus(IndexStatus::kDeleted);
-            }
-            deleted_num += deleting_pos.size();
-        }
-        if (!enable_gc_.load(std::memory_order_relaxed) || !need_gc) {
-            continue;
-        }
-        if (deleted_num == real_index.size() || ttl_st_map.empty()) {
-            continue;
-        }
         for (uint32_t j = 0; j < seg_cnt_; j++) {
             uint64_t seg_gc_time = ::baidu::common::timer::get_micros() / 1000;
             Segment* segment = segments_[i][j];
             StatisticsInfo statistics_info(segment->GetTsCnt());
             segment->IncrGcVersion();
             segment->GcFreeList(&statistics_info);
-            if (ttl_st_map.size() == 1) {
-                segment->ExecuteGc(ttl_st_map.begin()->second, &statistics_info);
-            } else {
-                segment->ExecuteGc(ttl_st_map, &statistics_info);
-            }
-            gc_idx_cnt += statistics_info.GetTotalCnt();
-            gc_record_byte_size += statistics_info.record_byte_size;
-            seg_gc_time = ::baidu::common::timer::get_micros() / 1000 - seg_gc_time;
-            PDLOG(INFO, "gc segment[%u][%u] done consumed %lu for table %s tid %u pid %u", i, j, seg_gc_time,
-                  name_.c_str(), id_, pid_);
         }
     }
-    consumed = ::baidu::common::timer::get_micros() - consumed;
-    record_byte_size_.fetch_sub(gc_record_byte_size, std::memory_order_relaxed);
-    PDLOG(INFO, "gc finished, gc_idx_cnt %lu, consumed %lu ms for table %s tid %u pid %u", gc_idx_cnt, consumed / 1000,
-          name_.c_str(), id_, pid_);
     UpdateTTL();
 }
 

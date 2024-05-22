@@ -48,10 +48,10 @@ class IndexOrganizedTable : public MemTable {
     }
     bool AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) override { return false; }
 
-    void SchedGc() override;
+    void SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router);
 
  private:
-    absl::Status ClusteredIndexGCByDelete();
+    absl::Status ClusteredIndexGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router);
 
  private:
     // to get current distribute iterator

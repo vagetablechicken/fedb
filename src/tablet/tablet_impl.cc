@@ -464,7 +464,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
                              const std::map<int32_t, std::shared_ptr<Schema>>& vers_schema, CombineIterator* it,
                              std::string* value, uint64_t* ts) {
     if (it == nullptr || value == nullptr || ts == nullptr) {
-       LOG(WARNING) <<  "invalid args";
+        LOG(WARNING) << "invalid args";
         return -1;
     }
     uint64_t st = request->ts();
@@ -490,7 +490,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
     if (request->projection().size() > 0) {
         bool ok = row_project.Init();
         if (!ok) {
-            LOG(WARNING) <<  "invalid project list";
+            LOG(WARNING) << "invalid project list";
             return -1;
         }
         enable_project = true;
@@ -516,7 +516,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
                 const int8_t* row_ptr = reinterpret_cast<const int8_t*>(data.data());
                 bool ok = row_project.Project(row_ptr, data.size(), &ptr, &size);
                 if (!ok) {
-                    LOG(WARNING) <<  "fail to make a projection";
+                    LOG(WARNING) << "fail to make a projection";
                     return -4;
                 }
                 value->assign(reinterpret_cast<char*>(ptr), size);
@@ -546,7 +546,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
                 break;
 
             default:
-                LOG(WARNING) <<  "invalid et type " << ::openmldb::api::GetType_Name(et_type).c_str();
+                LOG(WARNING) << "invalid et type " << ::openmldb::api::GetType_Name(et_type).c_str();
                 return -2;
         }
         if (jump_out) {
@@ -559,7 +559,7 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
             const int8_t* row_ptr = reinterpret_cast<const int8_t*>(data.data());
             bool ok = row_project.Project(row_ptr, data.size(), &ptr, &size);
             if (!ok) {
-                LOG(WARNING) <<  "fail to make a projection";
+                LOG(WARNING) << "fail to make a projection";
                 return -4;
             }
             value->assign(reinterpret_cast<char*>(ptr), size);
@@ -1551,7 +1551,7 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
     auto aggrs = GetAggregators(tid, pid);
     if (!aggrs && !delete_others) {
         if (table->Delete(entry)) {
-            DEBUGLOG("delete ok. tid %u, pid %u, key %s", tid, pid, request->key().c_str());
+            DLOG(INFO) << "delete ok. " << tid << "." << pid << ", key " << request->key();
         } else {
             response->set_code(::openmldb::base::ReturnCode::kDeleteFailed);
             response->set_msg("delete failed");
@@ -1616,7 +1616,7 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
                     return;
                 }
             }
-            DEBUGLOG("delete ok. tid %u, pid %u, key %s", tid, pid, key.c_str());
+            DLOG(INFO) << "table & agg delete ok. " << tid << "." << pid << ", key " << key;
         } else {
             bool is_first_hit_index = true;
             for (const auto& index_def : table->GetAllIndex()) {
@@ -4258,7 +4258,11 @@ void TabletImpl::GcTable(uint32_t tid, uint32_t pid, bool execute_once) {
     if (table) {
         int32_t gc_interval = table->GetStorageMode() == common::kMemory ? FLAGS_gc_interval : FLAGS_disk_gc_interval;
         if (auto iot = std::dynamic_pointer_cast<storage::IndexOrganizedTable>(table); iot) {
-            iot->SchedGc();  // some params
+            sdk::SQLRouterOptions options;
+            options.zk_cluster = zk_cluster_;
+            options.zk_path = zk_path_;
+            auto router = sdk::NewClusterSQLRouter(options);
+            iot->SchedGCByDelete(router);  // some params
         } else {
             table->SchedGc();
         }

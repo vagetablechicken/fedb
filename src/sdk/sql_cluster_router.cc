@@ -1466,7 +1466,7 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                 // TODO(hw): string should add quotes
                 absl::StrAppend(&cond, row->GetTableInfo().column_key(0).col_name().Get(i), "=", key_values[i]);
             }
-            // TODO(hw): ts condition
+            // TODO(hw): ts condition, string should add quotes
             if (row->GetTableInfo().column_key(0).ts_name() != storage::DEFAULT_TS_COL_NAME) {
                 if (!cond.empty()) {
                     absl::StrAppend(&cond, " and ");

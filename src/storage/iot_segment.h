@@ -25,6 +25,8 @@
 #include "storage/segment.h"
 #include "storage/table.h"  // for storage::Schema
 
+DECLARE_uint32(cidx_gc_max_size);
+
 namespace openmldb::storage {
 
 base::Slice RowToSlice(const ::hybridse::codec::Row& row);
@@ -280,6 +282,9 @@ class IOTKeyIterator : public MemTableKeyIterator {
 class GCEntryInfo {
  public:
     void AddEntry(const Slice& keys, uint64_t ts) { entries_.emplace_back(keys, ts); }
+    std::size_t Size() { return entries_.size(); }
+    std::vector<std::pair<Slice, uint64_t>>& GetEntries() { return entries_; }
+    bool Full() { return entries_.size() >= FLAGS_cidx_gc_max_size; }
 
  private:
     std::vector<std::pair<Slice, uint64_t>> entries_;
