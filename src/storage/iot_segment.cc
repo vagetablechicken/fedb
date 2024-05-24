@@ -42,12 +42,15 @@ std::string PackPkeysAndPts(const std::string& pkeys, uint64_t pts) {
 }
 
 bool UnpackPkeysAndPts(const std::string& block, std::string* pkeys, uint64_t* pts) {
+    DLOG_ASSERT(block.size() >= sizeof(uint32_t) + sizeof(uint64_t)) << "block size is " << block.size();
     uint32_t offset = 0;
     uint32_t pkeys_size = *reinterpret_cast<const uint32_t*>(block.data() + offset);
     offset += sizeof(uint32_t);
     pkeys->assign(block.data() + offset, pkeys_size);
     offset += pkeys_size;
     *pts = *reinterpret_cast<const uint64_t*>(block.data() + offset);
+    DLOG_ASSERT(offset + sizeof(uint64_t) == block.size())
+        << "offset is " << offset << " block size is " << block.size();
     return true;
 }
 
@@ -92,7 +95,8 @@ bool IOTSegment::PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool
     return true;
 }
 
-bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool auto_gen_ts) {
+bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* cblock, DataBlock* sblock,
+                     bool put_if_absent) {
     if (ts_map.empty()) {
         return false;
     }
@@ -100,7 +104,9 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
         bool ret = false;
         if (auto pos = ts_map.find(ts_idx_map_.begin()->first); pos != ts_map.end()) {
             // TODO(hw): why ts_map key is int32_t, default ts is uint32_t?
-            ret = Segment::Put(key, pos->second, row, false, pos->first == DEFAULT_TS_COL_ID);
+            ret = Segment::Put(key, pos->second,
+                               (index_types_[ts_idx_map_.begin()->second] == common::kSecondary ? sblock : cblock),
+                               false, pos->first == DEFAULT_TS_COL_ID);
         }
         return ret;
     }
@@ -129,6 +135,8 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
             }
         }
         auto entry = reinterpret_cast<KeyEntry**>(entry_arr)[pos->second];
+        auto auto_gen_ts = (pos->first == DEFAULT_TS_COL_ID);
+        auto pblock = (index_types_[pos->second] == common::kSecondary ? sblock : cblock);
         if (IsClusteredTs(pos->first)) {
             // if cidx and key match, check ts -> insert or update
             if (auto_gen_ts) {
@@ -142,13 +150,13 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
                 }
             } else {
                 // cidx(keys+ts) check if ts match
-                if (ListContains(reinterpret_cast<KeyEntry*>(entry), kv.second, row, false)) {
+                if (ListContains(reinterpret_cast<KeyEntry*>(entry), kv.second, pblock, false)) {
                     LOG(WARNING) << "key " << key.ToString() << " ts " << kv.second << " exists in cidx";
                     return false;
                 }
             }
         }
-        uint8_t height = entry->entries.Insert(kv.second, row);
+        uint8_t height = entry->entries.Insert(kv.second, pblock);
         entry->count_.fetch_add(1, std::memory_order_relaxed);
         byte_size += GetRecordTsIdxSize(height);
         idx_byte_size_.fetch_add(byte_size, std::memory_order_relaxed);
@@ -156,7 +164,7 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
     }
     return true;
 }
-
+// TODO(hw): when add lock?
 void IOTSegment::GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info) {
     if (ttl_st_map.empty()) {
         DLOG(INFO) << "ttl map is empty, skip gc";
@@ -186,7 +194,7 @@ void GrepGC4Abs(KeyEntry* entry, const Slice& key, const TTLSt& ttl, uint64_t cu
         return;  // never expire
     }
     uint64_t expire_time = cur_time - ttl_offset - ttl.abs_ttl;
-    auto iter = entry->entries.NewIterator();
+    std::unique_ptr<TimeEntries::Iterator> iter(entry->entries.NewIterator());
     iter->Seek(expire_time);
     // delete (expire, last]
     while (iter->Valid()) {
@@ -197,7 +205,7 @@ void GrepGC4Abs(KeyEntry* entry, const Slice& key, const TTLSt& ttl, uint64_t cu
         // if (iter->GetKey() == expire_time) {
         //     continue;  // save ==, don't gc
         // }
-        gc_entry_info->AddEntry(key, iter->GetKey());
+        gc_entry_info->AddEntry(key, iter->GetKey(), iter->GetValue());
         if (gc_entry_info->Full()) {
             DLOG(INFO) << "gc entry info full, stop gc grep";
             return;
@@ -212,13 +220,13 @@ void GrepGC4Lat(KeyEntry* entry, const Slice& key, const TTLSt& ttl, GCEntryInfo
         return;  // never exipre
     }
 
-    auto iter = entry->entries.NewIterator();
+    std::unique_ptr<TimeEntries::Iterator> iter(entry->entries.NewIterator());
     iter->SeekToFirst();
     while (iter->Valid()) {
         if (keep_cnt > 0) {
             keep_cnt--;
         } else {
-            gc_entry_info->AddEntry(key, iter->GetKey());
+            gc_entry_info->AddEntry(key, iter->GetKey(), iter->GetValue());
         }
         if (gc_entry_info->Full()) {
             DLOG(INFO) << "gc entry info full, stop gc grep";
@@ -236,14 +244,14 @@ void GrepGC4AbsAndLat(KeyEntry* entry, const Slice& key, const TTLSt& ttl, uint6
     // keep both
     uint64_t expire_time = cur_time - ttl_offset - ttl.abs_ttl;
     auto keep_cnt = ttl.lat_ttl;
-    auto iter = entry->entries.NewIterator();
+    std::unique_ptr<TimeEntries::Iterator> iter(entry->entries.NewIterator());
     iter->SeekToFirst();
     // if > lat cnt and < expire, delete
     while (iter->Valid()) {
         if (keep_cnt > 0) {
             keep_cnt--;
         } else if (iter->GetKey() < expire_time) {
-            gc_entry_info->AddEntry(key, iter->GetKey());
+            gc_entry_info->AddEntry(key, iter->GetKey(), iter->GetValue());
         }
         if (gc_entry_info->Full()) {
             DLOG(INFO) << "gc entry info full, stop gc grep";
@@ -268,19 +276,19 @@ void GrepGC4AbsOrLat(KeyEntry* entry, const Slice& key, const TTLSt& ttl, uint64
     }
     uint64_t expire_time = cur_time - ttl_offset - ttl.abs_ttl;
     auto keep_cnt = ttl.lat_ttl;
-    auto iter = entry->entries.NewIterator();
+    std::unique_ptr<TimeEntries::Iterator> iter(entry->entries.NewIterator());
     iter->SeekToFirst();
     // if  > keep cnt or < expire time, delete
     while (iter->Valid()) {
         if (keep_cnt > 0) {
             keep_cnt--;  // safe
         } else {
-            gc_entry_info->AddEntry(key, iter->GetKey());
+            gc_entry_info->AddEntry(key, iter->GetKey(), iter->GetValue());
             iter->Next();
             continue;
         }
         if (iter->GetKey() < expire_time) {
-            gc_entry_info->AddEntry(key, iter->GetKey());
+            gc_entry_info->AddEntry(key, iter->GetKey(), iter->GetValue());
         }
         if (gc_entry_info->Full()) {
             DLOG(INFO) << "gc entry info full, stop gc grep";
@@ -301,7 +309,8 @@ void IOTSegment::GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEn
         Slice key = it->GetKey();
         it->Next();
         for (const auto& kv : ttl_st_map) {
-            DLOG(INFO) << "key " << key.ToString() << ", ts idx " << kv.first << ", ttl " << kv.second.ToString();
+            DLOG(INFO) << "key " << key.ToString() << ", ts idx " << kv.first << ", ttl " << kv.second.ToString()
+                       << ", ts_cnt_ " << ts_cnt_;
             if (!kv.second.NeedGc()) {
                 continue;
             }
@@ -310,8 +319,19 @@ void IOTSegment::GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEn
                 LOG(WARNING) << "gc ts idx " << kv.first << " not found";
                 continue;
             }
+            KeyEntry* entry = nullptr;
             // time series :[(ts, row), ...], so get key means get ts
-            KeyEntry* entry = entry_arr[pos->second];
+            if (ts_cnt_ == 1) {
+                LOG_IF(DFATAL, pos->second != 0) << "when ts cnt == 1, pos second is " << pos->second;
+                entry = reinterpret_cast<KeyEntry*>(entry_arr);
+            } else {
+                entry = entry_arr[pos->second];
+            }
+            if (entry == nullptr) {
+                DLOG(DFATAL) << "entry is null, impossible";
+                continue;
+            }
+            entry->GetCount();  // for test
             switch (kv.second.ttl_type) {
                 case ::openmldb::storage::TTLType::kAbsoluteTime: {
                     GrepGC4Abs(entry, key, kv.second, cur_time, ttl_offset_, gc_entry_info);

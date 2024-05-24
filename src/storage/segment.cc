@@ -69,6 +69,7 @@ Segment::Segment(uint8_t height, const std::vector<uint32_t>& ts_idx_vec)
 Segment::~Segment() { delete entries_; }
 
 void Segment::Release(StatisticsInfo* statistics_info) {
+    std::lock_guard<std::mutex> lock(mu_); // test
     std::unique_ptr<KeyEntries::Iterator> it(entries_->NewIterator());
     it->SeekToFirst();
     while (it->Valid()) {
@@ -101,6 +102,7 @@ void Segment::Release(StatisticsInfo* statistics_info) {
 void Segment::ReleaseAndCount(StatisticsInfo* statistics_info) { Release(statistics_info); }
 
 void Segment::ReleaseAndCount(const std::vector<size_t>& id_vec, StatisticsInfo* statistics_info) {
+    std::lock_guard<std::mutex> lock(mu_); // test
     if (ts_cnt_ <= 1) {
         return;
     }
@@ -319,6 +321,7 @@ bool Segment::Delete(const std::optional<uint32_t>& idx, const Slice& key, uint6
     if (!GetTsIdx(idx, &ts_idx)) {
         return false;
     }
+    std::lock_guard<std::mutex> lock(mu_);
     void* entry = nullptr;
     if (entries_->Get(key, entry) < 0 || entry == nullptr) {
         return true;
@@ -340,7 +343,7 @@ bool Segment::Delete(const std::optional<uint32_t>& idx, const Slice& key, uint6
                 it->Next();
                 base::Node<uint64_t, DataBlock*>* data_node = nullptr;
                 if (cur_ts <= ts && cur_ts > end_ts.value()) {
-                    std::lock_guard<std::mutex> lock(mu_);
+                    // std::lock_guard<std::mutex> lock(mu_);
                     data_node = key_entry->entries.Remove(cur_ts);
                 } else {
                     return true;
@@ -352,7 +355,7 @@ bool Segment::Delete(const std::optional<uint32_t>& idx, const Slice& key, uint6
     }
     base::Node<uint64_t, DataBlock*>* data_node = nullptr;
     {
-        std::lock_guard<std::mutex> lock(mu_);
+        // std::lock_guard<std::mutex> lock(mu_);
         data_node = key_entry->entries.Split(ts);
         DLOG(INFO) << "after delete, entry " << key.ToString() << " split by " << ts;
     }
@@ -773,6 +776,7 @@ int Segment::GetCount(const Slice& key, uint64_t& count) {
 }
 
 int Segment::GetCount(const Slice& key, uint32_t idx, uint64_t& count) {
+    std::lock_guard<std::mutex> lock(mu_); // test
     auto pos = ts_idx_map_.find(idx);
     if (pos == ts_idx_map_.end()) {
         return -1;

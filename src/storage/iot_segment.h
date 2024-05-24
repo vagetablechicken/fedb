@@ -149,7 +149,9 @@ class IOTWindowIterator : public MemTableWindowIterator {
                       uint64_t expire_cnt, type::CompressType compress_type,
                       std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter)
         : MemTableWindowIterator(it, ttl_type, expire_time, expire_cnt, compress_type),
-          cidx_iter_(std::move(cidx_iter)) {}
+          cidx_iter_(std::move(cidx_iter)) {
+        DLOG(INFO) << "create IOTWindowIterator";
+    }
     void SetSchema(const codec::Schema& schema, const std::vector<int>& pkeys_idx, int ts_idx) {
         schema_ = schema;
         pkeys_idx_ = pkeys_idx;
@@ -161,6 +163,11 @@ class IOTWindowIterator : public MemTableWindowIterator {
     }
     const ::hybridse::codec::Row& GetValue() override {
         auto pkeys_pts = MemTableWindowIterator::GetValue();
+        if (pkeys_pts.empty()) {
+            LOG(WARNING) << "empty pkeys_pts for key " << GetKey();
+            return dummy;
+        }
+
         // unpack the row and get pkeys+pts
         // Row -> cols
         std::string pkeys;
@@ -170,6 +177,7 @@ class IOTWindowIterator : public MemTableWindowIterator {
             return dummy;
         }
         // TODO(hw): what if no ts? it'll be 0 for temp
+        DLOG(INFO) << "pkeys=" << pkeys << ", ts=" << ts;
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
             // seek to ts
@@ -262,6 +270,7 @@ class IOTKeyIterator : public MemTableKeyIterator {
     }
     ::hybridse::vm::RowIterator* GetRawValue() override {
         // TODO(hw):
+        DLOG(INFO) << "GetRawValue for key " << GetKey().ToString() << ", bind cidx " << cidx_name_;
         TimeEntries::Iterator* it = GetTimeIter();
         auto cidx_iter = cidx_handler_->GetWindowIterator(cidx_name_);
         auto iter =
@@ -281,25 +290,46 @@ class IOTKeyIterator : public MemTableKeyIterator {
 
 class GCEntryInfo {
  public:
-    void AddEntry(const Slice& keys, uint64_t ts) { entries_.emplace_back(keys, ts); }
+    typedef std::pair<uint64_t, DataBlock*> Entry;
+    ~GCEntryInfo() {
+        for (auto& entry : entries_) {
+            entry.second->dim_cnt_down--;
+            // TODO delete?
+        }
+    }
+    void AddEntry(const Slice& keys, uint64_t ts, storage::DataBlock* ptr) {
+        // to avoid Block deleted before gc, add ref
+        ptr->dim_cnt_down++;  // TODO(hw): no concurrency? or make sure under lock
+        entries_.emplace_back(ts, ptr);
+    }
     std::size_t Size() { return entries_.size(); }
-    std::vector<std::pair<Slice, uint64_t>>& GetEntries() { return entries_; }
+    std::vector<Entry>& GetEntries() { return entries_; }
     bool Full() { return entries_.size() >= FLAGS_cidx_gc_max_size; }
 
  private:
-    std::vector<std::pair<Slice, uint64_t>> entries_;
+    // std::vector<std::pair<Slice, uint64_t>> entries_;
+    std::vector<Entry> entries_;
 };
 
 class IOTSegment : public Segment {
  public:
     explicit IOTSegment(uint8_t height) : Segment(height) {}
-    IOTSegment(uint8_t height, const std::vector<uint32_t>& ts_idx_vec, int64_t clustered_ts_id)
-        : Segment(height, ts_idx_vec), clustered_ts_id_(clustered_ts_id) {}
+    IOTSegment(uint8_t height, const std::vector<uint32_t>& ts_idx_vec,
+               const std::vector<common::IndexType>& index_types)
+        : Segment(height, ts_idx_vec), index_types_(index_types) {
+        // find clustered ts id
+        for (uint32_t i = 0; i < ts_idx_vec.size(); i++) {
+            if (index_types_[i] == common::kClustered) {
+                clustered_ts_id_ = ts_idx_vec[i];
+                break;
+            }
+        }
+    }
     ~IOTSegment() override {}
 
     bool PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time);
-    bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row,
-             bool put_if_absent = false) override;
+    bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* cblock, DataBlock* sblock,
+             bool put_if_absent = false);
 
     bool IsClusteredTs(uint64_t ts) {
         return clustered_ts_id_ < 0 ? false : ts == static_cast<uint64_t>(clustered_ts_id_);
@@ -307,6 +337,7 @@ class IOTSegment : public Segment {
 
     void GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
     int64_t clustered_ts_id_ = -1;
+    std::vector<common::IndexType> index_types_;
 
  private:
     void GrepGCEntry(const TTLSt& ttl_st, GCEntryInfo* gc_entry_info);

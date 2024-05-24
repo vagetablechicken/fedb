@@ -218,11 +218,12 @@ bool IndexOrganizedTable::Init() {
         if (!ts_vec.empty()) {
             for (uint32_t j = 0; j < seg_cnt_; j++) {
                 // let segment know whether it is cidx
-                seg_arr[j] = new IOTSegment(cur_key_entry_max_height, ts_vec, inner_indexs->at(i)->ClusteredTsId());
+                seg_arr[j] = new IOTSegment(cur_key_entry_max_height, ts_vec, inner_indexs->at(i)->GetTsIdxType());
                 PDLOG(INFO, "init %u, %u segment. height %u, ts col num %u. tid %u pid %u", i, j,
                       cur_key_entry_max_height, ts_vec.size(), id_, pid_);
             }
         } else {
+            // unavaildable
             for (uint32_t j = 0; j < seg_cnt_; j++) {
                 seg_arr[j] = new IOTSegment(cur_key_entry_max_height);
                 PDLOG(INFO, "init %u, %u segment. height %u tid %u pid %u", i, j, cur_key_entry_max_height, id_, pid_);
@@ -255,9 +256,8 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     }
     // inner index pos: -1 means invalid, so it's positive in inner_index_key_map
     std::map<int32_t, Slice> inner_index_key_map;
-    std::pair<int32_t, std::string> cidx_inner_key_pair;
+    std::pair<int32_t, std::string> cidx_inner_key_pair{-1, ""};
     std::vector<int32_t> secondary_inners;
-
     for (auto iter = dimensions.begin(); iter != dimensions.end(); iter++) {
         int32_t inner_pos = table_index_.GetInnerIndexPos(iter->idx());
         if (inner_pos < 0) {
@@ -286,7 +286,6 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     if (decoder == nullptr) {
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid schema version ", version));
     }
-
     uint64_t clustered_tsv = 0;
     std::map<uint32_t, std::map<int32_t, uint64_t>> ts_value_map;
     // we need two ref cnt
@@ -342,21 +341,40 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     }
     // it's ok to have no clustered/covering put or no secondary put, put will be applyed on other pid
     // but if no clustered/covering put and no secondary put, it's invalid, check it in put-loop
-    DataBlock* rblock = nullptr;
-    DataBlock* pblock = nullptr;
+    DataBlock* cblock = nullptr;
+    DataBlock* sblock = nullptr;
     if (real_ref_cnt > 0) {
-        rblock = new DataBlock(real_ref_cnt, value.c_str(), value.length());  // hard copy
+        cblock = new DataBlock(real_ref_cnt, value.c_str(), value.length());  // hard copy
     }
     if (secondary_ref_cnt > 0) {
+        // dimensions may not contain cidx, but we need cidx pkeys+pts for secondary index
+        // if contains, just use the key; if not, extract from value
+        if (cidx_inner_key_pair.first == -1) {
+            DLOG(INFO) << "cidx not in dimensions, extract from value";
+            auto cidx = table_index_.GetIndex(0);
+            auto hint = MakePkeysHint(table_meta_->column_desc(), table_meta_->column_key(0));
+            if (hint.empty()) {
+                LOG(WARNING) << "cidx pkeys hint empty";
+                return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": cidx pkeys hint empty"));
+            }
+            cidx_inner_key_pair.second =
+                ExtractPkeys(table_meta_->column_key(0), (int8_t*)value.c_str(), *decoder, hint);
+            if (cidx_inner_key_pair.second.empty()) {
+                LOG(WARNING) << "cidx pkeys+pts extract failed";
+                return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": cidx pkeys+pts extract failed"));
+            }
+        }
         auto pkeys_pts = PackPkeysAndPts(cidx_inner_key_pair.second, clustered_tsv);
         if (GetCompressType() == type::kSnappy) {  // sidx iterator will uncompress when getting pkeys+pts
             std::string val;
             ::snappy::Compress(pkeys_pts.c_str(), pkeys_pts.length(), &val);
-            pblock = new DataBlock(secondary_ref_cnt, val.c_str(), val.length());
+            sblock = new DataBlock(secondary_ref_cnt, val.c_str(), val.length());
         } else {
-            pblock = new DataBlock(secondary_ref_cnt, pkeys_pts.c_str(), pkeys_pts.length());  // hard copy
+            sblock = new DataBlock(secondary_ref_cnt, pkeys_pts.c_str(), pkeys_pts.length());  // hard copy
         }
     }
+    DLOG(INFO) << "put iot table " << id_ << "." << pid_ << " key+ts " << cidx_inner_key_pair.second << " - "
+               << clustered_tsv << ", real ref cnt " << real_ref_cnt << " secondary ref cnt " << secondary_ref_cnt;
 
     for (const auto& kv : inner_index_key_map) {
         auto iter = ts_value_map.find(kv.first);
@@ -364,18 +382,13 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
             continue;
         }
         uint32_t seg_idx = SegIdx(kv.second.ToString());
-        Segment* segment = GetSegment(kv.first, seg_idx);
-        // clustered index put row
-        auto blk = kv.first == cidx_inner_key_pair.first ? rblock : pblock;
-        if (blk == nullptr) {
-            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": block is null, dims are mismatch"));
-        }
+        auto iot_segment = dynamic_cast<IOTSegment*>(GetSegment(kv.first, seg_idx));
         // TODO(hw): put if absent unsupportted
         if (put_if_absent) {
             return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": iot put if absent is not supported"));
         }
-        // clustered segment should be dedup and update will trigger all index update like delete TODO
-        if (!segment->Put(kv.second, iter->second, blk, false)) {
+        // clustered segment should be dedup and update will trigger all index update(impl in cli router)
+        if (!iot_segment->Put(kv.second, iter->second, cblock, sblock, false)) {
             return absl::AlreadyExistsError("data exists");  // let caller know exists
         }
     }
@@ -383,8 +396,105 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     return absl::OkStatus();
 }
 
+// <pkey_col_name, (idx_in_row, type)>, error if empty
+std::map<std::string, std::pair<uint32_t, type::DataType>> IndexOrganizedTable::MakePkeysHint(
+    const codec::Schema& schema, const common::ColumnKey& cidx_ck) {
+    if (cidx_ck.col_name().empty()) {
+        LOG(WARNING) << "empty cidx column key";
+        return {};
+    }
+    // pkey col idx in row
+    std::set<std::string> pkey_set;
+    for (int i = 0; i < cidx_ck.col_name().size(); i++) {
+        pkey_set.insert(cidx_ck.col_name().Get(i));
+    }
+    if (pkey_set.empty()) {
+        LOG(WARNING) << "empty pkey set";
+        return {};
+    }
+    if (pkey_set.size() != static_cast<std::set<std::string>::size_type>(cidx_ck.col_name().size())) {
+        LOG(WARNING) << "pkey set size not equal to cidx pkeys size";
+        return {};
+    }
+    std::map<std::string, std::pair<uint32_t, type::DataType>> col_idx;
+    for (int i = 0; i < schema.size(); i++) {
+        if (pkey_set.find(schema.Get(i).name()) != pkey_set.end()) {
+            col_idx[schema.Get(i).name()] = {i, schema.Get(i).data_type()};
+        }
+    }
+    if (col_idx.size() != pkey_set.size()) {
+        LOG(WARNING) << "col idx size not equal to cidx pkeys size";
+        return {};
+    }
+    return col_idx;
+}
+
+// error if empty
+std::string IndexOrganizedTable::MakeDeleteSQL(
+    const std::string& db, const std::string& name, const common::ColumnKey& cidx_ck, const int8_t* values, uint64_t ts,
+    const codec::RowView& row_view, const std::map<std::string, std::pair<uint32_t, type::DataType>>& col_idx) {
+    auto sql_prefix = absl::StrCat("delete from ", db, ".", name, " where ");
+    std::string cond;
+    for (int i = 0; i < cidx_ck.col_name().size(); i++) {
+        // append primary keys, pkeys in dimension are encoded, so we should get them from raw value
+        // split can't work if string has `|`
+        auto& col_name = cidx_ck.col_name().Get(i);
+        auto col = col_idx.find(col_name);
+        if (col == col_idx.end()) {
+            LOG(WARNING) << "col " << col_name << " not found in col idx";
+            return "";
+        }
+        std::string val;
+        row_view.GetStrValue(values, col->second.first, &val);
+        if (!cond.empty()) {
+            absl::StrAppend(&cond, " and ");
+        }
+        // TODO(hw): string should add quotes how about timestamp?
+        // check existence before, so here we skip
+        absl::StrAppend(&cond, col_name);
+        if (auto t = col->second.second; t == type::kVarchar || t == type::kString) {
+            absl::StrAppend(&cond, "=\"", val, "\"");
+        } else {
+            absl::StrAppend(&cond, "=", val);
+        }
+    }
+    // ts must be integer, won't be string
+    if (!cidx_ck.ts_name().empty() && cidx_ck.ts_name() != storage::DEFAULT_TS_COL_NAME) {
+        if (!cond.empty()) {
+            absl::StrAppend(&cond, " and ");
+        }
+        absl::StrAppend(&cond, cidx_ck.ts_name(), "=", std::to_string(ts));
+    }
+    auto sql = absl::StrCat(sql_prefix, cond, ";");
+    // TODO(hw): if delete failed, we can't revert. And if sidx skeys+sts doesn't change, no need to delete and
+    // then insert
+    DLOG(INFO) << "delete sql " << sql;
+    return sql;
+}
+
+// error if empty
+std::string IndexOrganizedTable::ExtractPkeys(
+    const common::ColumnKey& cidx_ck, const int8_t* values, const codec::RowView& row_view,
+    const std::map<std::string, std::pair<uint32_t, type::DataType>>& col_idx) {
+    // join with |
+    std::vector<std::string> pkeys;
+    for (int i = 0; i < cidx_ck.col_name().size(); i++) {
+        auto& col_name = cidx_ck.col_name().Get(i);
+        auto col = col_idx.find(col_name);
+        if (col == col_idx.end()) {
+            LOG(WARNING) << "col " << col_name << " not found in col idx";
+            return "";
+        }
+        std::string val;
+        row_view.GetStrValue(values, col->second.first, &val);
+        pkeys.push_back(val);
+    }
+    return absl::StrJoin(pkeys, "|");
+}
+
 // index gc should try to do ExecuteGc for each waiting segment, but if some segments are gc before, we should release
 // them so it will be a little complex
+// should run under lock
 absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router) {
     auto cur_index = table_index_.GetIndex(0);
     if (!cur_index) {
@@ -422,39 +532,27 @@ absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete(const std::shared_ptr
     }
     // delete entries by sql
     if (info.Size() > 0) {
-        DLOG(INFO) << "delete cidx " << info.Size() << " entries by sql";
-        auto sql_prefix = absl::StrCat("delete from ", GetDB(), ".", GetName(), " where ");
+        LOG(INFO) << "delete cidx " << info.Size() << " entries by sql";
+
         auto meta = GetTableMeta();
+        auto cols = meta->column_desc();  // copy
+        codec::RowView row_view(cols);
+        auto hint = MakePkeysHint(cols, meta->column_key(0));
+        if (hint.empty()) {
+            return absl::InternalError("make pkeys hint failed");
+        }
         for (size_t i = 0; i < info.Size(); i++) {
             auto& keys_ts = info.GetEntries()[i];
-            auto keys = keys_ts.first.ToString();
-            auto ts = keys_ts.second;
-            std::string cond;
-            // exists_value -> exists pkeys, but no pkey column name, get it from table info
-            std::vector<std::string> key_values = absl::StrSplit(keys, '|');
-            if (meta->column_key(0).col_name().size() != key_values.size()) {
-                return absl::InternalError("primary key value size not match");
-            }
-            for (int i = 0; i < meta->column_key(0).col_name().size(); i++) {
-                // append primary keys, pkeys in dimension are encoded, so we should get them from raw value?or just
-                // split?
-                if (!cond.empty()) {
-                    absl::StrAppend(&cond, " and ");
-                }
-                // TODO(hw): string should add quotes
-                absl::StrAppend(&cond, meta->column_key(0).col_name().Get(i), "=", key_values[i]);
-            }
-            // TODO(hw): ts condition, string should add quotes
-            if (meta->column_key(0).ts_name() != storage::DEFAULT_TS_COL_NAME) {
-                if (!cond.empty()) {
-                    absl::StrAppend(&cond, " and ");
-                }
-                absl::StrAppend(&cond, meta->column_key(0).ts_name(), "=", std::to_string(ts));
-            }
-            auto sql = absl::StrCat(sql_prefix, cond, ";");
+            auto values = keys_ts.second;  // get pkeys from values
+            auto ts = keys_ts.first;
+            auto sql =
+                MakeDeleteSQL(GetDB(), GetName(), meta->column_key(0), (int8_t*)values->data, ts, row_view, hint);
             // TODO(hw): if delete failed, we can't revert. And if sidx skeys+sts doesn't change, no need to delete and
             // then insert
             DLOG(INFO) << "delete sql " << sql;
+            if (sql.empty()) {
+                return absl::InternalError("make delete sql failed");
+            }
             hybridse::sdk::Status status;
             router->ExecuteSQL(sql, &status);
             if (!status.IsOK()) {
@@ -468,15 +566,16 @@ absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete(const std::shared_ptr
 
 // TODO(hw): don't refactor with MemTable, make MemTable stable
 void IndexOrganizedTable::SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router) {
+    std::lock_guard<std::mutex> lock(gc_lock_);
     uint64_t consumed = ::baidu::common::timer::get_micros();
-    PDLOG(INFO, "start making gc for iot table %s, tid %u, pid %u", name_.c_str(), id_, pid_);
+    LOG(INFO) << "iot table " << name_ << "[" << id_ << "." << pid_ << "] start making gc";
     // gc cidx first, it'll delete on all indexes
     auto st = ClusteredIndexGCByDelete(router);
     if (!st.ok()) {
         LOG(WARNING) << "cidx gc by delete error: " << st.ToString();
     }
     // TODO(hw): don't gc sidx or covering index?
-    // may core on GcFreeList?
+    // may core on GcFreeList
     // but record cnt in segment and tablet status can't change if no gc or free
     // for all index, only do free? don't do gc TODO how to check the record cnt?
     auto inner_indexs = table_index_.GetAllInnerIndex();
@@ -491,6 +590,7 @@ void IndexOrganizedTable::SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>&
         }
     }
     UpdateTTL();
+    LOG(INFO) << "iot table " << name_ << "[" << id_ << "." << pid_ << "] gc and update ttl done";
 }
 
 }  // namespace openmldb::storage

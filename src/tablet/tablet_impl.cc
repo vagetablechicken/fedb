@@ -477,13 +477,19 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
     }
     ::openmldb::api::GetType real_et_type = et_type;
     ::openmldb::storage::TTLType ttl_type = it->GetTTLType();
-    uint64_t expire_time = it->GetExpireTime();
-    if (ttl_type == ::openmldb::storage::TTLType::kAbsoluteTime ||
-        ttl_type == ::openmldb::storage::TTLType::kAbsOrLat) {
-        et = std::max(et, expire_time);
-    }
-    if (et < expire_time && et_type == ::openmldb::api::GetType::kSubKeyGt) {
-        real_et_type = ::openmldb::api::GetType::kSubKeyGe;
+    // if no expire, don't change et
+    if (!request->no_expire()) {
+        uint64_t expire_time = it->GetExpireTime();
+        if (ttl_type == ::openmldb::storage::TTLType::kAbsoluteTime ||
+            ttl_type == ::openmldb::storage::TTLType::kAbsOrLat) {
+            et = std::max(et, expire_time);
+        }
+        if (et < expire_time && et_type == ::openmldb::api::GetType::kSubKeyGt) {
+            real_et_type = ::openmldb::api::GetType::kSubKeyGe;
+        }
+        DLOG(INFO) << "expire time " << expire_time << ", after adjust: et " << et << " real_et_type " << real_et_type;
+    } else {
+        DLOG(INFO) << "no expire time, et " << et << " real_et_type " << real_et_type;
     }
     bool enable_project = false;
     openmldb::codec::RowProject row_project(vers_schema, request->projection());
@@ -495,14 +501,16 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
         }
         enable_project = true;
     }
-    // it's ok to when st < et, we should return 0 rows cuz no valid data for this range
+    // it's ok when st < et(after adjust), we should return 0 rows cuz no valid data for this range
     // but we have set the code -1, don't change the return code, accept it.
     if (st > 0 && st < et) {
-        DLOG(WARNING) << "invalid args for st " << st << " less than et " << et << " or expire time " << expire_time;
+        DLOG(WARNING) << "invalid args for st " << st << " less than et " << et;
         return -1;
     }
+    DLOG(INFO) << "it valid " << it->Valid();
     if (it->Valid()) {
         *ts = it->GetTs();
+        DLOG(INFO) << "check " << *ts << " " << st << " " << et << " " << st_type << " " << real_et_type;
         if (st_type == ::openmldb::api::GetType::kSubKeyEq && st > 0 && *ts != st) {
             return 1;
         }
@@ -673,7 +681,7 @@ void TabletImpl::Get(RpcController* controller, const ::openmldb::api::GetReques
     int32_t code = GetIndex(request, *table_meta, vers_schema, &combine_it, value, &ts);
     response->set_ts(ts);
     response->set_code(code);
-    DLOG(WARNING) << "get key " << request->key() << " value " << *value << " ts " << ts << " code " << code;
+    DLOG(WARNING) << "get key " << request->key() << " ts " << ts << " code " << code;
     uint64_t end_time = ::baidu::common::timer::get_micros();
     if (start_time + FLAGS_query_slow_log_threshold < end_time) {
         std::string index_name;
@@ -3600,7 +3608,7 @@ void TabletImpl::ExecuteGc(RpcController* controller, const ::openmldb::api::Exe
     gc_pool_.AddTask(boost::bind(&TabletImpl::GcTable, this, tid, pid, true));
     response->set_code(::openmldb::base::ReturnCode::kOk);
     response->set_msg("ok");
-    PDLOG(INFO, "ExecuteGc. tid %u pid %u", tid, pid);
+    PDLOG(INFO, "ExecuteGc add task. tid %u pid %u", tid, pid);
 }
 
 void TabletImpl::GetTableFollower(RpcController* controller, const ::openmldb::api::GetTableFollowerRequest* request,
@@ -4262,7 +4270,7 @@ void TabletImpl::GcTable(uint32_t tid, uint32_t pid, bool execute_once) {
             options.zk_cluster = zk_cluster_;
             options.zk_path = zk_path_;
             auto router = sdk::NewClusterSQLRouter(options);
-            iot->SchedGCByDelete(router);  // some params
+            iot->SchedGCByDelete(router);  // add a lock to avoid gc one table in the same time
         } else {
             table->SchedGc();
         }

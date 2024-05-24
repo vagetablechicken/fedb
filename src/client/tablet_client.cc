@@ -205,7 +205,7 @@ bool TabletClient::UpdateTableMetaForAddField(uint32_t tid, const std::vector<op
 
 base::Status TabletClient::Put(uint32_t tid, uint32_t pid, uint64_t time, const std::string& value,
                                const std::vector<std::pair<std::string, uint32_t>>& dimensions, int memory_usage_limit,
-                               bool put_if_absent) {
+                               bool put_if_absent, bool check_exist) {
     ::google::protobuf::RepeatedPtrField<::openmldb::api::Dimension> pb_dimensions;
     for (size_t i = 0; i < dimensions.size(); i++) {
         ::openmldb::api::Dimension* d = pb_dimensions.Add();
@@ -213,12 +213,12 @@ base::Status TabletClient::Put(uint32_t tid, uint32_t pid, uint64_t time, const 
         d->set_idx(dimensions[i].second);
     }
 
-    return Put(tid, pid, time, base::Slice(value), &pb_dimensions, memory_usage_limit, put_if_absent);
+    return Put(tid, pid, time, base::Slice(value), &pb_dimensions, memory_usage_limit, put_if_absent, check_exist);
 }
 
 base::Status TabletClient::Put(uint32_t tid, uint32_t pid, uint64_t time, const base::Slice& value,
                                ::google::protobuf::RepeatedPtrField<::openmldb::api::Dimension>* dimensions,
-                               int memory_usage_limit, bool put_if_absent) {
+                               int memory_usage_limit, bool put_if_absent, bool check_exist) {
     ::openmldb::api::PutRequest request;
     if (memory_usage_limit < 0 || memory_usage_limit > 100) {
         return {base::ReturnCode::kError, absl::StrCat("invalid memory_usage_limit ", memory_usage_limit)};
@@ -231,6 +231,7 @@ base::Status TabletClient::Put(uint32_t tid, uint32_t pid, uint64_t time, const 
     request.set_pid(pid);
     request.mutable_dimensions()->Swap(dimensions);
     request.set_put_if_absent(put_if_absent);
+    request.set_check_exist(check_exist);
     ::openmldb::api::PutResponse response;
     auto st = client_.SendRequestSt(&::openmldb::api::TabletServer_Stub::Put, &request, &response,
                                     FLAGS_request_timeout_ms, 1);
@@ -820,15 +821,18 @@ base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk
     return {response.code(), response.msg()};
 }
 
-base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk, uint64_t stime, uint64_t etime,
-                               const std::string& idx_name, std::string& value, uint64_t& ts) {
+base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk, uint64_t stime, api::GetType stype,
+                               uint64_t etime, bool no_expire, const std::string& idx_name, std::string& value,
+                               uint64_t& ts) {
     ::openmldb::api::GetRequest request;
     ::openmldb::api::GetResponse response;
     request.set_tid(tid);
     request.set_pid(pid);
     request.set_key(pk);
     request.set_ts(stime);
+    request.set_type(stype);
     request.set_et(etime);
+    request.set_no_expire(no_expire);
     if (!idx_name.empty()) {
         request.set_idx_name(idx_name);
     }

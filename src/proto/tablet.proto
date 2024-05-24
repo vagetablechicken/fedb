@@ -196,6 +196,7 @@ message PutRequest {
     optional uint32 format_version = 8 [default = 0, deprecated = true];
     optional uint32 memory_limit = 9;
     optional bool put_if_absent = 10 [default = false];
+    optional bool check_exist = 11 [default = false];
 }
 
 message PutResponse {
@@ -532,6 +533,7 @@ message GetRequest {
     optional GetType et_type = 8 [default = kSubKeyGe];
     repeated uint32 projection = 9;
     repeated uint32 pid_group = 10;
+    optional bool no_expire = 11 [default = false];
 }
 
 message GetResponse {

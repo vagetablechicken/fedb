@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "base/glog_wrapper.h"
 #include "common/timer.h"
 #include "proto/name_server.pb.h"
 #include "proto/tablet.pb.h"
@@ -248,6 +249,7 @@ class IndexDef {
     inline uint32_t GetInnerPos() const { return inner_pos_; }
     ::openmldb::common::ColumnKey GenColumnKey();
 
+    common::IndexType GetIndexType() const { return index_type_; }
     bool IsSecondaryIndex() { return index_type_ == common::IndexType::kSecondary; }
     bool IsClusteredIndex() { return index_type_ == common::IndexType::kClustered; }
 
@@ -274,9 +276,18 @@ class InnerIndexSt {
                 ts_.push_back(ts_col->GetId());
             }
         }
+        LOG_IF(DFATAL, ts_.size() != index_.size()) << "ts size not equal to index size";
     }
     inline uint32_t GetId() const { return id_; }
     inline const std::vector<uint32_t>& GetTsIdx() const { return ts_; }
+    // len(ts) == len(type)
+    inline std::vector<common::IndexType> GetTsIdxType() const {
+        std::vector<common::IndexType> ts_idx_type;
+        for (const auto& cur_index : index_) {
+            if (cur_index->GetTsColumn()) ts_idx_type.push_back(cur_index->GetIndexType());
+        }
+        return ts_idx_type;
+    }
     inline const std::vector<std::shared_ptr<IndexDef>>& GetIndex() const { return index_; }
     uint32_t GetKeyEntryMaxHeight(uint32_t abs_max_height, uint32_t lat_max_height) const;
     // -1 means no clustered idx in here, it's safe to cvt to uint32_t when id >= 0

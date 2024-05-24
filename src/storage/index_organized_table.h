@@ -17,6 +17,8 @@
 #ifndef SRC_STORAGE_INDEX_ORGANIZED_TABLE_H_
 #define SRC_STORAGE_INDEX_ORGANIZED_TABLE_H_
 
+#include <mutex>
+
 #include "catalog/tablet_catalog.h"
 #include "storage/mem_table.h"
 
@@ -50,12 +52,23 @@ class IndexOrganizedTable : public MemTable {
 
     void SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router);
 
+    static std::map<std::string, std::pair<uint32_t, type::DataType>> MakePkeysHint(const codec::Schema& schema,
+                                                                                    const common::ColumnKey& cidx_ck);
+    static std::string MakeDeleteSQL(const std::string& db, const std::string& name, const common::ColumnKey& cidx_ck,
+                                     const int8_t* values, uint64_t ts, const codec::RowView& row_view,
+                                     const std::map<std::string, std::pair<uint32_t, type::DataType>>& col_idx);
+    static std::string ExtractPkeys(const common::ColumnKey& cidx_ck, const int8_t* values,
+                                    const codec::RowView& row_view,
+                                    const std::map<std::string, std::pair<uint32_t, type::DataType>>& col_idx);
+
  private:
     absl::Status ClusteredIndexGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router);
 
  private:
     // to get current distribute iterator
     std::shared_ptr<catalog::TabletCatalog> catalog_;
+
+    std::mutex gc_lock_;
 };
 }  // namespace openmldb::storage
 

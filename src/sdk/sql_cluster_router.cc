@@ -61,6 +61,7 @@
 #include "sdk/result_set_sql.h"
 #include "sdk/sdk_util.h"
 #include "sdk/split.h"
+#include "storage/index_organized_table.h"
 #include "udf/udf.h"
 #include "vm/catalog.h"
 #include "vm/engine.h"
@@ -1376,6 +1377,7 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
 
         auto cols = row->GetTableInfo().column_desc();  // copy
         codec::RowView row_view(cols);
+        // get cidx pid tablet for existence check
         for (const auto& kv : dimensions) {
             uint32_t pid = kv.first;
             for (auto& pair : kv.second) {
@@ -1394,7 +1396,8 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                         return false;
                     }
                     int64_t get_ts = 0;
-                    if (auto ts_name = ClusteredIndexTsName(row->GetTableInfo()); !ts_name.empty()) {
+                    auto ts_name = ClusteredIndexTsName(row->GetTableInfo());
+                    if (!ts_name.empty()) {
                         bool found = false;
                         for (int i = 0; i < cols.size(); i++) {
                             if (cols.Get(i).name() == ts_name) {
@@ -1413,12 +1416,20 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                     } else {
                         DLOG(INFO) << "no ts column in cidx";
                     }
-                    // if get_ts == 0, cidx may be without ts column
+                    // if get_ts == 0, cidx may be without ts column, use cidx to check
                     DLOG(INFO) << "get key " << pair.first << ", ts " << get_ts;
 
-                    // Get exactly ts
+                    // Or we can try set to clustered key to check?
                     std::string value;
-                    auto st = client->Get(tid, pid, pair.first, get_ts, get_ts,
+                    auto start_ts = (ts_name.empty() ? std::numeric_limits<int64_t>::max() : get_ts);
+                    auto end_ts = (ts_name.empty() ? 0 : get_ts);
+                    // if no-ts cidx, find any ts(time); if ts cidx, find the exact ts
+                    auto start_type = (ts_name.empty() ? api::kSubKeyLe : api::kSubKeyEq);
+                    DLOG(INFO) << "get primary key on iot table, pid " << pid << ", key " << pair.first << ", start_ts "
+                               << start_ts << ", end_ts " << end_ts;
+                    // get should read all data(expired data may still in data skiplist), so we should get under no
+                    // expire
+                    auto st = client->Get(tid, pid, pair.first, start_ts, start_type, end_ts, true,
                                           row->GetTableInfo().column_key(0).index_name(), value, ts);
                     if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound &&
                         st.GetCode() != base::ReturnCode::kInvalidParameter) {
@@ -1426,12 +1437,11 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                         return false;
                     }
                     valid = true;
+                    DLOG(INFO) << "Get result: " << st.ToString();
                     // check result, won't set exists_value if key not found
-                    DLOG(INFO) << "check primary key on iot table, pid " << pid << ", key " << pair.first
-                               << ", value(unreadable), ts " << ts;
-                    if (st.OK() && ts == (uint64_t)get_ts) {
+                    if (st.OK() && (ts_name.empty() || ts == (uint64_t)get_ts)) {
                         DLOG(INFO) << "primary key exist on iot table";
-                        exists_value = pair.first;
+                        exists_value = value;
                         // ts already set
                     }
                 }
@@ -1448,35 +1458,19 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
             // revertput or SQLDeleteRow is not easy to use here, so make a sql?
             DLOG(INFO) << "primary key exists, delete old data then insert new data";
             // just where primary key, not all columns(redundant condition)
-            std::string sql =
-                absl::StrCat("delete from ", row->GetTableInfo().db(), ".", row->GetTableInfo().name(), " where ");
-            std::string cond;
-            // exists_value -> exists pkeys, but no pkey column name, get it from table info
-            std::vector<std::string> key_values = absl::StrSplit(exists_value, '|');
-            if (row->GetTableInfo().column_key(0).col_name().size() != key_values.size()) {
-                SET_STATUS_AND_WARN(status, -1, "primary key value size not match");
+            auto hint = storage::IndexOrganizedTable::MakePkeysHint(row->GetTableInfo().column_desc(),
+                                                                    row->GetTableInfo().column_key(0));
+            if (hint.empty()) {
+                SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "make pkeys hint failed");
                 return false;
             }
-            for (int i = 0; i < row->GetTableInfo().column_key(0).col_name().size(); i++) {
-                // append primary keys, pkeys in dimension are encoded, so we should get them from raw value?or just
-                // split?
-                if (!cond.empty()) {
-                    absl::StrAppend(&cond, " and ");
-                }
-                // TODO(hw): string should add quotes
-                absl::StrAppend(&cond, row->GetTableInfo().column_key(0).col_name().Get(i), "=", key_values[i]);
+            auto sql = storage::IndexOrganizedTable::MakeDeleteSQL(row->GetTableInfo().db(), row->GetTableInfo().name(),
+                                                                   row->GetTableInfo().column_key(0),
+                                                                   (int8_t*)exists_value.c_str(), ts, row_view, hint);
+            if (sql.empty()) {
+                SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "make delete sql failed");
+                return false;
             }
-            // TODO(hw): ts condition, string should add quotes
-            if (row->GetTableInfo().column_key(0).ts_name() != storage::DEFAULT_TS_COL_NAME) {
-                if (!cond.empty()) {
-                    absl::StrAppend(&cond, " and ");
-                }
-                absl::StrAppend(&cond, row->GetTableInfo().column_key(0).ts_name(), "=", std::to_string(ts));
-            }
-            absl::StrAppend(&sql, cond, ";");
-            // TODO(hw): if delete failed, we can't revert. And if sidx skeys+sts doesn't change, no need to delete and
-            // then insert
-            DLOG(INFO) << "delete sql " << sql;
             ExecuteSQL(sql, status);
             if (status->code != 0) {
                 PREPEND_AND_WARN(status, "delete old data failed");
@@ -1626,7 +1620,7 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
         bool valid = false;
         uint64_t ts = 0;
         std::string exists_value;  // if empty, no primary key exists
-
+        // TODO: ref putrow, fix later
         auto cols = table_info->column_desc();  // copy
         codec::RowView row_view(cols);
         for (const auto& kv : dimensions_map) {
@@ -1668,14 +1662,16 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
                     // if get_ts == 0, may be cidx without ts column
                     DLOG(INFO) << "get key " << pair.key() << ", ts " << get_ts;
 
-                    // TODO(hw): if cidx no ts, won't use cur_ts? But what if cidx has ts?
-                    std::string value;
-                    auto st =
-                        client->Get(tid, pid, pair.key(), get_ts, table_info->column_key(0).index_name(), value, ts);
-                    if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
-                        APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
-                        return false;
-                    }
+                    // TODO(hw): use put to check cidx primary key, only cidx dim will be 
+                    auto st = client->Put(tid, pid, cur_ts, row_value, &kv.second,
+                                insert_memory_usage_limit_.load(std::memory_order_relaxed), false, true);
+                    // std::string value;
+                    // auto st =
+                    //     client->Get(tid, pid, pair.key(), get_ts, table_info->column_key(0).index_name(), value, ts);
+                    // if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
+                    //     APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
+                    //     return false;
+                    // }
                     valid = true;
                     // check result, won't set exists_value if key not found
                     DLOG(INFO) << "check primary key on iot table, pid " << pid << ", key " << pair.key()
