@@ -330,18 +330,22 @@ class IOTSegment : public Segment {
     bool PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent, bool check_all_time);
     bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* cblock, DataBlock* sblock,
              bool put_if_absent = false);
-
-    bool IsClusteredTs(uint64_t ts) {
-        return clustered_ts_id_ < 0 ? false : ts == static_cast<uint64_t>(clustered_ts_id_);
+    // use ts map to get idx in entry_arr
+    absl::Status CheckKeyExists(const Slice& key, const std::map<int32_t, uint64_t>& ts_map);
+    // DEFAULT_TS_COL_ID is uint32_t max, so clsutered_ts_id_ can't have a init value, use std::optional
+    bool IsClusteredTs(uint32_t ts_id) {
+        return clustered_ts_id_.has_value() ? (ts_id == clustered_ts_id_.value()) : false;
     }
 
     void GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
-    int64_t clustered_ts_id_ = -1;
+
     std::vector<common::IndexType> index_types_;
 
  private:
     void GrepGCEntry(const TTLSt& ttl_st, GCEntryInfo* gc_entry_info);
     void GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
+    private:
+        std::optional<uint32_t> clustered_ts_id_;
 };
 
 }  // namespace openmldb::storage

@@ -396,6 +396,73 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     return absl::OkStatus();
 }
 
+absl::Status IndexOrganizedTable::CheckDataExists(const std::string& value, const Dimensions& dimensions) {
+    // get cidx dim
+    if (dimensions.empty()) {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": empty dimension"));
+    }
+    // inner index pos: -1 means invalid, so it's positive in inner_index_key_map
+    std::pair<int32_t, std::string> cidx_inner_key_pair{-1, ""};
+    std::vector<int32_t> secondary_inners;
+    for (auto iter = dimensions.begin(); iter != dimensions.end(); iter++) {
+        int32_t inner_pos = table_index_.GetInnerIndexPos(iter->idx());
+        if (inner_pos < 0) {
+            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid dimension idx ", iter->idx()));
+        }
+        if (iter->idx() == 0) {
+            cidx_inner_key_pair = {inner_pos, iter->key()};
+        }
+    }
+    if (cidx_inner_key_pair.first == -1) {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": cidx not found"));
+    }
+    const int8_t* data = reinterpret_cast<const int8_t*>(value.data());
+    std::string uncompress_data;
+    uint32_t data_length = value.length();
+    if (GetCompressType() == openmldb::type::kSnappy) {
+        snappy::Uncompress(value.data(), value.size(), &uncompress_data);
+        data = reinterpret_cast<const int8_t*>(uncompress_data.data());
+        data_length = uncompress_data.length();
+    }
+    if (data_length < codec::HEADER_LENGTH) {
+        PDLOG(WARNING, "invalid value. tid %u pid %u", id_, pid_);
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid value"));
+    }
+    uint8_t version = codec::RowView::GetSchemaVersion(data);
+    auto decoder = GetVersionDecoder(version);
+    if (decoder == nullptr) {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid schema version ", version));
+    }
+    uint64_t clustered_tsv = 0;
+    // if ts col, get ts from value
+    auto cidx = table_index_.GetIndex(cidx_inner_key_pair.first);
+    if (!cidx->IsReady()) {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": cidx is not ready"));
+    }
+
+    auto ts_col = cidx->GetTsColumn();
+    if (ts_col) {
+        int64_t ts = 0;
+        if (!ts_col->IsAutoGenTs() && (decoder->GetInteger(data, ts_col->GetId(), ts_col->GetType(), &ts) != 0)) {
+            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": get ts failed"));
+        }
+        if (ts < 0) {
+            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": ts is negative ", ts));
+        }
+        clustered_tsv = ts;
+    } else {
+        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": no ts column"));
+    }
+
+    DLOG(INFO) << "check iot table " << id_ << "." << pid_ << " key+ts " << cidx_inner_key_pair.second << " - "
+               << clustered_tsv << ", on index " << cidx->GetName() << " with ts id " << ts_col->GetId();
+
+    uint32_t seg_idx = SegIdx(cidx_inner_key_pair.second);
+    auto iot_segment = dynamic_cast<IOTSegment*>(GetSegment(cidx_inner_key_pair.first, seg_idx));
+    // ts id -> ts value
+    return iot_segment->CheckKeyExists(cidx_inner_key_pair.second, {{ts_col->GetId(), clustered_tsv}});
+}
+
 // <pkey_col_name, (idx_in_row, type)>, error if empty
 std::map<std::string, std::pair<uint32_t, type::DataType>> IndexOrganizedTable::MakePkeysHint(
     const codec::Schema& schema, const common::ColumnKey& cidx_ck) {

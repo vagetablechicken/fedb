@@ -1287,8 +1287,7 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& s
             auto r = codegen_rows[i];
             auto row = std::make_shared<SQLInsertRow>(table_info, schema, r, put_if_absent);
             if (!PutRow(table_info->tid(), row, tablets, status)) {
-                LOG(WARNING) << "fail to put row["
-                             << "] due to: " << status->msg;
+                LOG(WARNING) << "fail to put row[" << "] due to: " << status->msg;
                 fails.push_back(i);
                 continue;
             }
@@ -1420,29 +1419,25 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                     DLOG(INFO) << "get key " << pair.first << ", ts " << get_ts;
 
                     // Or we can try set to clustered key to check?
-                    std::string value;
-                    auto start_ts = (ts_name.empty() ? std::numeric_limits<int64_t>::max() : get_ts);
-                    auto end_ts = (ts_name.empty() ? 0 : get_ts);
-                    // if no-ts cidx, find any ts(time); if ts cidx, find the exact ts
-                    auto start_type = (ts_name.empty() ? api::kSubKeyLe : api::kSubKeyEq);
-                    DLOG(INFO) << "get primary key on iot table, pid " << pid << ", key " << pair.first << ", start_ts "
-                               << start_ts << ", end_ts " << end_ts;
+                    DLOG(INFO) << "get primary key on iot table, pid " << pid << ", key " << pair.first;
                     // get should read all data(expired data may still in data skiplist), so we should get under no
                     // expire
-                    auto st = client->Get(tid, pid, pair.first, start_ts, start_type, end_ts, true,
-                                          row->GetTableInfo().column_key(0).index_name(), value, ts);
-                    if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound &&
-                        st.GetCode() != base::ReturnCode::kInvalidParameter) {
+                    // auto st = client->Get(tid, pid, pair.first, start_ts, start_type, end_ts, true,
+                    //                       row->GetTableInfo().column_key(0).index_name(), value, ts);
+                    // only check in cidx, no real insertion
+                    auto st = client->Put(tid, pid, get_ts, row->GetRow(), {pair},
+                                          insert_memory_usage_limit_.load(std::memory_order_relaxed), false, true);
+                    if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
                         APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
                         return false;
                     }
                     valid = true;
                     DLOG(INFO) << "Get result: " << st.ToString();
                     // check result, won't set exists_value if key not found
-                    if (st.OK() && (ts_name.empty() || ts == (uint64_t)get_ts)) {
+                    if (st.OK()) {
                         DLOG(INFO) << "primary key exist on iot table";
-                        exists_value = value;
-                        // ts already set
+                        exists_value = row->GetRow();
+                        ts = get_ts;
                     }
                 }
             }
@@ -1661,26 +1656,21 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
                     }
                     // if get_ts == 0, may be cidx without ts column
                     DLOG(INFO) << "get key " << pair.key() << ", ts " << get_ts;
-
-                    // TODO(hw): use put to check cidx primary key, only cidx dim will be 
-                    auto st = client->Put(tid, pid, cur_ts, row_value, &kv.second,
-                                insert_memory_usage_limit_.load(std::memory_order_relaxed), false, true);
-                    // std::string value;
-                    // auto st =
-                    //     client->Get(tid, pid, pair.key(), get_ts, table_info->column_key(0).index_name(), value, ts);
-                    // if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
-                    //     APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
-                    //     return false;
-                    // }
+                    ::google::protobuf::RepeatedPtrField<::openmldb::api::Dimension> dims;
+                    dims.Add()->CopyFrom(pair);
+                    auto st = client->Put(tid, pid, get_ts, row_value, &dims,
+                                          insert_memory_usage_limit_.load(std::memory_order_relaxed), false, true);
+                    if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
+                        APPEND_FROM_BASE_AND_WARN(status, st, "get primary key failed");
+                        return false;
+                    }
                     valid = true;
+                    DLOG(INFO) << "Get result: " << st.ToString();
                     // check result, won't set exists_value if key not found
-                    DLOG(INFO) << "check primary key on iot table, pid " << pid << ", key " << pair.key()
-                               << ", value(unreadable), ts " << ts;
-                    if (st.OK() && ts == (uint64_t)get_ts) {
-                        DLOG(INFO) << "primary key exist on iot table, pid " << pid << ", key " << pair.key() << ", ts "
-                                   << ts;
-                        exists_value = pair.key();
-                        // ts already set
+                    if (st.OK()) {
+                        DLOG(INFO) << "primary key exist on iot table";
+                        exists_value = value;
+                        ts = get_ts;
                     }
                 }
             }
@@ -1700,7 +1690,7 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
             std::string cond;
             // exists_value -> exists pkeys, but no pkey column name, get it from table info
             std::vector<std::string> key_values = absl::StrSplit(exists_value, '|');
-            if (table_info->column_key(0).col_name().size() != key_values.size()) {
+            if ((decltype(key_values.size()))table_info->column_key(0).col_name().size() != key_values.size()) {
                 SET_STATUS_AND_WARN(status, -1, "primary key value size not match");
                 return false;
             }

@@ -171,6 +171,7 @@ enum ReturnCode {
     kHasNotColumnKey = 517,
     kTooManyPartition = 518,
     kWrongColumnKey = 519,
+    kCidxKeyExists = 520,
     kOperatorNotSupport = 701,
     kDatabaseAlreadyExists = 801,
     kDatabaseNotFound = 802,

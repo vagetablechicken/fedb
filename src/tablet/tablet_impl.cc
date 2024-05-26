@@ -761,10 +761,41 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
             response->set_msg("invalid dimension parameter");
             return;
         }
-        DLOG(INFO) << "put data to tid " << tid << " pid " << pid << " with key " << request->dimensions(0).key();
-        // 1. normal put: ok, invalid data
-        // 2. put if absent: ok, exists but ignore, invalid data
-        st = table->Put(entry.ts(), entry.value(), entry.dimensions(), request->put_if_absent());
+        if (request->check_exists()) {
+            // table should be iot
+            auto iot = std::dynamic_pointer_cast<storage::IndexOrganizedTable>(table);
+            if (!iot) {
+                response->set_code(::openmldb::base::ReturnCode::kTableMetaIsIllegal);
+                response->set_msg("table type is not iot");
+                return;
+            }
+            DLOG(INFO) << "check data exists in tid " << tid << " pid " << pid << " with key "
+                       << request->dimensions(0).key();
+            st = iot->CheckDataExists(entry.value(), entry.dimensions());
+        } else {
+            DLOG(INFO) << "put data to tid " << tid << " pid " << pid << " with key " << request->dimensions(0).key();
+            // 1. normal put: ok, invalid data
+            // 2. put if absent: ok, exists but ignore, invalid data
+            st = table->Put(entry.ts(), entry.value(), entry.dimensions(), request->put_if_absent());
+        }
+    }
+    // when check exists, we won't do log
+    if (request->check_exists()) {
+        DLOG_ASSERT(request->check_exists()) << "check_exists should be true";
+        DLOG_ASSERT(!request->put_if_absent()) << "put_if_absent should be false";
+        // return ok if exists
+        if (absl::IsAlreadyExists(st)) {
+            response->set_code(base::ReturnCode::kOk);
+            response->set_msg("exists");
+        } else if (absl::IsNotFound(st)) {
+            response->set_code(base::ReturnCode::kKeyNotFound);
+            response->set_msg(st.ToString());
+        } else {
+            // other errors
+            response->set_code(base::ReturnCode::kError);
+            response->set_msg(st.ToString());
+        }
+        return;
     }
 
     if (!st.ok()) {

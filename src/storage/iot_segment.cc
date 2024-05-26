@@ -164,6 +164,58 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
     }
     return true;
 }
+
+absl::Status IOTSegment::CheckKeyExists(const Slice& key, const std::map<int32_t, uint64_t>& ts_map) {
+    // check lock
+    void* entry_arr = nullptr;
+    std::lock_guard<std::mutex> lock(mu_);
+    int ret = entries_->Get(key, entry_arr);
+    if (ret < 0 || entry_arr == nullptr) {
+        return absl::NotFoundError("key not found");
+    }
+    if (ts_map.size() != 1) {
+        return absl::InvalidArgumentError("ts map size is not 1");
+    }
+    auto idx_ts = ts_map.begin();
+    auto pos = ts_idx_map_.find(idx_ts->first);
+    if (pos == ts_idx_map_.end()) {
+        return absl::InvalidArgumentError("ts not found");
+    }
+    // be careful, ts id in arg maybe negative cuz it's int32, but id in member is uint32
+    if (!IsClusteredTs(idx_ts->first)) {
+        LOG(WARNING) << "idx_ts->first " << idx_ts->first << " is not clustered ts "
+                     << (clustered_ts_id_.has_value() ? std::to_string(clustered_ts_id_.value()) : "no");
+        return absl::InvalidArgumentError("ts is not clustered");
+    }
+    KeyEntry* entry = nullptr;
+    if (ts_cnt_ == 1) {
+        LOG_IF(DFATAL, pos->second != 0) << "when ts cnt == 1, pos second is " << pos->second;
+        entry = reinterpret_cast<KeyEntry*>(entry_arr);
+    } else {
+        entry = reinterpret_cast<KeyEntry**>(entry_arr)[pos->second];
+    }
+
+    if (entry == nullptr) {
+        return absl::NotFoundError("ts entry not found");
+    }
+    auto auto_gen_ts = (idx_ts->first == DEFAULT_TS_COL_ID);
+    if (auto_gen_ts) {
+        // cidx(keys) has just one entry for one keys, so if keys exists, needs delete
+        DLOG_ASSERT(reinterpret_cast<KeyEntry*>(entry)->entries.GetSize() == 1) << "cidx keys has more than one entry";
+        if (reinterpret_cast<KeyEntry*>(entry)->entries.GetSize() > 0) {
+            return absl::AlreadyExistsError("key exists: " + key.ToString());
+        }
+    } else {
+        // don't use listcontains, we don't need to check value, just check if time exists
+        storage::DataBlock* v = nullptr;
+        if (entry->entries.Get(idx_ts->second, v) == -1) {
+            return absl::AlreadyExistsError("key exists: " + key.ToString());
+        }
+        return absl::NotFoundError("ts not found");
+    }
+
+    return absl::OkStatus();
+}
 // TODO(hw): when add lock?
 void IOTSegment::GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info) {
     if (ttl_st_map.empty()) {

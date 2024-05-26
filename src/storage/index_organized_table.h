@@ -42,6 +42,8 @@ class IndexOrganizedTable : public MemTable {
     absl::Status Put(uint64_t time, const std::string& value, const Dimensions& dimensions,
                      bool put_if_absent) override;
 
+    absl::Status CheckDataExists(const std::string& value, const Dimensions& dimensions);
+    
     // TODO(hw): iot bulk load unsupported
     bool GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response) { return false; }
     bool BulkLoad(const std::vector<DataBlock*>& data_blocks,
