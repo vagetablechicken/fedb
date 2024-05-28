@@ -120,6 +120,7 @@ class IOTTraverseIterator : public MemTableTraverseIterator {
             return "";
         }
         // distribute cidx iter should seek to (key, ts)
+        DLOG(INFO) << "seek to " << pkeys << ", " << ts;
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
             // seek to ts
@@ -127,11 +128,12 @@ class IOTTraverseIterator : public MemTableTraverseIterator {
             ts_iter_->Seek(ts);
             if (ts_iter_->Valid()) {
                 // TODO(hw): hard copy, or hold ts_iter to store value? IOTIterator should be the same.
+                DLOG(INFO) << "valid, " << ts_iter_->GetValue().ToString();
                 return RowToSlice(ts_iter_->GetValue());
             }
         }
         LOG(WARNING) << "no suitable iter";
-        return "";  // won't core, just no row for select
+        return "";  // won't core, just no row for select?
     }
 
  private:
@@ -275,7 +277,7 @@ class IOTKeyIterator : public MemTableKeyIterator {
         auto cidx_iter = cidx_handler_->GetWindowIterator(cidx_name_);
         auto iter =
             new IOTWindowIterator(it, ttl_type_, expire_time_, expire_cnt_, compress_type_, std::move(cidx_iter));
-        iter->SetSchema(schema_, pkeys_idx_, ts_idx_);
+        // iter->SetSchema(schema_, pkeys_idx_, ts_idx_);
         return iter;
     }
 
@@ -337,6 +339,8 @@ class IOTSegment : public Segment {
         return clustered_ts_id_.has_value() ? (ts_id == clustered_ts_id_.value()) : false;
     }
 
+    std::optional<uint32_t> ClusteredTs() const { return clustered_ts_id_; }
+
     void GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
 
     std::vector<common::IndexType> index_types_;
@@ -344,8 +348,9 @@ class IOTSegment : public Segment {
  private:
     void GrepGCEntry(const TTLSt& ttl_st, GCEntryInfo* gc_entry_info);
     void GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
-    private:
-        std::optional<uint32_t> clustered_ts_id_;
+
+ private:
+    std::optional<uint32_t> clustered_ts_id_;
 };
 
 }  // namespace openmldb::storage

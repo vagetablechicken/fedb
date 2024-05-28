@@ -1287,7 +1287,7 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& s
             auto r = codegen_rows[i];
             auto row = std::make_shared<SQLInsertRow>(table_info, schema, r, put_if_absent);
             if (!PutRow(table_info->tid(), row, tablets, status)) {
-                LOG(WARNING) << "fail to put row[" << "] due to: " << status->msg;
+                LOG(WARNING) << "fail to put row[" << i << "] due to: " << status->msg;
                 fails.push_back(i);
                 continue;
             }
@@ -1415,16 +1415,13 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                     } else {
                         DLOG(INFO) << "no ts column in cidx";
                     }
-                    // if get_ts == 0, cidx may be without ts column, use cidx to check
-                    DLOG(INFO) << "get key " << pair.first << ", ts " << get_ts;
-
-                    // Or we can try set to clustered key to check?
-                    DLOG(INFO) << "get primary key on iot table, pid " << pid << ", key " << pair.first;
-                    // get should read all data(expired data may still in data skiplist), so we should get under no
-                    // expire
-                    // auto st = client->Get(tid, pid, pair.first, start_ts, start_type, end_ts, true,
-                    //                       row->GetTableInfo().column_key(0).index_name(), value, ts);
-                    // only check in cidx, no real insertion
+                    // if get_ts == 0, cidx may be without ts column, you should check ts col in cidx info, not by
+                    // get_ts
+                    DLOG(INFO) << "get primary key on iot table, pid " << pid << ", key " << pair.first << ", ts "
+                               << get_ts;
+                    // get rpc can't read all data(expired data may still in data skiplist), so we use put to check
+                    // exists only check in cidx, no real insertion. get_ts may not be the current time, it can be ts
+                    // col value, it's a bit different.
                     auto st = client->Put(tid, pid, get_ts, row->GetRow(), {pair},
                                           insert_memory_usage_limit_.load(std::memory_order_relaxed), false, true);
                     if (!st.OK() && st.GetCode() != base::ReturnCode::kKeyNotFound) {
@@ -1435,7 +1432,7 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                     DLOG(INFO) << "Get result: " << st.ToString();
                     // check result, won't set exists_value if key not found
                     if (st.OK()) {
-                        DLOG(INFO) << "primary key exist on iot table";
+                        DLOG(INFO) << "primary key exists on iot table";
                         exists_value = row->GetRow();
                         ts = get_ts;
                     }
@@ -1450,7 +1447,7 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
         DLOG_IF(INFO, exists_value.empty()) << "primary key not exists, safe to insert";
         if (!exists_value.empty()) {
             // delete old data then insert new data, no concurrency control, be careful
-            // revertput or SQLDeleteRow is not easy to use here, so make a sql?
+            // revertput or SQLDeleteRow is not easy to use here, so make a sql
             DLOG(INFO) << "primary key exists, delete old data then insert new data";
             // just where primary key, not all columns(redundant condition)
             auto hint = storage::IndexOrganizedTable::MakePkeysHint(row->GetTableInfo().column_desc(),
@@ -1471,6 +1468,7 @@ bool SQLClusterRouter::PutRow(uint32_t tid, const std::shared_ptr<SQLInsertRow>&
                 PREPEND_AND_WARN(status, "delete old data failed");
                 return false;
             }
+            DLOG(INFO) << "delete old data success";
         }
     }
     for (const auto& kv : dimensions) {
@@ -1686,34 +1684,19 @@ bool SQLClusterRouter::ExecuteInsert(const std::string& db, const std::string& n
             // revertput or SQLDeleteRow is not easy to use here, so make a sql?
             DLOG(INFO) << "primary key exists, delete old data then insert new data";
             // just where primary key, not all columns(redundant condition)
-            std::string sql = absl::StrCat("delete from ", db, ".", name, " where ");
-            std::string cond;
-            // exists_value -> exists pkeys, but no pkey column name, get it from table info
-            std::vector<std::string> key_values = absl::StrSplit(exists_value, '|');
-            if ((decltype(key_values.size()))table_info->column_key(0).col_name().size() != key_values.size()) {
-                SET_STATUS_AND_WARN(status, -1, "primary key value size not match");
+            auto hint =
+                storage::IndexOrganizedTable::MakePkeysHint(table_info->column_desc(), table_info->column_key(0));
+            if (hint.empty()) {
+                SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "make pkeys hint failed");
                 return false;
             }
-            for (int i = 0; i < table_info->column_key(0).col_name().size(); i++) {
-                // append primary keys, pkeys in dimension are encoded, so we should get them from raw value?or just
-                // split?
-                if (!cond.empty()) {
-                    absl::StrAppend(&cond, " and ");
-                }
-                // TODO(hw): string should add quotes
-                absl::StrAppend(&cond, table_info->column_key(0).col_name().Get(i), "=", key_values[i]);
+            auto sql = storage::IndexOrganizedTable::MakeDeleteSQL(table_info->db(), table_info->name(),
+                                                                   table_info->column_key(0),
+                                                                   (int8_t*)exists_value.c_str(), ts, row_view, hint);
+            if (sql.empty()) {
+                SET_STATUS_AND_WARN(status, StatusCode::kCmdError, "make delete sql failed");
+                return false;
             }
-            // TODO(hw): ts condition
-            if (table_info->column_key(0).ts_name() != storage::DEFAULT_TS_COL_NAME) {
-                if (!cond.empty()) {
-                    absl::StrAppend(&cond, " and ");
-                }
-                absl::StrAppend(&cond, table_info->column_key(0).ts_name(), "=", std::to_string(ts));
-            }
-            absl::StrAppend(&sql, cond, ";");
-            // TODO(hw): if delete failed, we can't revert. And if sidx skeys+sts doesn't change, no need to delete and
-            // then insert
-            DLOG(INFO) << "delete sql " << sql;
             ExecuteSQL(sql, status);
             if (status->code != 0) {
                 PREPEND_AND_WARN(status, "delete old data failed");
@@ -3933,6 +3916,7 @@ hybridse::sdk::Status SQLClusterRouter::HandleDelete(const std::string& db, cons
     if (!status.IsOK()) {
         return status;
     }
+    DLOG(INFO) << "delete option: " << option.DebugString();
     status = SendDeleteRequst(table_info, option);
     if (status.IsOK() && db != nameserver::INTERNAL_DB) {
         status = {

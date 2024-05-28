@@ -79,22 +79,25 @@ class Segment {
 
     void BulkLoadPut(unsigned int key_entry_id, const Slice& key, uint64_t time, DataBlock* row);
     // main put method
-    virtual bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row, bool put_if_absent = false);
+    virtual bool Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map, DataBlock* row,
+                     bool put_if_absent = false);
 
     bool Delete(const std::optional<uint32_t>& idx, const Slice& key);
-    bool Delete(const std::optional<uint32_t>& idx, const Slice& key,
-            uint64_t ts, const std::optional<uint64_t>& end_ts);
+    bool Delete(const std::optional<uint32_t>& idx, const Slice& key, uint64_t ts,
+                const std::optional<uint64_t>& end_ts);
 
     void Release(StatisticsInfo* statistics_info);
 
     void ExecuteGc(const TTLSt& ttl_st, StatisticsInfo* statistics_info);
-    void ExecuteGc(const std::map<uint32_t, TTLSt>& ttl_st_map, StatisticsInfo* statistics_info);
+    void ExecuteGc(const std::map<uint32_t, TTLSt>& ttl_st_map, StatisticsInfo* statistics_info,
+                   std::optional<uint32_t> clustered_ts_id = std::nullopt);
 
     void Gc4TTL(const uint64_t time, StatisticsInfo* statistics_info);
     void Gc4Head(uint64_t keep_cnt, StatisticsInfo* statistics_info);
     void Gc4TTLAndHead(const uint64_t time, const uint64_t keep_cnt, StatisticsInfo* statistics_info);
     void Gc4TTLOrHead(const uint64_t time, const uint64_t keep_cnt, StatisticsInfo* statistics_info);
-    void GcAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, StatisticsInfo* statistics_info);
+    void GcAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, StatisticsInfo* statistics_info,
+                   std::optional<uint32_t> clustered_ts_id = std::nullopt);
 
     MemTableIterator* NewIterator(const Slice& key, Ticket& ticket, type::CompressType compress_type);  // NOLINT
     MemTableIterator* NewIterator(const Slice& key, uint32_t idx, Ticket& ticket,                       // NOLINT
@@ -150,7 +153,7 @@ class Segment {
     bool ListContains(KeyEntry* entry, uint64_t time, DataBlock* row, bool check_all_time);
 
     virtual bool PutUnlock(const Slice& key, uint64_t time, DataBlock* row, bool put_if_absent = false,
-                   bool check_all_time = false);
+                           bool check_all_time = false);
 
  protected:
     KeyEntries* entries_;

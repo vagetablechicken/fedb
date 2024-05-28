@@ -770,8 +770,9 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
                 return;
             }
             DLOG(INFO) << "check data exists in tid " << tid << " pid " << pid << " with key "
-                       << request->dimensions(0).key();
-            st = iot->CheckDataExists(entry.value(), entry.dimensions());
+                       << entry.dimensions(0).key() << " ts " << entry.ts();
+            // ts is ts value when check exists
+            st = iot->CheckDataExists(entry.ts(), entry.dimensions());
         } else {
             DLOG(INFO) << "put data to tid " << tid << " pid " << pid << " with key " << request->dimensions(0).key();
             // 1. normal put: ok, invalid data
@@ -783,6 +784,7 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
     if (request->check_exists()) {
         DLOG_ASSERT(request->check_exists()) << "check_exists should be true";
         DLOG_ASSERT(!request->put_if_absent()) << "put_if_absent should be false";
+        DLOG(INFO) << "result " << st.ToString();
         // return ok if exists
         if (absl::IsAlreadyExists(st)) {
             response->set_code(base::ReturnCode::kOk);
@@ -1399,6 +1401,9 @@ base::Status TabletImpl::DeleteAllIndex(const std::shared_ptr<storage::Table>& t
                                         uint32_t partition_num) {
     storage::Ticket ticket;
     std::unique_ptr<storage::TableIterator> iter(table->NewIterator(cur_index->GetId(), key, ticket));
+    DLOG(INFO) << "delete all index in " << table->GetId() << "." << cur_index->GetId() << ", key " << key
+               << ", start_ts " << (start_ts.has_value() ? std::to_string(start_ts.value()) : "-1") << ", end_ts "
+               << (end_ts.has_value() ? std::to_string(end_ts.value()) : "-1");
     if (start_ts.has_value()) {
         iter->Seek(start_ts.value());
     } else {
@@ -1406,7 +1411,7 @@ base::Status TabletImpl::DeleteAllIndex(const std::shared_ptr<storage::Table>& t
     }
     auto indexs = table->GetAllIndex();
     while (iter->Valid()) {
-        DEBUGLOG("cur ts %lu cur index pos %u", iter->GetKey(), cur_index->GetId());
+        DLOG(INFO) << "cur ts " << iter->GetKey();
         if (end_ts.has_value() && iter->GetKey() <= end_ts.value()) {
             break;
         }
@@ -1490,11 +1495,10 @@ base::Status TabletImpl::DeleteAllIndex(const std::shared_ptr<storage::Table>& t
             if (client == nullptr) {
                 return {base::ReturnCode::kDeleteFailed, absl::StrCat("client is nullptr, pid ", cur_pid)};
             }
-            DEBUGLOG("delete idx %u pid %u pk %s ts %lu end_ts %lu", option.idx.value(), cur_pid, option.key.c_str(),
-                     option.start_ts.value(), option.end_ts.value());
             std::string msg;
             // do not delete other index data
             option.enable_decode_value = false;
+            DLOG(INFO) << "pid " << cur_pid << " delete key " << option.DebugString();
             if (auto status = client->Delete(table->GetId(), cur_pid, option, FLAGS_request_timeout_ms); !status.OK()) {
                 return {base::ReturnCode::kDeleteFailed,
                         absl::StrCat("delete failed. key ", option.key, " pid ", cur_pid, " msg: ", status.GetMsg())};
@@ -1518,7 +1522,7 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
     }
     auto table = GetTable(tid, pid);
     if (auto status = CheckTable(tid, pid, true, table); !status.OK()) {
-        SetResponseStatus(status, response);
+        SET_RESP_AND_WARN(response, status.GetCode(), status.GetMsg());
         return;
     }
     auto replicator = GetReplicator(tid, pid);
@@ -1587,13 +1591,14 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
             }
         }
     }
+    DLOG(INFO) << tid << "." << pid << ": delete request " << request->ShortDebugString() << ", delete others "
+               << delete_others;
     auto aggrs = GetAggregators(tid, pid);
     if (!aggrs && !delete_others) {
         if (table->Delete(entry)) {
-            DLOG(INFO) << "delete ok. " << tid << "." << pid << ", key " << request->key();
+            DLOG(INFO) << tid << "." << pid << ": delete ok, key " << request->key();
         } else {
-            response->set_code(::openmldb::base::ReturnCode::kDeleteFailed);
-            response->set_msg("delete failed");
+            SET_RESP_AND_WARN(response, base::ReturnCode::kDeleteFailed, "delete failed");
             return;
         }
     } else {
@@ -1625,6 +1630,7 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
         }
         uint32_t pid_num = tablet_table_handler->GetPartitionNum();
         auto table_client_manager = tablet_table_handler->GetTableClientManager();
+        DLOG(INFO) << "delete from table & aggr " << tid << "." << pid;
         if (entry.dimensions_size() > 0) {
             const auto& dimension = entry.dimensions(0);
             uint32_t idx = dimension.idx();
@@ -1639,8 +1645,7 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
                 }
             }
             if (!table->Delete(idx, key, start_ts, end_ts)) {
-                response->set_code(::openmldb::base::ReturnCode::kDeleteFailed);
-                response->set_msg("delete failed");
+                SET_RESP_AND_WARN(response, base::ReturnCode::kDeleteFailed, "delete from partition failed");
                 return;
             }
             auto aggr = get_aggregator(aggrs, idx);
@@ -1655,7 +1660,7 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
                     return;
                 }
             }
-            DLOG(INFO) << "table & agg delete ok. " << tid << "." << pid << ", key " << key;
+            DLOG(INFO) << tid << "." << pid << ": table & agg delete ok, key " << key;
         } else {
             bool is_first_hit_index = true;
             for (const auto& index_def : table->GetAllIndex()) {
@@ -1680,8 +1685,7 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
                     }
                     iter->NextPK();
                     if (!table->Delete(idx, pk, start_ts, end_ts)) {
-                        response->set_code(::openmldb::base::ReturnCode::kDeleteFailed);
-                        response->set_msg("delete failed");
+                        SET_RESP_AND_WARN(response, base::ReturnCode::kDeleteFailed, "delete failed");
                         return;
                     }
                     auto aggr = get_aggregator(aggrs, idx);
@@ -1699,11 +1703,11 @@ void TabletImpl::Delete(RpcController* controller, const ::openmldb::api::Delete
                 }
                 is_first_hit_index = false;
             }
+            DLOG(INFO) << tid << "." << pid << ": table & agg delete ok when no entry dim.";
         }
     }
     response->set_code(::openmldb::base::ReturnCode::kOk);
     response->set_msg("ok");
-
     replicator->AppendEntry(entry);
     if (FLAGS_binlog_notify_on_put) {
         replicator->Notify();

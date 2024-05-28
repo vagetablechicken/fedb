@@ -168,7 +168,7 @@ bool IOTSegment::Put(const Slice& key, const std::map<int32_t, uint64_t>& ts_map
 absl::Status IOTSegment::CheckKeyExists(const Slice& key, const std::map<int32_t, uint64_t>& ts_map) {
     // check lock
     void* entry_arr = nullptr;
-    std::lock_guard<std::mutex> lock(mu_);
+    std::lock_guard<std::mutex> lock(mu_); // need shrink?
     int ret = entries_->Get(key, entry_arr);
     if (ret < 0 || entry_arr == nullptr) {
         return absl::NotFoundError("key not found");
@@ -208,15 +208,15 @@ absl::Status IOTSegment::CheckKeyExists(const Slice& key, const std::map<int32_t
     } else {
         // don't use listcontains, we don't need to check value, just check if time exists
         storage::DataBlock* v = nullptr;
-        if (entry->entries.Get(idx_ts->second, v) == -1) {
-            return absl::AlreadyExistsError("key exists: " + key.ToString());
+        if (entry->entries.Get(idx_ts->second, v) == 0) {
+            return absl::AlreadyExistsError(absl::StrCat("key+ts exists: ", key.ToString(), " ts ", idx_ts->second));
         }
         return absl::NotFoundError("ts not found");
     }
 
     return absl::OkStatus();
 }
-// TODO(hw): when add lock?
+// TODO(hw): when add lock? ref segment, don't lock iter
 void IOTSegment::GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info) {
     if (ttl_st_map.empty()) {
         DLOG(INFO) << "ttl map is empty, skip gc";
