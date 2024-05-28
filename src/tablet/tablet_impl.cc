@@ -63,6 +63,7 @@
 #include "schema/schema_adapter.h"
 #include "storage/binlog.h"
 #include "storage/disk_table_snapshot.h"
+#include "storage/index_organized_table.h"
 #include "storage/segment.h"
 #include "storage/table.h"
 #include "tablet/file_sender.h"

@@ -254,7 +254,13 @@ CREATE TABLE iot (c1 int64, c2 int64, c3 int64, INDEX(ckey=c1, ts=c2)); -- 一�
 CREATE TABLE iot (c1 int64, c2 int64, c3 int64, INDEX(ckey=c1), INDEX(skey=c2)); -- 一个Clustered索引和一个Secondary索引
 CREATE TABLE iot (c1 int64, c2 int64, c3 int64, INDEX(ckey=c1), INDEX(skey=c2), INDEX(key=c3)); -- 一个Clustered索引、一个Secondary索引和一个Covering索引
 ```
-IOT各个索引的TTL与普通表的不同点是，IOT Clustered索引的ttl淘汰，将触发其他索引的删除操作，而Secondary索引和Covering索引的ttl淘汰，只会删除自己的索引数据，不会触发其他索引的删除操作。通常来讲，除非有必要让Secondary和Covering索引更加节约内存，可以只设置Clustered索引的ttl，不设置Secondary和Covering索引的ttl。
+
+IOT各个索引的TTL与普通表的不同点是，IOT Clustered索引的ttl淘汰，将触发其他索引的删除操作，而Secondary索引和Covering索引的ttl淘汰，只会删除自身索引中的数据，不会触发其他索引的删除操作。通常来讲，除非有必要让Secondary和Covering索引更加节约内存，可以只设置Clustered索引的ttl，不设置Secondary和Covering索引的ttl。
+
+##### 注意事项
+
+- IOT表不可以并发写入相同主键的多条数据，可能出现冲突，至少一条数据会写入失败。IOT表中已存在的相同主键的数据不需要额外处理，将会被覆盖。为了不用修复导入，请在导入前做好数据清洗，对导入数据中相同主键的数据进行去重。（覆盖会出触发所有索引中的删除，单线程写入效率也非常低，所以并不推荐单线程导入。）
+- 
 
 #### Example
 **示例1：创建一张带单列索引的表**
