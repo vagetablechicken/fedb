@@ -823,7 +823,7 @@ base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk
 }
 
 base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk, uint64_t stime, api::GetType stype,
-                               uint64_t etime, bool no_expire, const std::string& idx_name, std::string& value,
+                               uint64_t etime, const std::string& idx_name, std::string& value,
                                uint64_t& ts) {
     ::openmldb::api::GetRequest request;
     ::openmldb::api::GetResponse response;
@@ -833,7 +833,6 @@ base::Status TabletClient::Get(uint32_t tid, uint32_t pid, const std::string& pk
     request.set_ts(stime);
     request.set_type(stype);
     request.set_et(etime);
-    request.set_no_expire(no_expire);
     if (!idx_name.empty()) {
         request.set_idx_name(idx_name);
     }

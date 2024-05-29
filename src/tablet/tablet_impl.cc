@@ -478,20 +478,17 @@ int32_t TabletImpl::GetIndex(const ::openmldb::api::GetRequest* request, const :
     }
     ::openmldb::api::GetType real_et_type = et_type;
     ::openmldb::storage::TTLType ttl_type = it->GetTTLType();
-    // if no expire, don't change et
-    if (!request->no_expire()) {
-        uint64_t expire_time = it->GetExpireTime();
-        if (ttl_type == ::openmldb::storage::TTLType::kAbsoluteTime ||
-            ttl_type == ::openmldb::storage::TTLType::kAbsOrLat) {
-            et = std::max(et, expire_time);
-        }
-        if (et < expire_time && et_type == ::openmldb::api::GetType::kSubKeyGt) {
-            real_et_type = ::openmldb::api::GetType::kSubKeyGe;
-        }
-        DLOG(INFO) << "expire time " << expire_time << ", after adjust: et " << et << " real_et_type " << real_et_type;
-    } else {
-        DLOG(INFO) << "no expire time, et " << et << " real_et_type " << real_et_type;
+
+    uint64_t expire_time = it->GetExpireTime();
+    if (ttl_type == ::openmldb::storage::TTLType::kAbsoluteTime ||
+        ttl_type == ::openmldb::storage::TTLType::kAbsOrLat) {
+        et = std::max(et, expire_time);
     }
+    if (et < expire_time && et_type == ::openmldb::api::GetType::kSubKeyGt) {
+        real_et_type = ::openmldb::api::GetType::kSubKeyGe;
+    }
+    DLOG(INFO) << "expire time " << expire_time << ", after adjust: et " << et << " real_et_type " << real_et_type;
+
     bool enable_project = false;
     openmldb::codec::RowProject row_project(vers_schema, request->projection());
     if (request->projection().size() > 0) {
@@ -771,8 +768,8 @@ void TabletImpl::Put(RpcController* controller, const ::openmldb::api::PutReques
                 return;
             }
             DLOG(INFO) << "check data exists in tid " << tid << " pid " << pid << " with key "
-                       << request->dimensions(0).key();
-            st = iot->CheckDataExists(entry.value(), entry.dimensions());
+                       << request->dimensions(0).key() << " ts " << entry.ts();
+            st = iot->CheckDataExists(entry.ts(), entry.dimensions());
         } else {
             DLOG(INFO) << "put data to tid " << tid << " pid " << pid << " with key " << request->dimensions(0).key();
             // 1. normal put: ok, invalid data

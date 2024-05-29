@@ -2164,13 +2164,34 @@ base::Status ConvertCreateIndexStatement(const zetasql::ASTCreateIndexStatement*
         keys.push_back(path.back());
     }
     node::SqlNodeList* index_node_list = node_manager->MakeNodeList();
-
-    node::SqlNode* index_key_node = node_manager->MakeIndexKeyNode(keys, "key"); // TODO(hw): create index support skey/ckey
+    // extract index type from options
+    std::string index_type{"key"};
+    if (root->options_list() != nullptr) {
+        for (const auto option : root->options_list()->options_entries()) {
+            if (auto name = option->name()->GetAsString(); absl::EqualsIgnoreCase(name, "type")) {
+                CHECK_TRUE(option->value()->node_kind() == zetasql::AST_PATH_EXPRESSION, common::kSqlAstError,
+                           "Invalid index type, should be path expression");
+                std::string type_name;
+                CHECK_STATUS(
+                    AstPathExpressionToString(option->value()->GetAsOrNull<zetasql::ASTPathExpression>(), &type_name));
+                if (absl::EqualsIgnoreCase(type_name, "secondary")) {
+                    index_type = "skey";
+                } else if (!absl::EqualsIgnoreCase(type_name, "covering")) {
+                    FAIL_STATUS(common::kSqlAstError, "Invalid index type: ", type_name);
+                }
+            }
+        }
+    }
+    node::SqlNode* index_key_node = node_manager->MakeIndexKeyNode(keys, index_type);
     index_node_list->PushBack(index_key_node);
     if (root->options_list() != nullptr) {
         for (const auto option : root->options_list()->options_entries()) {
+            // ignore type
+            if (auto name = option->name()->GetAsString(); absl::EqualsIgnoreCase(name, "type")) {
+                continue;
+            }
             node::SqlNode* node = nullptr;
-            CHECK_STATUS(ConvertIndexOption(option, node_manager, &node));
+            CHECK_STATUS(ConvertIndexOption(option, node_manager, &node));  // option set secondary index type
             if (node != nullptr) {
                 // NOTE: unhandled option will return OK, but node is not set
                 index_node_list->PushBack(node);

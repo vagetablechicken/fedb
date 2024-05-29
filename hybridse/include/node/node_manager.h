@@ -173,8 +173,8 @@ class NodeManager {
     SqlNode *MakeColumnIndexNode(SqlNodeList *keys, SqlNode *ts, SqlNode *ttl,
                                  SqlNode *version);
     SqlNode *MakeColumnIndexNode(SqlNodeList *index_item_list);
-    SqlNode *MakeIndexKeyNode(const std::string &key, const std::string &type);
-    SqlNode *MakeIndexKeyNode(const std::vector<std::string> &keys, const std::string &type);
+    SqlNode *MakeIndexKeyNode(const std::string &key, const std::string &type = "key");
+    SqlNode *MakeIndexKeyNode(const std::vector<std::string> &keys, const std::string &type = "key");
     SqlNode *MakeIndexTsNode(const std::string &ts);
     SqlNode *MakeIndexTTLNode(ExprListNode *ttl_expr);
     SqlNode *MakeIndexTTLTypeNode(const std::string &ttl_type);

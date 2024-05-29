@@ -533,7 +533,6 @@ message GetRequest {
     optional GetType et_type = 8 [default = kSubKeyGe];
     repeated uint32 projection = 9;
     repeated uint32 pid_group = 10;
-    optional bool no_expire = 11 [default = false];
 }
 
 message GetResponse {

@@ -152,7 +152,7 @@ TEST_P(TableIteratorTest, latest) {
             dim->set_key(key);
             std::string value;
             ASSERT_EQ(0, codec.EncodeRow(row, &value));
-            table->Put(0, value, request.dimensions());
+            ASSERT_TRUE(table->Put(0, value, request.dimensions()).ok());
         }
     }
     ::hybridse::vm::WindowIterator* it = table->NewWindowIterator(0);
@@ -216,7 +216,7 @@ TEST_P(TableIteratorTest, smoketest2) {
             dim->set_key(key);
             std::string value;
             ASSERT_EQ(0, codec.EncodeRow(row, &value));
-            table->Put(0, value, request.dimensions());
+            ASSERT_TRUE(table->Put(0, value, request.dimensions()).ok());
         }
     }
     ::hybridse::vm::WindowIterator* it = table->NewWindowIterator(0);

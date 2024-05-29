@@ -43,22 +43,7 @@ class IOTIterator : public MemTableIterator {
                 std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter)
         : MemTableIterator(it, compress_type), cidx_iter_(std::move(cidx_iter)) {}
     virtual ~IOTIterator() {}
-    // TODO(hw): add schema for test, delete later
-    void SetSchema(const std::shared_ptr<openmldb::storage::Schema>& schema,
-                   const std::shared_ptr<openmldb::storage::IndexDef>& cidx) {
-        schema_ = *schema;  // copy
-        // pkeys idx
-        std::map<std::string, int> col_idx_map;
-        for (int i = 0; i < schema_.size(); i++) {
-            col_idx_map[schema_[i].name()] = i;
-        }
-        pkeys_idx_.clear();
-        for (auto pkey : cidx->GetColumns()) {
-            pkeys_idx_.emplace_back(col_idx_map[pkey.GetName()]);
-        }
 
-        ts_idx_ = col_idx_map[cidx->GetTsColumn()->GetName()];
-    }
     openmldb::base::Slice GetValue() const override {
         auto pkeys_pts = MemTableIterator::GetValue();
         std::string pkeys;
@@ -82,10 +67,6 @@ class IOTIterator : public MemTableIterator {
 
  private:
     std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter_;
-    // test
-    codec::Schema schema_;
-    std::vector<int> pkeys_idx_;
-    int ts_idx_;
 };
 
 class IOTTraverseIterator : public MemTableTraverseIterator {
@@ -96,21 +77,7 @@ class IOTTraverseIterator : public MemTableTraverseIterator {
         : MemTableTraverseIterator(segments, seg_cnt, ttl_type, expire_time, expire_cnt, ts_index, compress_type),
           cidx_iter_(std::move(cidx_iter)) {}
     ~IOTTraverseIterator() override {}
-    void SetSchema(const std::shared_ptr<openmldb::storage::Schema>& schema,
-                   const std::shared_ptr<openmldb::storage::IndexDef>& cidx) {
-        schema_ = *schema;  // copy
-        // pkeys idx
-        std::map<std::string, int> col_idx_map;
-        for (int i = 0; i < schema_.size(); i++) {
-            col_idx_map[schema_[i].name()] = i;
-        }
-        pkeys_idx_.clear();
-        for (auto pkey : cidx->GetColumns()) {
-            pkeys_idx_.emplace_back(col_idx_map[pkey.GetName()]);
-        }
 
-        ts_idx_ = col_idx_map[cidx->GetTsColumn()->GetName()];
-    }
     openmldb::base::Slice GetValue() const override {
         auto pkeys_pts = MemTableTraverseIterator::GetValue();
         std::string pkeys;
@@ -137,10 +104,6 @@ class IOTTraverseIterator : public MemTableTraverseIterator {
  private:
     std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter_;
     std::unique_ptr<hybridse::codec::RowIterator> ts_iter_;
-    // test
-    codec::Schema schema_;
-    std::vector<int> pkeys_idx_;
-    int ts_idx_;
 };
 
 class IOTWindowIterator : public MemTableWindowIterator {
@@ -152,15 +115,7 @@ class IOTWindowIterator : public MemTableWindowIterator {
           cidx_iter_(std::move(cidx_iter)) {
         DLOG(INFO) << "create IOTWindowIterator";
     }
-    void SetSchema(const codec::Schema& schema, const std::vector<int>& pkeys_idx, int ts_idx) {
-        schema_ = schema;
-        pkeys_idx_ = pkeys_idx;
-        ts_idx_ = ts_idx;
-        if (ts_idx_ != -1) {
-            ts_type_ = schema_.Get(ts_idx_).data_type();
-        }
-        row_view_.reset(new codec::RowView(schema_));
-    }
+
     const ::hybridse::codec::Row& GetValue() override {
         auto pkeys_pts = MemTableWindowIterator::GetValue();
         if (pkeys_pts.empty()) {
@@ -176,7 +131,7 @@ class IOTWindowIterator : public MemTableWindowIterator {
             LOG(WARNING) << "unpack pkeys and pts failed";
             return dummy;
         }
-        // TODO(hw): what if no ts? it'll be 0 for temp
+        // if cidx no ts col, it'll be insert time, it's ok for query
         DLOG(INFO) << "pkeys=" << pkeys << ", ts=" << ts;
         cidx_iter_->Seek(pkeys);
         if (cidx_iter_->Valid()) {
@@ -187,7 +142,8 @@ class IOTWindowIterator : public MemTableWindowIterator {
             cidx_ts_iter_->Seek(ts);
             // must be the same keys+ts
             if (cidx_ts_iter_->Valid()) {
-                DLOG(INFO) << "valid, is the same value? " << GetKeys(cidx_ts_iter_->GetValue());
+                DLOG(INFO) << "valid, is the same value? " << cidx_iter_->GetKey().ToString() << ", "
+                           << cidx_ts_iter_->GetKey();
                 return cidx_ts_iter_->GetValue();
             }
         }
@@ -196,48 +152,8 @@ class IOTWindowIterator : public MemTableWindowIterator {
     }
 
  private:
-    std::string GetKeys(const hybridse::codec::Row& pkeys_pts) {
-        std::string pkeys, key;  // RowView Get will assign output, no need to clear
-        for (auto pkey_idx : pkeys_idx_) {
-            if (!pkeys.empty()) {
-                pkeys += "|";
-            }
-            // TODO(hw): if null, append to key?
-            auto ret = row_view_->GetStrValue(pkeys_pts.buf(), pkey_idx, &key);
-            if (ret == -1) {
-                LOG(WARNING) << "get pkey failed";
-                return {};
-            }
-            pkeys += key.empty() ? hybridse::codec::EMPTY_STRING : key;
-            DLOG(INFO) << pkey_idx << "=" << key;
-        }
-        return pkeys;
-    }
-    // -2: invalid, -1: no ts or null, >=0: valid
-    int64_t GetTs(const hybridse::codec::Row& pkeys_pts) {
-        int64_t tsv = -1;
-        if (ts_idx_ != -1) {
-            int64_t tsv = 0;
-            auto ret = row_view_->GetInteger(pkeys_pts.buf(), ts_idx_, ts_type_, &tsv);
-            if (ret == -1) {
-                LOG(WARNING) << "get ts failed";
-                return -2;  // TODO(hw): right?
-            } else if (ret == 1) {
-                LOG(INFO) << "ts is null";  // TODO(hw): ts col can be null?
-            }
-        }
-        return tsv;
-    }
-
- private:
     std::unique_ptr<::hybridse::codec::WindowIterator> cidx_iter_;
     std::unique_ptr<hybridse::codec::RowIterator> cidx_ts_iter_;
-    // test
-    codec::Schema schema_;
-    std::unique_ptr<codec::RowView> row_view_;
-    std::vector<int> pkeys_idx_;
-    int ts_idx_ = -1;
-    type::DataType ts_type_;
     ::hybridse::codec::Row dummy;
 };
 
@@ -253,21 +169,7 @@ class IOTKeyIterator : public MemTableKeyIterator {
     }
 
     ~IOTKeyIterator() override {}
-    void SetSchema(const std::shared_ptr<openmldb::storage::Schema>& schema,
-                   const std::shared_ptr<openmldb::storage::IndexDef>& cidx) {
-        schema_ = *schema;  // copy
-        // pkeys idx
-        std::map<std::string, int> col_idx_map;
-        for (int i = 0; i < schema_.size(); i++) {
-            col_idx_map[schema_[i].name()] = i;
-        }
-        pkeys_idx_.clear();
-        for (auto pkey : cidx->GetColumns()) {
-            pkeys_idx_.emplace_back(col_idx_map[pkey.GetName()]);
-        }
 
-        ts_idx_ = col_idx_map[cidx->GetTsColumn()->GetName()];
-    }
     ::hybridse::vm::RowIterator* GetRawValue() override {
         // TODO(hw):
         DLOG(INFO) << "GetRawValue for key " << GetKey().ToString() << ", bind cidx " << cidx_name_;
@@ -275,17 +177,12 @@ class IOTKeyIterator : public MemTableKeyIterator {
         auto cidx_iter = cidx_handler_->GetWindowIterator(cidx_name_);
         auto iter =
             new IOTWindowIterator(it, ttl_type_, expire_time_, expire_cnt_, compress_type_, std::move(cidx_iter));
-        iter->SetSchema(schema_, pkeys_idx_, ts_idx_);
         return iter;
     }
 
  private:
     std::shared_ptr<catalog::TabletTableHandler> cidx_handler_;
     std::string cidx_name_;
-    // test
-    codec::Schema schema_;
-    std::vector<int> pkeys_idx_;
-    int ts_idx_;
 };
 
 class GCEntryInfo {
@@ -337,15 +234,17 @@ class IOTSegment : public Segment {
         return clustered_ts_id_.has_value() ? (ts_id == clustered_ts_id_.value()) : false;
     }
 
+    std::optional<uint32_t> ClusteredTs() const { return clustered_ts_id_; }
+
     void GrepGCEntry(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
 
     std::vector<common::IndexType> index_types_;
 
  private:
-    void GrepGCEntry(const TTLSt& ttl_st, GCEntryInfo* gc_entry_info);
     void GrepGCAllType(const std::map<uint32_t, TTLSt>& ttl_st_map, GCEntryInfo* gc_entry_info);
-    private:
-        std::optional<uint32_t> clustered_ts_id_;
+
+ private:
+    std::optional<uint32_t> clustered_ts_id_;
 };
 
 }  // namespace openmldb::storage

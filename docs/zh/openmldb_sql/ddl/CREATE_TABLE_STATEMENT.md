@@ -240,7 +240,7 @@ IndexOption ::=
 ```{note}
 最大过期时间和最大存活条数的限制，是出于性能考虑。如果你一定要配置更大的TTL值，可先创建表时临时使用合规的TTL值，然后使用nameserver的UpdateTTL接口来调整到所需的值（可无视max限制），生效需要经过一个gc时间；或者，调整nameserver配置`absolute_ttl_max`和`latest_ttl_max`，重启生效后再创建表。
 ```
-#### Index-Orgnized Table(IOT)
+#### Index-Organized Table(IOT)
 
 索引使用KEY设置时创建Covering索引，在OpenMLDB中Covering索引存储完整的数据行，也因此占用内存较多。如果希望内存占用更低，同时允许性能损失，可以使用IOT表。IOT表中可以建三种类型的索引：
 - `CKEY`：Clustered索引，存完整数据行。配置的CKEY+TS用于唯一标识一行数据，INSERT重复主键时将更新数据（会触发所有索引上的删除旧数据，再INSERT新数据，性能会有损失）。也可只使用CKEY，不配置TS，CKEY唯一标识一行数据。查询到此索引的性能无损失。

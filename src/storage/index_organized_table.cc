@@ -24,6 +24,8 @@
 #include "sdk/sql_router.h"
 #include "storage/iot_segment.h"
 
+DECLARE_uint32(absolute_default_skiplist_height);
+
 namespace openmldb::storage {
 
 IOTIterator* NewNullIterator() {
@@ -50,6 +52,7 @@ IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, uint32_t idx, Ti
     auto ts_idx_map = segment->GetTsIdxMap();
     auto pos = ts_idx_map.find(idx);
     if (pos == ts_idx_map.end()) {
+        LOG(WARNING) << "can't find idx in segment";
         return NewNullIterator();
     }
     auto entries = segment->GetKeyEntries();
@@ -65,7 +68,6 @@ IOTIterator* NewIOTIterator(Segment* segment, const Slice& key, uint32_t idx, Ti
     return new IOTIterator(entry->entries.NewIterator(), compress_type, std::move(cidx_iter));
 }
 
-// TODO(hw): iot iterator needs schema for test, delete later
 TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::string& pk, Ticket& ticket) {
     std::shared_ptr<IndexDef> index_def = table_index_.GetIndex(index);
     if (!index_def || !index_def->IsReady()) {
@@ -97,15 +99,13 @@ TableIterator* IndexOrganizedTable::NewIterator(uint32_t index, const std::strin
             auto iter =
                 NewIOTIterator(segment, spk, ts_col->GetId(), ticket, GetCompressType(),
                                std::move(tablet_table_handler->GetWindowIterator(table_index_.GetIndex(0)->GetName())));
-            // schema, pkeys cols, ts col
-            iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
             return iter;
         }
         // clsutered and covering still use old iterator
         return segment->NewIterator(spk, ts_col->GetId(), ticket, GetCompressType());
     }
-    // cidx without ts
-    // TODO(hw): sidx without ts?
+    // invalid case
+    DLOG(INFO) << "index ts col is null, reate no-ts iterator";
     return segment->NewIterator(spk, ticket, GetCompressType());
 }
 
@@ -145,13 +145,13 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
                 GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_col->GetId(),
                 GetCompressType(),
                 std::move(tablet_table_handler->GetWindowIterator(table_index_.GetIndex(0)->GetName())));
-            // schema, pkeys cols, ts col
-            iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
             return iter;
         }
+        DLOG(INFO) << "create memtable traverse iterator for traverse";
         return new MemTableTraverseIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt,
                                             ts_col->GetId(), GetCompressType());
     }
+    DLOG(INFO) << "index ts col is null, reate no-ts iterator";
     return new MemTableTraverseIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, 0,
                                         GetCompressType());
 }
@@ -176,6 +176,7 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
     if (ts_col) {
         ts_idx = ts_col->GetId();
     }
+    DLOG(INFO) << "ts is null? " << ts_col << ", ts_idx " << ts_idx;
     // if secondary, use iot iterator
     if (index_def->IsSecondaryIndex()) {
         // get clustered index iter for secondary index
@@ -194,8 +195,6 @@ TraverseIterator* IndexOrganizedTable::NewTraverseIterator(uint32_t index) {
         auto iter =
             new IOTKeyIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_idx,
                                GetCompressType(), tablet_table_handler, table_index_.GetIndex(0)->GetName());
-        // schema, pkeys cols, ts col
-        iter->SetSchema(GetSchema(), table_index_.GetIndex(0));
         return iter;
     }
     return new MemTableKeyIterator(GetSegments(real_idx), GetSegCnt(), ttl->ttl_type, expire_time, expire_cnt, ts_idx,
@@ -278,7 +277,6 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
         data_length = uncompress_data.length();
     }
     if (data_length < codec::HEADER_LENGTH) {
-        PDLOG(WARNING, "invalid value. tid %u pid %u", id_, pid_);
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid value"));
     }
     uint8_t version = codec::RowView::GetSchemaVersion(data);
@@ -286,7 +284,7 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     if (decoder == nullptr) {
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid schema version ", version));
     }
-    uint64_t clustered_tsv = 0;
+    std::optional<uint64_t> clustered_tsv;
     std::map<uint32_t, std::map<int32_t, uint64_t>> ts_value_map;
     // we need two ref cnt
     // 1. clustered and covering: put row ->DataBlock(i)
@@ -307,12 +305,8 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
             if (ts_col) {
                 int64_t ts = 0;
                 if (ts_col->IsAutoGenTs()) {
-                    // clustered index don't use current time to be ts TODO(hw): current time to ttl?
-                    if (index_def->IsClusteredIndex()) {
-                        ts = 0;
-                    } else {
-                        ts = time;
-                    }
+                    // clustered index still use current time to ttl and delete iter, we'll check time series size if ts is auto gen
+                    ts = time;
                 } else if (decoder->GetInteger(data, ts_col->GetId(), ts_col->GetType(), &ts) != 0) {
                     return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": get ts failed"));
                 }
@@ -363,8 +357,24 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
                 LOG(WARNING) << "cidx pkeys+pts extract failed";
                 return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": cidx pkeys+pts extract failed"));
             }
+            DLOG_ASSERT(!clustered_tsv) << "clustered ts should not be set too";
+            auto ts_col = cidx->GetTsColumn();
+            if (!ts_col) {
+                return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ":no ts column in cidx"));
+            }
+            int64_t ts = 0;
+            if (ts_col->IsAutoGenTs()) {
+                // clustered index still use current time to ttl and delete iter, we'll check time series size if ts is auto gen
+                ts = time;
+            } else if (decoder->GetInteger(data, ts_col->GetId(), ts_col->GetType(), &ts) != 0) {
+                return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": get ts failed"));
+            }
+            if (ts < 0) {
+                return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": ts is negative ", ts));
+            }
+            clustered_tsv = ts;
         }
-        auto pkeys_pts = PackPkeysAndPts(cidx_inner_key_pair.second, clustered_tsv);
+        auto pkeys_pts = PackPkeysAndPts(cidx_inner_key_pair.second, clustered_tsv.value());
         if (GetCompressType() == type::kSnappy) {  // sidx iterator will uncompress when getting pkeys+pts
             std::string val;
             ::snappy::Compress(pkeys_pts.c_str(), pkeys_pts.length(), &val);
@@ -374,7 +384,8 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
         }
     }
     DLOG(INFO) << "put iot table " << id_ << "." << pid_ << " key+ts " << cidx_inner_key_pair.second << " - "
-               << clustered_tsv << ", real ref cnt " << real_ref_cnt << " secondary ref cnt " << secondary_ref_cnt;
+               << (clustered_tsv ? std::to_string(clustered_tsv.value()) : "-1") << ", real ref cnt " << real_ref_cnt
+               << " secondary ref cnt " << secondary_ref_cnt;
 
     for (const auto& kv : inner_index_key_map) {
         auto iter = ts_value_map.find(kv.first);
@@ -396,14 +407,13 @@ absl::Status IndexOrganizedTable::Put(uint64_t time, const std::string& value, c
     return absl::OkStatus();
 }
 
-absl::Status IndexOrganizedTable::CheckDataExists(const std::string& value, const Dimensions& dimensions) {
+absl::Status IndexOrganizedTable::CheckDataExists(uint64_t tsv, const Dimensions& dimensions) {
     // get cidx dim
     if (dimensions.empty()) {
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": empty dimension"));
     }
     // inner index pos: -1 means invalid, so it's positive in inner_index_key_map
     std::pair<int32_t, std::string> cidx_inner_key_pair{-1, ""};
-    std::vector<int32_t> secondary_inners;
     for (auto iter = dimensions.begin(); iter != dimensions.end(); iter++) {
         int32_t inner_pos = table_index_.GetInnerIndexPos(iter->idx());
         if (inner_pos < 0) {
@@ -416,51 +426,21 @@ absl::Status IndexOrganizedTable::CheckDataExists(const std::string& value, cons
     if (cidx_inner_key_pair.first == -1) {
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": cidx not found"));
     }
-    const int8_t* data = reinterpret_cast<const int8_t*>(value.data());
-    std::string uncompress_data;
-    uint32_t data_length = value.length();
-    if (GetCompressType() == openmldb::type::kSnappy) {
-        snappy::Uncompress(value.data(), value.size(), &uncompress_data);
-        data = reinterpret_cast<const int8_t*>(uncompress_data.data());
-        data_length = uncompress_data.length();
-    }
-    if (data_length < codec::HEADER_LENGTH) {
-        PDLOG(WARNING, "invalid value. tid %u pid %u", id_, pid_);
-        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid value"));
-    }
-    uint8_t version = codec::RowView::GetSchemaVersion(data);
-    auto decoder = GetVersionDecoder(version);
-    if (decoder == nullptr) {
-        return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": invalid schema version ", version));
-    }
-    uint64_t clustered_tsv = 0;
-    // if ts col, get ts from value
-    auto cidx = table_index_.GetIndex(cidx_inner_key_pair.first);
+    auto cidx = table_index_.GetIndex(0);
     if (!cidx->IsReady()) {
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": cidx is not ready"));
     }
-
     auto ts_col = cidx->GetTsColumn();
-    if (ts_col) {
-        int64_t ts = 0;
-        if (!ts_col->IsAutoGenTs() && (decoder->GetInteger(data, ts_col->GetId(), ts_col->GetType(), &ts) != 0)) {
-            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": get ts failed"));
-        }
-        if (ts < 0) {
-            return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": ts is negative ", ts));
-        }
-        clustered_tsv = ts;
-    } else {
+    if (!ts_col) {
         return absl::InvalidArgumentError(absl::StrCat(id_, ".", pid_, ": no ts column"));
     }
-
-    DLOG(INFO) << "check iot table " << id_ << "." << pid_ << " key+ts " << cidx_inner_key_pair.second << " - "
-               << clustered_tsv << ", on index " << cidx->GetName() << " with ts id " << ts_col->GetId();
+    DLOG(INFO) << "check iot table " << id_ << "." << pid_ << " key+ts " << cidx_inner_key_pair.second << " - " << tsv
+               << ", on index " << cidx->GetName() << " ts col " << ts_col->GetId();
 
     uint32_t seg_idx = SegIdx(cidx_inner_key_pair.second);
     auto iot_segment = dynamic_cast<IOTSegment*>(GetSegment(cidx_inner_key_pair.first, seg_idx));
     // ts id -> ts value
-    return iot_segment->CheckKeyExists(cidx_inner_key_pair.second, {{ts_col->GetId(), clustered_tsv}});
+    return iot_segment->CheckKeyExists(cidx_inner_key_pair.second, {{ts_col->GetId(), tsv}});
 }
 
 // <pkey_col_name, (idx_in_row, type)>, error if empty
@@ -635,6 +615,10 @@ absl::Status IndexOrganizedTable::ClusteredIndexGCByDelete(const std::shared_ptr
 void IndexOrganizedTable::SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router) {
     std::lock_guard<std::mutex> lock(gc_lock_);
     uint64_t consumed = ::baidu::common::timer::get_micros();
+    if (!enable_gc_.load(std::memory_order_relaxed)) {
+        LOG(INFO) << "iot table " << name_ << "[" << id_ << "." << pid_ << "] gc disabled";
+        return;
+    }
     LOG(INFO) << "iot table " << name_ << "[" << id_ << "." << pid_ << "] start making gc";
     // gc cidx first, it'll delete on all indexes
     auto st = ClusteredIndexGCByDelete(router);
@@ -645,19 +629,91 @@ void IndexOrganizedTable::SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>&
     // may core on GcFreeList
     // but record cnt in segment and tablet status can't change if no gc or free
     // for all index, only do free? don't do gc TODO how to check the record cnt?
+    uint64_t gc_idx_cnt = 0;
+    uint64_t gc_record_byte_size = 0;
     auto inner_indexs = table_index_.GetAllInnerIndex();
     for (uint32_t i = 0; i < inner_indexs->size(); i++) {
         const std::vector<std::shared_ptr<IndexDef>>& real_index = inner_indexs->at(i)->GetIndex();
+        std::map<uint32_t, TTLSt> ttl_st_map;
+        bool need_gc = true;
+        size_t deleted_num = 0;
+        std::vector<size_t> deleting_pos;
+        for (size_t pos = 0; pos < real_index.size(); pos++) {
+            auto cur_index = real_index[pos];
+            auto ts_col = cur_index->GetTsColumn();
+            if (ts_col) {
+                ttl_st_map.emplace(ts_col->GetId(), *(cur_index->GetTTL()));
+            }
+            if (cur_index->GetStatus() == IndexStatus::kWaiting) {
+                cur_index->SetStatus(IndexStatus::kDeleting);
+                need_gc = false;
+            } else if (cur_index->GetStatus() == IndexStatus::kDeleting) {
+                deleting_pos.push_back(pos);
+            } else if (cur_index->GetStatus() == IndexStatus::kDeleted) {
+                deleted_num++;
+            }
+        }
+        if (!deleting_pos.empty()) {
+            if (segments_[i] != nullptr) {
+                for (uint32_t k = 0; k < seg_cnt_; k++) {
+                    if (segments_[i][k] != nullptr) {
+                        StatisticsInfo statistics_info(segments_[i][k]->GetTsCnt());
+                        if (real_index.size() == 1 || deleting_pos.size() + deleted_num == real_index.size()) {
+                            segments_[i][k]->ReleaseAndCount(&statistics_info);
+                        } else {
+                            segments_[i][k]->ReleaseAndCount(deleting_pos, &statistics_info);
+                        }
+                        gc_idx_cnt += statistics_info.GetTotalCnt();
+                        gc_record_byte_size += statistics_info.record_byte_size;
+                    }
+                }
+            }
+            for (auto pos : deleting_pos) {
+                real_index[pos]->SetStatus(IndexStatus::kDeleted);
+            }
+            deleted_num += deleting_pos.size();
+        }
+        if (!need_gc) {
+            continue;
+        }
+        // skip cidx gc in segment, gcfreelist shouldn't be skiped, so we don't change the condition
+        if (deleted_num == real_index.size() || ttl_st_map.empty()) {
+            continue;
+        }
         for (uint32_t j = 0; j < seg_cnt_; j++) {
             uint64_t seg_gc_time = ::baidu::common::timer::get_micros() / 1000;
-            Segment* segment = segments_[i][j];
+            auto segment = dynamic_cast<IOTSegment*>(segments_[i][j]);
             StatisticsInfo statistics_info(segment->GetTsCnt());
             segment->IncrGcVersion();
             segment->GcFreeList(&statistics_info);
+            // don't gc in cidx, it's not a good way to impl, refactor later
+            segment->ExecuteGc(ttl_st_map, &statistics_info, segment->ClusteredTs());
+            gc_idx_cnt += statistics_info.GetTotalCnt();
+            gc_record_byte_size += statistics_info.record_byte_size;
+            seg_gc_time = ::baidu::common::timer::get_micros() / 1000 - seg_gc_time;
+            PDLOG(INFO, "gc segment[%u][%u] done consumed %lu for table %s tid %u pid %u", i, j, seg_gc_time,
+                  name_.c_str(), id_, pid_);
         }
     }
+    consumed = ::baidu::common::timer::get_micros() - consumed;
+    record_byte_size_.fetch_sub(gc_record_byte_size, std::memory_order_relaxed);
     UpdateTTL();
-    LOG(INFO) << "iot table " << name_ << "[" << id_ << "." << pid_ << "] gc and update ttl done";
+    LOG(INFO) << "iot table " << name_ << "[" << id_ << "." << pid_ << "] gc and update ttl done: " << consumed / 1000
+              << " ms, total gc cnt " << gc_idx_cnt;
+}
+
+bool IndexOrganizedTable::AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) {
+    std::vector<uint32_t> ts_vec = {index_def->GetTsColumn()->GetId()};
+    uint32_t inner_id = index_def->GetInnerPos();
+    Segment** seg_arr = new Segment*[seg_cnt_];
+    for (uint32_t j = 0; j < seg_cnt_; j++) {
+        seg_arr[j] = new IOTSegment(FLAGS_absolute_default_skiplist_height, ts_vec, {index_def->GetIndexType()});
+        LOG(INFO) << "init iot segment inner_ts" << inner_id << "." << j << " for table " << name_ << "[" << id_ << "."
+                  << pid_ << "], height " << FLAGS_absolute_default_skiplist_height << ", ts col num " << ts_vec.size()
+                  << ", type " << IndexType_Name(index_def->GetIndexType());
+    }
+    segments_[inner_id] = seg_arr;
+    return true;
 }
 
 }  // namespace openmldb::storage

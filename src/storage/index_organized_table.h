@@ -42,15 +42,15 @@ class IndexOrganizedTable : public MemTable {
     absl::Status Put(uint64_t time, const std::string& value, const Dimensions& dimensions,
                      bool put_if_absent) override;
 
-    absl::Status CheckDataExists(const std::string& value, const Dimensions& dimensions);
-    
+    absl::Status CheckDataExists(uint64_t tsv, const Dimensions& dimensions);
+
     // TODO(hw): iot bulk load unsupported
     bool GetBulkLoadInfo(::openmldb::api::BulkLoadInfoResponse* response) { return false; }
     bool BulkLoad(const std::vector<DataBlock*>& data_blocks,
                   const ::google::protobuf::RepeatedPtrField<::openmldb::api::BulkLoadIndex>& indexes) {
         return false;
     }
-    bool AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) override { return false; }
+    bool AddIndexToTable(const std::shared_ptr<IndexDef>& index_def) override;
 
     void SchedGCByDelete(const std::shared_ptr<sdk::SQLRouter>& router);
 

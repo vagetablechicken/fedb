@@ -5270,6 +5270,21 @@ hybridse::sdk::Status SQLClusterRouter::UpdateUser(const UserInfo& user_info, co
     return status;
 }
 
+hybridse::sdk::Status SQLClusterRouter::DeleteUser(const std::string& name) {
+    hybridse::sdk::Status status;
+
+    auto ns_client = cluster_sdk_->GetNsClient();
+
+    bool ok = ns_client->DeleteUser("%", name);
+
+    if (!ok) {
+        status.code = hybridse::common::StatusCode::kRunError;
+        status.msg = absl::StrCat("Fail to delete user: ", name);
+    }
+
+    return status;
+}
+
 void SQLClusterRouter::AddUserToConfig(std::map<std::string, std::string>* config) {
     config->emplace("spark.openmldb.user", GetRouterOptions()->user);
     if (!GetRouterOptions()->password.empty()) {
